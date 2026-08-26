@@ -47,6 +47,7 @@ def fetch_bars(symbol: str, interval: str, api_key: str, outputsize: int = BARS_
             "interval": interval,
             "outputsize": outputsize,
             "apikey": api_key,
+            "timezone": "UTC",
         },
         timeout=10,
     )

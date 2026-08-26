@@ -62,6 +62,12 @@ the configured max stop? Flag clearly if the structural stop needs
 meaningfully more room than configured — do not force-fit a tight stop onto a
 setup that structurally needs more.
 
+Also factor in the typical spread for this pair (given to you in the user
+message). Spread is paid on entry, so it effectively shrinks your reward and
+adds to your realized risk. If spread eats a large fraction of the configured
+stop distance, say so explicitly — a technically clean setup can still be a
+bad trade after cost.
+
 ### Step 6 — Fundamental Check (use the web_search tool)
 Search for the current state of both currencies in the pair:
 - Any scheduled high-impact release (central bank rate decision, CPI, NFP,
@@ -97,10 +103,15 @@ TAVSIYA: [SAVDONI KUZATISH / O'TKAZIB YUBORISH]
 ASOSLASH: [aniq, yuqoridagi bosqichlarga bog'liq — umumiy gaplarsiz]
 
 AGAR "SAVDONI KUZATISH" BO'LSA:
+- Yo'nalish: [SOTIB OLISH / SOTISH]
 - Kuzatiladigan setup: [aniq namuna + daraja]
 - Keyingi asosiy darajagacha taxminiy foyda (pipsda): [masofa]
 - Struktura stop-loss (pipsda): [masofa, va sozlangan maksimalga mos keladimi yoki yo'qligi]
 ```
+
+"Yo'nalish" har doim "SAVDONI KUZATISH" bilan birga, aniq ko'rsatilishi shart —
+bu maydon dastur tomonidan avtomatik o'qiladi, shuning uchun aynan shu ikki
+so'zdan ("SOTIB OLISH" yoki "SOTISH") birini tanlang, boshqa so'z ishlatmang.
 
 If conditions change intra-session, treat each check-in as a fresh Step 1–6
 pass — don't assume a prior verdict still holds.

@@ -1,0 +1,133 @@
+import logging
+import os
+from datetime import datetime, timedelta, timezone
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+TURSO_DATABASE_URL = os.environ["TURSO_DATABASE_URL"]  # libsql://<name>.turso.io
+TURSO_AUTH_TOKEN = os.environ["TURSO_AUTH_TOKEN"]
+
+_PIPELINE_URL = TURSO_DATABASE_URL.replace("libsql://", "https://") + "/v2/pipeline"
+
+_CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pair TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    target_price REAL NOT NULL,
+    stop_price REAL NOT NULL,
+    signal_time TEXT NOT NULL,
+    analysis_text TEXT NOT NULL,
+    outcome TEXT,
+    outcome_price REAL,
+    outcome_time TEXT
+);
+"""
+
+
+def _typed_arg(value):
+    if value is None:
+        return {"type": "null", "value": None}
+    if isinstance(value, bool):
+        return {"type": "integer", "value": str(int(value))}
+    if isinstance(value, int):
+        return {"type": "integer", "value": str(value)}
+    if isinstance(value, float):
+        return {"type": "float", "value": value}
+    return {"type": "text", "value": str(value)}
+
+
+def _cell_value(cell: dict):
+    if cell["type"] == "null":
+        return None
+    if cell["type"] == "integer":
+        return int(cell["value"])
+    if cell["type"] == "float":
+        return float(cell["value"])
+    return cell["value"]
+
+
+def _execute(sql: str, args: list | None = None) -> dict:
+    stmt = {"sql": sql}
+    if args:
+        stmt["args"] = [_typed_arg(a) for a in args]
+
+    response = requests.post(
+        _PIPELINE_URL,
+        headers={"Authorization": f"Bearer {TURSO_AUTH_TOKEN}"},
+        json={"requests": [{"type": "execute", "stmt": stmt}, {"type": "close"}]},
+        timeout=15,
+    )
+    response.raise_for_status()
+    result = response.json()["results"][0]
+    if result["type"] == "error":
+        raise RuntimeError(f"Turso query failed: {result.get('error')}")
+    return result["response"]["result"]
+
+
+def _rows_as_dicts(result: dict) -> list[dict]:
+    col_names = [c["name"] for c in result["cols"]]
+    return [dict(zip(col_names, (_cell_value(cell) for cell in row))) for row in result["rows"]]
+
+
+def init_db() -> None:
+    _execute(_CREATE_TABLE_SQL)
+    logger.info("Database ready (signals table present)")
+
+
+def log_signal(pair: str, direction: str, entry_price: float, target_price: float,
+               stop_price: float, analysis_text: str) -> int:
+    signal_time = datetime.now(timezone.utc).isoformat()
+    result = _execute(
+        """INSERT INTO signals (pair, direction, entry_price, target_price, stop_price, signal_time, analysis_text)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        [pair, direction, entry_price, target_price, stop_price, signal_time, analysis_text],
+    )
+    return int(result["last_insert_rowid"])
+
+
+def get_open_signals() -> list[dict]:
+    result = _execute("SELECT * FROM signals WHERE outcome IS NULL ORDER BY signal_time")
+    rows = _rows_as_dicts(result)
+    for row in rows:
+        row["signal_time"] = datetime.fromisoformat(row["signal_time"])
+    return rows
+
+
+def resolve_signal(signal_id: int, outcome: str, price: float) -> None:
+    _execute(
+        "UPDATE signals SET outcome = ?, outcome_price = ?, outcome_time = ? WHERE id = ?",
+        [outcome, price, datetime.now(timezone.utc).isoformat(), signal_id],
+    )
+
+
+def get_stats() -> dict:
+    result = _execute("SELECT outcome, signal_time FROM signals WHERE outcome IS NOT NULL")
+    rows = _rows_as_dicts(result)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+    def _counts(rows: list[dict]) -> dict:
+        counts: dict[str, int] = {}
+        for row in rows:
+            counts[row["outcome"]] = counts.get(row["outcome"], 0) + 1
+        return counts
+
+    def _win_rate(counts: dict) -> float | None:
+        wins, losses = counts.get("WIN", 0), counts.get("LOSS", 0)
+        decided = wins + losses
+        return round(wins / decided * 100, 1) if decided else None
+
+    all_time = _counts(rows)
+    last_30d = _counts([r for r in rows if datetime.fromisoformat(r["signal_time"]) > cutoff])
+
+    open_result = _execute("SELECT count(*) AS n FROM signals WHERE outcome IS NULL")
+    open_count = _rows_as_dicts(open_result)[0]["n"]
+
+    return {
+        "open_signals": open_count,
+        "all_time": {**all_time, "win_rate_pct": _win_rate(all_time)},
+        "last_30_days": {**last_30d, "win_rate_pct": _win_rate(last_30d)},
+    }
