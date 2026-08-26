@@ -9,6 +9,7 @@ from openai import OpenAI
 
 from market_data import fetch_multi_timeframe, normalize_symbol
 from notifier import send_telegram_message
+from scheduler import start_scheduler
 
 load_dotenv()
 
@@ -86,6 +87,37 @@ def run_analysis(user_prompt: str) -> str:
     return response.output_text
 
 
+def analyze_and_notify(raw_ticker: str) -> dict:
+    """Shared pipeline: trading-window check -> fetch bars -> AI analysis -> Telegram.
+    Used by both the scheduler (self-triggered) and the optional TradingView webhook."""
+    now_utc = datetime.now(timezone.utc)
+    if not in_trading_window(now_utc):
+        logger.info("%s ignored — outside trading window (%s UTC)", raw_ticker, now_utc.isoformat())
+        return {"status": "ignored", "reason": "outside trading window"}
+
+    try:
+        symbol = normalize_symbol(raw_ticker)
+    except ValueError as exc:
+        logger.warning("Rejected ticker: %s", exc)
+        return {"status": "error", "reason": str(exc)}
+
+    logger.info("Processing %s", symbol)
+
+    try:
+        bars = fetch_multi_timeframe(raw_ticker, TWELVEDATA_API_KEY)
+        target_pips, stop_pips = pip_target_and_stop(symbol)
+        user_prompt = build_analysis_prompt(raw_ticker, symbol, bars, target_pips, stop_pips)
+        analysis = run_analysis(user_prompt)
+    except Exception:
+        logger.exception("Analysis failed for %s", symbol)
+        return {"status": "error", "reason": "analysis failed"}
+
+    sent = send_telegram_message(f"{symbol}\n\n{analysis}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    logger.info("Analysis complete for %s (telegram sent: %s)", symbol, sent)
+
+    return {"status": "processed", "telegram_sent": sent}
+
+
 @app.route("/health")
 def health():
     return jsonify(status="ok")
@@ -93,6 +125,8 @@ def health():
 
 @app.route("/webhook/tradingview", methods=["POST"])
 def tradingview_webhook():
+    """Optional: only useful if you're on a TradingView plan that supports webhook
+    alerts. The bot doesn't depend on this — see scheduler.py for the self-triggered path."""
     try:
         payload = request.get_json(force=True, silent=False)
     except Exception:
@@ -104,33 +138,11 @@ def tradingview_webhook():
         logger.warning("Webhook payload missing 'ticker': %s", payload)
         return jsonify(error="missing 'ticker'"), 400
 
-    now_utc = datetime.now(timezone.utc)
-    if not in_trading_window(now_utc):
-        logger.info("Alert for %s ignored — outside trading window (%s UTC)", raw_ticker, now_utc.isoformat())
-        return jsonify(status="ignored", reason="outside trading window"), 200
-
-    try:
-        symbol = normalize_symbol(raw_ticker)
-    except ValueError as exc:
-        logger.warning("Rejected webhook: %s", exc)
-        return jsonify(error=str(exc)), 400
-
-    logger.info("Processing alert for %s", symbol)
-
-    try:
-        bars = fetch_multi_timeframe(raw_ticker, TWELVEDATA_API_KEY)
-        target_pips, stop_pips = pip_target_and_stop(symbol)
-        user_prompt = build_analysis_prompt(raw_ticker, symbol, bars, target_pips, stop_pips)
-        analysis = run_analysis(user_prompt)
-    except Exception:
-        logger.exception("Analysis failed for %s", symbol)
-        return jsonify(error="analysis failed"), 500
-
-    sent = send_telegram_message(f"{symbol}\n\n{analysis}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-    logger.info("Analysis complete for %s (telegram sent: %s)", symbol, sent)
-
-    return jsonify(status="processed", telegram_sent=sent), 200
+    result = analyze_and_notify(raw_ticker)
+    status_code = 500 if result["status"] == "error" else 200
+    return jsonify(result), status_code
 
 
 if __name__ == "__main__":
+    start_scheduler(TWELVEDATA_API_KEY, on_trigger=analyze_and_notify)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
