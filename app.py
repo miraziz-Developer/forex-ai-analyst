@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime, time, timezone
 
 from dotenv import load_dotenv
@@ -87,12 +88,29 @@ def run_analysis(user_prompt: str) -> str:
     return response.output_text
 
 
+def extract_recommendation(analysis: str) -> str:
+    """Reads the model's own 'TAVSIYA: ...' line. The model decides — there's no
+    separate indicator gating this; it's purely the AI's judgment."""
+    for line in analysis.splitlines():
+        normalized = re.sub(r"[’‘'ʻʼ`´]", "", line).upper()
+        if normalized.strip().startswith("TAVSIYA"):
+            if "SAVDONI KUZATISH" in normalized:
+                return "TRADE_WATCH"
+            if "OTKAZIB YUBORISH" in normalized:
+                return "SKIP"
+    return "UNKNOWN"
+
+
+_last_recommendation: dict[str, str] = {}
+
+
 def analyze_and_notify(raw_ticker: str) -> dict:
-    """Shared pipeline: trading-window check -> fetch bars -> AI analysis -> Telegram.
-    Used by both the scheduler (self-triggered) and the optional TradingView webhook."""
+    """Shared pipeline: trading-window check -> fetch bars -> full AI read -> Telegram
+    only when the AI itself calls a new TRADE WATCH. Runs on every scheduler tick for
+    every watched pair — the AI decides each time, not a mechanical indicator."""
     now_utc = datetime.now(timezone.utc)
     if not in_trading_window(now_utc):
-        logger.info("%s ignored — outside trading window (%s UTC)", raw_ticker, now_utc.isoformat())
+        logger.info("%s skipped — outside trading window (%s UTC)", raw_ticker, now_utc.isoformat())
         return {"status": "ignored", "reason": "outside trading window"}
 
     try:
@@ -101,7 +119,7 @@ def analyze_and_notify(raw_ticker: str) -> dict:
         logger.warning("Rejected ticker: %s", exc)
         return {"status": "error", "reason": str(exc)}
 
-    logger.info("Processing %s", symbol)
+    logger.info("Analyzing %s", symbol)
 
     try:
         bars = fetch_multi_timeframe(raw_ticker, TWELVEDATA_API_KEY)
@@ -112,10 +130,20 @@ def analyze_and_notify(raw_ticker: str) -> dict:
         logger.exception("Analysis failed for %s", symbol)
         return {"status": "error", "reason": "analysis failed"}
 
-    sent = send_telegram_message(f"{symbol}\n\n{analysis}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-    logger.info("Analysis complete for %s (telegram sent: %s)", symbol, sent)
+    recommendation = extract_recommendation(analysis)
+    logger.info("%s verdict: %s", symbol, recommendation)
 
-    return {"status": "processed", "telegram_sent": sent}
+    previous = _last_recommendation.get(raw_ticker)
+    _last_recommendation[raw_ticker] = recommendation
+
+    if recommendation != "TRADE_WATCH" or previous == "TRADE_WATCH":
+        # either nothing worth trading, or this is the same setup we already signaled
+        return {"status": "no_signal", "recommendation": recommendation}
+
+    sent = send_telegram_message(f"{symbol}\n\n{analysis}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    logger.info("Signal sent for %s (telegram sent: %s)", symbol, sent)
+
+    return {"status": "signal_sent", "telegram_sent": sent}
 
 
 @app.route("/health")
@@ -144,5 +172,5 @@ def tradingview_webhook():
 
 
 if __name__ == "__main__":
-    start_scheduler(TWELVEDATA_API_KEY, on_trigger=analyze_and_notify)
+    start_scheduler(on_check=analyze_and_notify)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

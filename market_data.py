@@ -1,4 +1,6 @@
 import logging
+import threading
+import time
 
 import requests
 
@@ -7,6 +9,25 @@ logger = logging.getLogger(__name__)
 TWELVEDATA_BASE_URL = "https://api.twelvedata.com/time_series"
 TIMEFRAMES = {"4h": "4h", "1h": "1h", "15min": "15min", "5min": "5min"}
 BARS_PER_TIMEFRAME = 50
+
+# Twelve Data free tier: 8 requests/minute. This gates every call (across
+# threads/pairs) so concurrent checks — e.g. the scheduler and a manual
+# webhook firing close together — never burst past that and get 429s.
+_MAX_CALLS_PER_MINUTE = 8
+_rate_lock = threading.Lock()
+_call_timestamps: list[float] = []
+
+
+def _throttle() -> None:
+    with _rate_lock:
+        while True:
+            now = time.monotonic()
+            while _call_timestamps and now - _call_timestamps[0] > 60:
+                _call_timestamps.pop(0)
+            if len(_call_timestamps) < _MAX_CALLS_PER_MINUTE:
+                _call_timestamps.append(now)
+                return
+            time.sleep(60 - (now - _call_timestamps[0]) + 0.5)
 
 
 def normalize_symbol(raw_ticker: str) -> str:
@@ -18,6 +39,7 @@ def normalize_symbol(raw_ticker: str) -> str:
 
 
 def fetch_bars(symbol: str, interval: str, api_key: str, outputsize: int = BARS_PER_TIMEFRAME) -> list[dict]:
+    _throttle()
     response = requests.get(
         TWELVEDATA_BASE_URL,
         params={
