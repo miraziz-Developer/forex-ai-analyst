@@ -5,26 +5,27 @@ from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+import broker
 import storage
 from market_data import fetch_bars
 from notifier import send_telegram_message
 
 logger = logging.getLogger(__name__)
 
-WATCH_PAIRS = [p.strip() for p in os.environ.get("WATCH_PAIRS", "EURUSD,GBPUSD,USDJPY").split(",") if p.strip()]
+WATCH_PAIRS = [p.strip() for p in os.environ.get("WATCH_PAIRS", "BTC-USDT,ETH-USDT").split(",") if p.strip()]
 POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "20"))
 RESOLVER_INTERVAL_MINUTES = int(os.environ.get("RESOLVER_INTERVAL_MINUTES", "15"))
-SIGNAL_EXPIRY_HOURS = int(os.environ.get("SIGNAL_EXPIRY_HOURS", "48"))
+SIGNAL_EXPIRY_HOURS = int(os.environ.get("SIGNAL_EXPIRY_HOURS", "24"))
 
 _last_digest_date: date | None = None
 
 
-def start_scheduler(on_check: Callable[[str], dict], twelvedata_api_key: str,
+def start_scheduler(on_check: Callable[[str], dict],
                      telegram_bot_token: str, telegram_chat_id: str) -> BackgroundScheduler:
     """Runs a full AI read on every watched pair on a timer (no indicator gating —
     the AI decides each tick, see extract_recommendation in app.py), plus a second,
-    separate timer that resolves open signals against real price history and sends
-    a daily win-rate digest."""
+    separate timer that resolves open signals against real price history (and, if a
+    real broker position exists, force-closes it on expiry) and sends a daily digest."""
     scheduler = BackgroundScheduler(timezone="UTC")
 
     def analysis_job():
@@ -36,7 +37,7 @@ def start_scheduler(on_check: Callable[[str], dict], twelvedata_api_key: str,
 
     def resolver_job():
         try:
-            _resolve_open_signals(twelvedata_api_key)
+            _resolve_open_signals()
         except Exception:
             logger.exception("Scheduler: resolving open signals failed")
         try:
@@ -56,15 +57,15 @@ def start_scheduler(on_check: Callable[[str], dict], twelvedata_api_key: str,
     return scheduler
 
 
-def _resolve_open_signals(twelvedata_api_key: str) -> None:
+def _resolve_open_signals() -> None:
     for signal in storage.get_open_signals():
-        _resolve_one(signal, twelvedata_api_key)
+        _resolve_one(signal)
 
 
-def _resolve_one(signal: dict, twelvedata_api_key: str) -> None:
+def _resolve_one(signal: dict) -> None:
     symbol = signal["pair"]
     try:
-        bars = fetch_bars(symbol, "1h", twelvedata_api_key, outputsize=100)
+        bars = fetch_bars(symbol, "1h", outputsize=100)
     except Exception as exc:
         logger.error("Resolver: failed to fetch bars for %s: %s", symbol, exc)
         return
@@ -102,12 +103,20 @@ def _resolve_one(signal: dict, twelvedata_api_key: str) -> None:
     age_hours = (datetime.now(timezone.utc) - signal_time).total_seconds() / 3600
     if age_hours >= SIGNAL_EXPIRY_HOURS:
         latest_price = float(bars[0]["close"])
+        broker_qty = signal.get("broker_qty")
+        if broker_qty:
+            try:
+                broker.close_position(symbol, direction, broker_qty)
+                logger.info("Force-closed expired broker position for signal %s (%s)", signal["id"], symbol)
+            except Exception:
+                logger.exception("Resolver: failed to force-close expired position for signal %s (%s)",
+                                  signal["id"], symbol)
         storage.resolve_signal(signal["id"], "EXPIRED", latest_price)
         logger.info("Signal %s (%s) resolved: EXPIRED at %s", signal["id"], symbol, latest_price)
 
 
 def _bar_time(bar: dict) -> datetime:
-    return datetime.strptime(bar["datetime"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    return datetime.fromtimestamp(bar["datetime"] / 1000, tz=timezone.utc)
 
 
 def _maybe_send_daily_digest(telegram_bot_token: str, telegram_chat_id: str) -> None:

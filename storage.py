@@ -75,16 +75,28 @@ def _rows_as_dicts(result: dict) -> list[dict]:
 
 def init_db() -> None:
     _execute(_CREATE_TABLE_SQL)
+    for migration in (
+        "ALTER TABLE signals ADD COLUMN oanda_trade_id TEXT",  # generic broker order id (legacy name)
+        "ALTER TABLE signals ADD COLUMN broker_qty REAL",
+    ):
+        try:
+            _execute(migration)
+        except RuntimeError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
     logger.info("Database ready (signals table present)")
 
 
 def log_signal(pair: str, direction: str, entry_price: float, target_price: float,
-               stop_price: float, analysis_text: str) -> int:
+               stop_price: float, analysis_text: str,
+               broker_order_id: str | None = None, broker_qty: float | None = None) -> int:
     signal_time = datetime.now(timezone.utc).isoformat()
     result = _execute(
-        """INSERT INTO signals (pair, direction, entry_price, target_price, stop_price, signal_time, analysis_text)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        [pair, direction, entry_price, target_price, stop_price, signal_time, analysis_text],
+        """INSERT INTO signals (pair, direction, entry_price, target_price, stop_price,
+                                 signal_time, analysis_text, oanda_trade_id, broker_qty)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [pair, direction, entry_price, target_price, stop_price, signal_time, analysis_text,
+         broker_order_id, broker_qty],
     )
     return int(result["last_insert_rowid"])
 

@@ -5,11 +5,12 @@ import re
 from datetime import datetime, time, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 from openai import OpenAI
 
+import broker
 import storage
-from market_data import fetch_multi_timeframe, normalize_symbol
+from market_data import fetch_multi_timeframe
 from notifier import send_telegram_message
 from scheduler import start_scheduler
 
@@ -27,15 +28,20 @@ app = Flask(__name__)
 AZURE_OPENAI_API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]
-TWELVEDATA_API_KEY = os.environ["TWELVEDATA_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
-TRADING_DAYS = os.environ.get("TRADING_DAYS", "MON,TUE,WED,THU,FRI")
-TRADING_WINDOW_START = os.environ.get("TRADING_WINDOW_START", "12:00")
-TRADING_WINDOW_END = os.environ.get("TRADING_WINDOW_END", "16:00")
-RISK_REWARD_PIPS = os.environ.get("RISK_REWARD_PIPS", "20/5")
-SPREAD_PIPS = float(os.environ.get("SPREAD_PIPS", "1.5"))
+# Crypto perpetuals trade 24/7 — this stays available for anyone who wants a
+# restricted window, but defaults to no restriction at all.
+TRADING_DAYS = os.environ.get("TRADING_DAYS", "ALL")
+TRADING_WINDOW_START = os.environ.get("TRADING_WINDOW_START", "00:00")
+TRADING_WINDOW_END = os.environ.get("TRADING_WINDOW_END", "23:59")
+
+TARGET_PCT, STOP_PCT = (float(x) for x in os.environ.get("TARGET_PCT_STOP_PCT", "1.5/0.6").split("/"))
+
+AUTO_EXECUTE_TRADES = os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true"
+POSITION_SIZE_USDT = float(os.environ.get("POSITION_SIZE_USDT", "100"))
+MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "3"))
 
 WEEKDAY_CODES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
@@ -59,23 +65,11 @@ def in_trading_window(now_utc: datetime) -> bool:
     return days_ok and window_ok
 
 
-def pip_size_for(symbol: str) -> float:
-    return 0.01 if "JPY" in symbol else 0.0001
-
-
-def pip_target_and_stop(symbol: str) -> tuple[float, float]:
-    target_pips, stop_pips = (float(x) for x in RISK_REWARD_PIPS.split("/"))
-    return target_pips, stop_pips
-
-
-def build_analysis_prompt(raw_ticker: str, symbol: str, bars: dict, target_pips: float, stop_pips: float) -> str:
-    pip_note = "0.01 (JPY pair)" if "JPY" in symbol else "0.0001"
+def build_analysis_prompt(symbol: str, bars: dict) -> str:
     return (
-        f"Pair: {symbol} (alert ticker: {raw_ticker})\n"
+        f"Pair: {symbol} (perpetual futures, USDT-margined)\n"
         f"Current UTC time: {datetime.now(timezone.utc).isoformat()}\n"
-        f"Pip size for this pair: {pip_note}\n"
-        f"Typical spread for this pair: {SPREAD_PIPS} pips\n"
-        f"Configured target: {target_pips} pips, max stop: {stop_pips} pips\n\n"
+        f"Configured target: {TARGET_PCT}% , max stop: {STOP_PCT}%\n\n"
         f"4H bars (most recent first):\n{json.dumps(bars.get('4h', [])[:20])}\n\n"
         f"1H bars:\n{json.dumps(bars.get('1h', [])[:24])}\n\n"
         f"15min bars:\n{json.dumps(bars.get('15min', [])[:20])}\n\n"
@@ -122,27 +116,20 @@ def extract_direction(analysis: str) -> str | None:
 _last_recommendation: dict[str, str] = {}
 
 
-def analyze_and_notify(raw_ticker: str) -> dict:
+def analyze_and_notify(symbol: str) -> dict:
     """Shared pipeline: trading-window check -> fetch bars -> full AI read -> Telegram
     only when the AI itself calls a new TRADE WATCH. Runs on every scheduler tick for
     every watched pair — the AI decides each time, not a mechanical indicator."""
     now_utc = datetime.now(timezone.utc)
     if not in_trading_window(now_utc):
-        logger.info("%s skipped — outside trading window (%s UTC)", raw_ticker, now_utc.isoformat())
+        logger.info("%s skipped — outside trading window (%s UTC)", symbol, now_utc.isoformat())
         return {"status": "ignored", "reason": "outside trading window"}
-
-    try:
-        symbol = normalize_symbol(raw_ticker)
-    except ValueError as exc:
-        logger.warning("Rejected ticker: %s", exc)
-        return {"status": "error", "reason": str(exc)}
 
     logger.info("Analyzing %s", symbol)
 
     try:
-        bars = fetch_multi_timeframe(raw_ticker, TWELVEDATA_API_KEY)
-        target_pips, stop_pips = pip_target_and_stop(symbol)
-        user_prompt = build_analysis_prompt(raw_ticker, symbol, bars, target_pips, stop_pips)
+        bars = fetch_multi_timeframe(symbol)
+        user_prompt = build_analysis_prompt(symbol, bars)
         analysis = run_analysis(user_prompt)
     except Exception:
         logger.exception("Analysis failed for %s", symbol)
@@ -151,43 +138,74 @@ def analyze_and_notify(raw_ticker: str) -> dict:
     recommendation = extract_recommendation(analysis)
     logger.info("%s verdict: %s", symbol, recommendation)
 
-    previous = _last_recommendation.get(raw_ticker)
-    _last_recommendation[raw_ticker] = recommendation
+    previous = _last_recommendation.get(symbol)
+    _last_recommendation[symbol] = recommendation
 
     if recommendation != "TRADE_WATCH" or previous == "TRADE_WATCH":
         # either nothing worth trading, or this is the same setup we already signaled
         return {"status": "no_signal", "recommendation": recommendation}
 
-    sent = send_telegram_message(f"{symbol}\n\n{analysis}", TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-    logger.info("Signal sent for %s (telegram sent: %s)", symbol, sent)
+    message, executed = _log_and_maybe_execute_signal(symbol, bars, analysis)
 
-    _log_signal_if_possible(symbol, bars, target_pips, stop_pips, analysis)
+    sent = send_telegram_message(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    logger.info("Signal sent for %s (telegram sent: %s, executed: %s)", symbol, sent, executed)
 
-    return {"status": "signal_sent", "telegram_sent": sent}
+    return {"status": "signal_sent", "telegram_sent": sent, "executed": executed}
 
 
-def _log_signal_if_possible(symbol: str, bars: dict, target_pips: float, stop_pips: float, analysis: str) -> None:
+def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str) -> tuple[str, bool]:
+    """Computes entry/target/stop, optionally places a real BingX demo order, logs
+    the signal (with the broker order ID/qty if one was opened), and returns the
+    Telegram message text (analysis + an explicit execution status line) plus
+    whether an order was actually placed."""
     direction = extract_direction(analysis)
     freshest_5min = bars.get("5min") or []
     if not direction or not freshest_5min:
         logger.warning("%s: could not log signal (direction=%s, has_bars=%s)", symbol, direction, bool(freshest_5min))
-        return
+        return analysis, False
 
     entry_price = float(freshest_5min[0]["close"])
-    pip_size = pip_size_for(symbol)
     if direction == "BUY":
-        target_price = entry_price + target_pips * pip_size
-        stop_price = entry_price - stop_pips * pip_size
+        target_price = entry_price * (1 + TARGET_PCT / 100)
+        stop_price = entry_price * (1 - STOP_PCT / 100)
     else:
-        target_price = entry_price - target_pips * pip_size
-        stop_price = entry_price + stop_pips * pip_size
+        target_price = entry_price * (1 - TARGET_PCT / 100)
+        stop_price = entry_price * (1 + STOP_PCT / 100)
+
+    broker_order_id = None
+    broker_qty = None
+    executed = False
+    execution_line = "Ijro: o'chirilgan (faqat tahlil rejimi)"
+
+    if AUTO_EXECUTE_TRADES:
+        open_count = len(storage.get_open_signals())
+        if open_count >= MAX_OPEN_POSITIONS:
+            execution_line = f"Ijro: o'tkazib yuborildi — ochiq pozitsiyalar limiti ({MAX_OPEN_POSITIONS}) to'lgan"
+        else:
+            try:
+                quantity = broker.round_quantity(symbol, POSITION_SIZE_USDT / entry_price)
+                fill = broker.place_market_order(symbol, direction, quantity, target_price, stop_price)
+                broker_order_id = fill["order_id"]
+                broker_qty = quantity
+                executed = True
+                execution_line = (
+                    f"Ijro: BAJARILDI ✅ (BingX demo) — order #{broker_order_id}, "
+                    f"narx {fill['fill_price']}, hajm {quantity}"
+                )
+            except Exception as exc:
+                logger.exception("%s: order execution failed", symbol)
+                execution_line = f"Ijro: XATOLIK ⚠️ — {exc}"
 
     try:
-        signal_id = storage.log_signal(symbol, direction, entry_price, target_price, stop_price, analysis)
-        logger.info("%s: logged signal id=%s dir=%s entry=%s target=%s stop=%s",
-                     symbol, signal_id, direction, entry_price, target_price, stop_price)
+        signal_id = storage.log_signal(symbol, direction, entry_price, target_price, stop_price,
+                                        analysis, broker_order_id, broker_qty)
+        logger.info("%s: logged signal id=%s dir=%s entry=%s target=%s stop=%s order_id=%s qty=%s",
+                     symbol, signal_id, direction, entry_price, target_price, stop_price,
+                     broker_order_id, broker_qty)
     except Exception:
         logger.exception("%s: failed to log signal to database", symbol)
+
+    return f"{symbol}\n\n{analysis}\n\n{execution_line}", executed
 
 
 @app.route("/health")
@@ -200,31 +218,10 @@ def stats():
     return jsonify(storage.get_stats())
 
 
-@app.route("/webhook/tradingview", methods=["POST"])
-def tradingview_webhook():
-    """Optional: only useful if you're on a TradingView plan that supports webhook
-    alerts. The bot doesn't depend on this — see scheduler.py for the self-triggered path."""
-    try:
-        payload = request.get_json(force=True, silent=False)
-    except Exception:
-        logger.warning("Received malformed (non-JSON) webhook payload")
-        return jsonify(error="invalid JSON"), 400
-
-    raw_ticker = payload.get("ticker") if payload else None
-    if not raw_ticker:
-        logger.warning("Webhook payload missing 'ticker': %s", payload)
-        return jsonify(error="missing 'ticker'"), 400
-
-    result = analyze_and_notify(raw_ticker)
-    status_code = 500 if result["status"] == "error" else 200
-    return jsonify(result), status_code
-
-
 if __name__ == "__main__":
     storage.init_db()
     start_scheduler(
         on_check=analyze_and_notify,
-        twelvedata_api_key=TWELVEDATA_API_KEY,
         telegram_bot_token=TELEGRAM_BOT_TOKEN,
         telegram_chat_id=TELEGRAM_CHAT_ID,
     )
