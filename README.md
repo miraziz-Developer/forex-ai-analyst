@@ -151,8 +151,9 @@ With `AUTO_EXECUTE_TRADES=true`:
 - Leverage is set to `LEVERAGE` (default 3x) before each order
 - Position size is `POSITION_SIZE_USDT` (default 100) worth of margin,
   converted to a contract quantity at the current price
-- Capped at `MAX_OPEN_POSITIONS` (default 3) concurrent positions, and at
-  most one open signal per pair at a time
+- No cap on concurrent open positions (demo money — removed deliberately);
+  the only per-pair limit is one open signal at a time (a pair won't
+  re-signal until its current one resolves)
 - Stop-loss/take-profit are the model's own structural price levels
   (falls back to an ATR-based percentage only if those fail a sanity check),
   attached to the order atomically at open — BingX's own engine executes
@@ -173,7 +174,7 @@ stop/target distance now vary per trade.
 - **Change trading window/days**: `TRADING_DAYS`, `TRADING_WINDOW_START/END` in `.env` (all UTC)
 - **Change the sanity-bound target/stop**: `ATR_MULTIPLIER`, `REWARD_RISK_RATIO`, or the `TARGET_PCT_STOP_PCT` fallback
 - **Change how long a signal stays open**: `SIGNAL_EXPIRY_HOURS`
-- **Change position size / leverage / concurrent trade cap**: `POSITION_SIZE_USDT`, `LEVERAGE`, `MAX_OPEN_POSITIONS`
+- **Change position size / leverage**: `POSITION_SIZE_USDT`, `LEVERAGE`
 
 ## 8. Reliability notes
 - BingX, Azure OpenAI, or Turso API failures are caught, logged, and skip that step without crashing

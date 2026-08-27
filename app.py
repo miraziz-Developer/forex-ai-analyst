@@ -66,7 +66,6 @@ def compute_stop_target_pct(bars_1h: list[dict]) -> tuple[float, float]:
 
 AUTO_EXECUTE_TRADES = os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true"
 POSITION_SIZE_USDT = float(os.environ.get("POSITION_SIZE_USDT", "100"))
-MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "3"))
 
 WEEKDAY_CODES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
@@ -265,23 +264,19 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
     execution_line = "Ijro: o'chirilgan (faqat tahlil rejimi)"
 
     if AUTO_EXECUTE_TRADES:
-        open_count = len(storage.get_open_signals())
-        if open_count >= MAX_OPEN_POSITIONS:
-            execution_line = f"Ijro: o'tkazib yuborildi — ochiq pozitsiyalar limiti ({MAX_OPEN_POSITIONS}) to'lgan"
-        else:
-            try:
-                quantity = broker.round_quantity(symbol, POSITION_SIZE_USDT / entry_price)
-                fill = broker.place_market_order(symbol, direction, quantity, target_price, stop_price)
-                broker_order_id = fill["order_id"]
-                broker_qty = quantity
-                executed = True
-                execution_line = (
-                    f"Ijro: BAJARILDI ✅ (BingX demo) — order #{broker_order_id}, "
-                    f"narx {fill['fill_price']}, hajm {quantity}"
-                )
-            except Exception as exc:
-                logger.exception("%s: order execution failed", symbol)
-                execution_line = f"Ijro: XATOLIK ⚠️ — {exc}"
+        try:
+            quantity = broker.round_quantity(symbol, POSITION_SIZE_USDT / entry_price)
+            fill = broker.place_market_order(symbol, direction, quantity, target_price, stop_price)
+            broker_order_id = fill["order_id"]
+            broker_qty = quantity
+            executed = True
+            execution_line = (
+                f"Ijro: BAJARILDI ✅ (BingX demo) — order #{broker_order_id}, "
+                f"narx {fill['fill_price']}, hajm {quantity}"
+            )
+        except Exception as exc:
+            logger.exception("%s: order execution failed", symbol)
+            execution_line = f"Ijro: XATOLIK ⚠️ — {exc}"
 
     try:
         signal_id = storage.log_signal(symbol, direction, entry_price, target_price, stop_price,
