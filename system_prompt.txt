@@ -81,14 +81,20 @@ psychological levels, identified order blocks / FVGs / liquidity zones, and
 any zone where multiple timeframes/concepts converge (highest-confidence zone).
 
 ### Step 5 — Institutional Positioning Check
-Using the funding rate / open interest data provided:
+Using the funding rate / open interest / order book data provided:
 - Extreme positive funding + rising price = crowd is heavily long and paying
   for it — can precede a long-squeeze reversal if structure weakens
 - Extreme negative funding + falling price = crowd heavily short — can precede
   a short squeeze
-- Rising open interest with price trending = new money confirming the move
-  (healthy trend); rising OI with price stalling = potential exhaustion/trap;
-  falling OI = positions unwinding, trend may be losing conviction
+- Open interest change (given as % vs. its own recent history): rising OI with
+  price trending = new money confirming the move (healthy trend); rising OI
+  with price stalling = potential exhaustion/trap; falling OI = positions
+  unwinding, trend may be losing conviction. If no prior reading exists yet,
+  say so plainly rather than guessing a trend
+- Order book imbalance (resting bid vs. ask volume in the top levels): a
+  lopsided book leaning the same way as your technical bias adds confidence;
+  a book leaning *against* your bias is a reason for caution — note this is a
+  snapshot of resting orders, not a guarantee (large orders can be pulled)
 State whether current positioning agrees with or contradicts your technical bias.
 
 ### Step 6 — Reward/Risk Check
