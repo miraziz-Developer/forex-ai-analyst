@@ -10,6 +10,8 @@ from openai import OpenAI
 
 import broker
 import storage
+from charting import bars_to_chart_base64
+from institutional_data import fetch_institutional_context, format_institutional_context
 from market_data import fetch_multi_timeframe
 from notifier import send_telegram_message
 from scheduler import start_scheduler
@@ -65,11 +67,12 @@ def in_trading_window(now_utc: datetime) -> bool:
     return days_ok and window_ok
 
 
-def build_analysis_prompt(symbol: str, bars: dict) -> str:
+def build_analysis_text(symbol: str, bars: dict, institutional: dict) -> str:
     return (
         f"Pair: {symbol} (perpetual futures, USDT-margined)\n"
         f"Current UTC time: {datetime.now(timezone.utc).isoformat()}\n"
         f"Configured target: {TARGET_PCT}% , max stop: {STOP_PCT}%\n\n"
+        f"{format_institutional_context(institutional)}\n\n"
         f"4H bars (most recent first):\n{json.dumps(bars.get('4h', [])[:20])}\n\n"
         f"1H bars:\n{json.dumps(bars.get('1h', [])[:24])}\n\n"
         f"15min bars:\n{json.dumps(bars.get('15min', [])[:20])}\n\n"
@@ -77,11 +80,25 @@ def build_analysis_prompt(symbol: str, bars: dict) -> str:
     )
 
 
-def run_analysis(user_prompt: str) -> str:
+def build_analysis_input(symbol: str, bars: dict, institutional: dict) -> list:
+    """Multi-part input: the numeric text block plus rendered 1H/15min chart
+    images, so the model gets a real visual read alongside the precise numbers."""
+    content = [{"type": "input_text", "text": build_analysis_text(symbol, bars, institutional)}]
+
+    for label, tf_name in (("1h", "1 soatlik"), ("15min", "15 daqiqalik")):
+        chart_b64 = bars_to_chart_base64(bars.get(label, []), title=f"{symbol} {tf_name}")
+        if chart_b64:
+            content.append({"type": "input_text", "text": f"({tf_name} grafik rasmi quyida)"})
+            content.append({"type": "input_image", "image_url": f"data:image/png;base64,{chart_b64}"})
+
+    return [{"role": "user", "content": content}]
+
+
+def run_analysis(model_input: list) -> str:
     response = openai_client.responses.create(
         model=AZURE_OPENAI_DEPLOYMENT,
         instructions=SYSTEM_PROMPT,
-        input=user_prompt,
+        input=model_input,
         tools=[{"type": "web_search_preview"}],
     )
     return response.output_text
@@ -129,8 +146,9 @@ def analyze_and_notify(symbol: str) -> dict:
 
     try:
         bars = fetch_multi_timeframe(symbol)
-        user_prompt = build_analysis_prompt(symbol, bars)
-        analysis = run_analysis(user_prompt)
+        institutional = fetch_institutional_context(symbol)
+        model_input = build_analysis_input(symbol, bars, institutional)
+        analysis = run_analysis(model_input)
     except Exception:
         logger.exception("Analysis failed for %s", symbol)
         return {"status": "error", "reason": "analysis failed"}
