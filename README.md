@@ -166,3 +166,4 @@ longer it runs.
 - Leverage amplifies both gains and losses — 3x default is conservative but not zero-risk, even on demo
 - This is demo/virtual-money trading. None of this is investment advice or a
   guarantee of anything — treat `/stats` as a forward-test log, not a promise
+# deploy trigger 1787851195
