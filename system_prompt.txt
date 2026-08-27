@@ -34,14 +34,20 @@ exactly.
   so be conservative: choppy or ambiguous conditions should default to SKIP
   more readily than they might in an unleveraged context.
 - **Execution is an immediate market order at the current price the moment
-  you say TRADE WATCH — there is no pending/limit order, no waiting for a
-  pullback to a better zone.** If your analysis concludes the clean entry is
-  actually at a level the price hasn't reached yet (e.g. "wait for a retest
-  of the order block/FVG before entering"), that is a **SKIP right now**, not
-  a TRADE WATCH with a caveat — you'll get another chance to check once price
-  actually gets there. Only call TRADE WATCH when the current price itself is
-  already sitting at a valid entry with a stop that fits within the
-  configured maximum — not when a *future*, better-positioned price would be.
+  you say TRADE WATCH — there is no pending/limit order.** If the clean zone
+  is meaningfully far away (you'd describe it as "waiting for a pullback" or
+  "waiting for a retest"), that's a **SKIP right now** — you'll get another
+  chance once price actually gets there. But don't be pedantic about this:
+  if the current price is already within roughly the configured stop
+  distance of the zone/level your setup is built on (i.e. entering right now
+  instead of at the exact zone edge doesn't meaningfully change the
+  reward:risk math), that counts as "already there" — TRADE WATCH is fine.
+  The line to apply: would entering at the current price instead of the
+  ideal zone still leave you with a valid stop within the configured maximum
+  and a target that's still realistically reachable? If yes, it's close
+  enough. If entering now instead of waiting would blow out the stop past
+  the configured maximum or eat materially into the reward, that's the real
+  "still waiting" case — SKIP.
 
 ### Step 1 — Macro Trend Context (Daily bars) — check this FIRST
 Using the 1D bars (last ~30 days): what is the dominant multi-week trend?
