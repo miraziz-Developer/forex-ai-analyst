@@ -156,6 +156,19 @@ def extract_direction(analysis: str) -> str | None:
     return None
 
 
+def extract_price(analysis: str, label: str) -> float | None:
+    """Reads a numeric price off a labeled line (e.g. 'Stop-loss narxi: 63,850')."""
+    for line in analysis.splitlines():
+        if label in line.upper():
+            match = re.search(r"[\d][\d,]*\.?\d*", line)
+            if match:
+                try:
+                    return float(match.group().replace(",", ""))
+                except ValueError:
+                    return None
+    return None
+
+
 _last_recommendation: dict[str, str] = {}
 
 
@@ -198,6 +211,32 @@ def analyze_and_notify(symbol: str) -> dict:
     return {"status": "signal_sent", "telegram_sent": sent, "executed": executed}
 
 
+def _resolve_target_stop(entry_price: float, direction: str, ai_target: float | None, ai_stop: float | None,
+                          fallback_target_pct: float, fallback_stop_pct: float) -> tuple[float, float, str]:
+    """Prefer the model's own structural stop/target (real SMC/S&R levels) over
+    a formula. The ATR-based percentage only acts as a sanity bound — reject the
+    model's numbers if they're on the wrong side of entry, basically zero distance
+    (parsing noise), or wildly outside a sane multiple of the ATR estimate (a sign
+    of a misread/typo'd level), and fall back to the percentage-based calc."""
+    if ai_stop is not None and ai_target is not None:
+        stop_pct_actual = abs(entry_price - ai_stop) / entry_price * 100
+        on_correct_side = (direction == "BUY" and ai_stop < entry_price < ai_target) or \
+                           (direction == "SELL" and ai_target < entry_price < ai_stop)
+        sane_distance = 0.05 <= stop_pct_actual <= max(fallback_stop_pct * 6, 3.0)
+        if on_correct_side and sane_distance:
+            return ai_target, ai_stop, "structural"
+        logger.warning("Model's stop/target failed sanity check (stop=%s target=%s entry=%s dir=%s) — "
+                        "falling back to ATR-based percentage", ai_stop, ai_target, entry_price, direction)
+
+    if direction == "BUY":
+        target_price = entry_price * (1 + fallback_target_pct / 100)
+        stop_price = entry_price * (1 - fallback_stop_pct / 100)
+    else:
+        target_price = entry_price * (1 - fallback_target_pct / 100)
+        stop_price = entry_price * (1 + fallback_stop_pct / 100)
+    return target_price, stop_price, "atr_fallback"
+
+
 def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
                                    target_pct: float, stop_pct: float) -> tuple[str, bool]:
     """Computes entry/target/stop, optionally places a real BingX demo order, logs
@@ -210,13 +249,15 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
         logger.warning("%s: could not log signal (direction=%s, has_bars=%s)", symbol, direction, bool(freshest_5min))
         return analysis, False
 
+    # Real execution price is always our own live feed, never the model's
+    # (possibly rounded/approximate) restated number.
     entry_price = float(freshest_5min[0]["close"])
-    if direction == "BUY":
-        target_price = entry_price * (1 + target_pct / 100)
-        stop_price = entry_price * (1 - stop_pct / 100)
-    else:
-        target_price = entry_price * (1 - target_pct / 100)
-        stop_price = entry_price * (1 + stop_pct / 100)
+
+    ai_stop = extract_price(analysis, "STOP-LOSS NARXI")
+    ai_target = extract_price(analysis, "TAKE-PROFIT NARXI")
+    target_price, stop_price, level_source = _resolve_target_stop(
+        entry_price, direction, ai_target, ai_stop, target_pct, stop_pct)
+    logger.info("%s: stop/target source=%s stop=%s target=%s", symbol, level_source, stop_price, target_price)
 
     broker_order_id = None
     broker_qty = None
