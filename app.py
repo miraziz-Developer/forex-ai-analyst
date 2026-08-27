@@ -73,6 +73,7 @@ def build_analysis_text(symbol: str, bars: dict, institutional: dict) -> str:
         f"Current UTC time: {datetime.now(timezone.utc).isoformat()}\n"
         f"Configured target: {TARGET_PCT}% , max stop: {STOP_PCT}%\n\n"
         f"{format_institutional_context(institutional)}\n\n"
+        f"1D bars (macro trend context, most recent first):\n{json.dumps(bars.get('1d', [])[:30])}\n\n"
         f"4H bars (most recent first):\n{json.dumps(bars.get('4h', [])[:20])}\n\n"
         f"1H bars:\n{json.dumps(bars.get('1h', [])[:24])}\n\n"
         f"15min bars:\n{json.dumps(bars.get('15min', [])[:20])}\n\n"

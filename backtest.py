@@ -67,16 +67,48 @@ def extract_direction(analysis: str) -> str | None:
     return None
 
 
-def fetch_history(symbol: str) -> dict[str, list[dict]]:
-    """One bulk pull per timeframe (most-recent-first, like the live path). A
-    failure on one timeframe/pair doesn't kill the whole backtest run."""
-    history = {}
-    for label, interval in (("4h", "4h"), ("1h", "1h"), ("15min", "15m")):
+def fetch_history_paginated(symbol: str, interval: str, pages: int) -> list[dict]:
+    """A single kline call caps at 1000 bars. Walk endTime backward for more
+    depth on the finer timeframes — this is one-off data prep, not a recurring
+    live cost, so it goes through market_data's existing rate-limit-aware
+    retry rather than a bespoke spacing scheme."""
+    all_bars: list[dict] = []
+    end_time_ms = None
+    for page in range(pages):
         try:
-            history[label] = fetch_bars(symbol, interval, outputsize=1000)
+            batch = fetch_bars(symbol, interval, outputsize=1000, end_time_ms=end_time_ms)
         except Exception as exc:
-            print(f"  {symbol} {label}: fetch failed ({exc}), skipping this timeframe")
-            history[label] = []
+            print(f"  {symbol} {interval} page {page + 1}/{pages}: fetch failed ({exc}), stopping pagination here")
+            break
+        if not batch:
+            break
+        all_bars.extend(b for b in batch if b not in all_bars)
+        end_time_ms = min(b["datetime"] for b in batch) - 1
+    all_bars.sort(key=lambda b: b["datetime"], reverse=True)
+    return all_bars
+
+
+def fetch_history(symbol: str) -> dict[str, list[dict]]:
+    """4H (1000 bars = ~166 days) and 1H (1000 bars = ~41 days) already comfortably
+    cover a useful backtest window in one call. 15min (1000 bars = ~10.4 days) is
+    the binding constraint on window length, so it gets paginated for more depth."""
+    history = {}
+    try:
+        history["1d"] = fetch_bars(symbol, "1d", outputsize=200)
+    except Exception as exc:
+        print(f"  {symbol} 1d: fetch failed ({exc}), skipping this timeframe")
+        history["1d"] = []
+    try:
+        history["4h"] = fetch_bars(symbol, "4h", outputsize=1000)
+    except Exception as exc:
+        print(f"  {symbol} 4h: fetch failed ({exc}), skipping this timeframe")
+        history["4h"] = []
+    try:
+        history["1h"] = fetch_bars(symbol, "1h", outputsize=1000)
+    except Exception as exc:
+        print(f"  {symbol} 1h: fetch failed ({exc}), skipping this timeframe")
+        history["1h"] = []
+    history["15min"] = fetch_history_paginated(symbol, "15m", pages=2)
     return history
 
 
@@ -86,13 +118,14 @@ def _bars_up_to(bars: list[dict], checkpoint_ms: int, count: int) -> list[dict]:
     return [b for b in bars if b["datetime"] <= checkpoint_ms][:count]
 
 
-def _build_checkpoint_prompt(symbol: str, checkpoint_ms: int, bars_4h, bars_1h, bars_15m) -> str:
+def _build_checkpoint_prompt(symbol: str, checkpoint_ms: int, bars_1d, bars_4h, bars_1h, bars_15m) -> str:
     checkpoint_iso = datetime.fromtimestamp(checkpoint_ms / 1000, tz=timezone.utc).isoformat()
     return (
         BACKTEST_NOTE
         + f"Pair: {symbol} (perpetual futures, USDT-margined)\n"
         f"Current UTC time (backtest checkpoint): {checkpoint_iso}\n"
         f"Configured target: {TARGET_PCT}% , max stop: {STOP_PCT}%\n\n"
+        f"1D bars (macro trend context, most recent first):\n{json.dumps(bars_1d[:30])}\n\n"
         f"4H bars (most recent first):\n{json.dumps(bars_4h[:20])}\n\n"
         f"1H bars:\n{json.dumps(bars_1h[:24])}\n\n"
         f"15min bars:\n{json.dumps(bars_15m[:20])}\n"
@@ -115,13 +148,14 @@ def _resolve_forward(direction: str, entry: float, target: float, stop: float,
 
 
 def run_checkpoint(symbol: str, checkpoint_ms: int, history: dict) -> dict | None:
+    bars_1d = _bars_up_to(history["1d"], checkpoint_ms, 30)
     bars_4h = _bars_up_to(history["4h"], checkpoint_ms, 50)
     bars_1h = _bars_up_to(history["1h"], checkpoint_ms, 50)
     bars_15m = _bars_up_to(history["15min"], checkpoint_ms, 50)
     if len(bars_1h) < 20 or len(bars_15m) < 20:
         return None  # not enough history yet at this checkpoint
 
-    prompt = _build_checkpoint_prompt(symbol, checkpoint_ms, bars_4h, bars_1h, bars_15m)
+    prompt = _build_checkpoint_prompt(symbol, checkpoint_ms, bars_1d, bars_4h, bars_1h, bars_15m)
     try:
         response = openai_client.responses.create(
             model=AZURE_OPENAI_DEPLOYMENT,
@@ -134,7 +168,8 @@ def run_checkpoint(symbol: str, checkpoint_ms: int, history: dict) -> dict | Non
         return None
 
     recommendation = extract_recommendation(analysis)
-    result = {"symbol": symbol, "checkpoint_ms": checkpoint_ms, "recommendation": recommendation}
+    result = {"symbol": symbol, "checkpoint_ms": checkpoint_ms, "recommendation": recommendation,
+              "analysis": analysis}
     if recommendation != "TRADE_WATCH":
         return result
 
@@ -168,10 +203,14 @@ def run_backtest(pairs: list[str], checkpoint_hours: int, workers: int) -> None:
     tasks = []
     for symbol, history in histories.items():
         bar_1h_times = sorted(b["datetime"] for b in history["1h"])
-        if not bar_1h_times:
-            print(f"  {symbol}: no 1h history returned, skipping")
+        bar_15m_times = sorted(b["datetime"] for b in history["15min"])
+        if not bar_1h_times or not bar_15m_times:
+            print(f"  {symbol}: missing 1h or 15min history, skipping")
             continue
-        start_ms, end_ms = bar_1h_times[0], bar_1h_times[-1]
+        # bounded by whichever timeframe's window is shorter (usually 15min,
+        # since it's the finest granularity and caps out fastest per API call)
+        start_ms = max(bar_1h_times[0], bar_15m_times[0])
+        end_ms = min(bar_1h_times[-1], bar_15m_times[-1])
         step_ms = checkpoint_hours * 3600 * 1000
         checkpoint = start_ms + step_ms * 20  # skip the first ~20 checkpoints so bars_up_to has enough history
         while checkpoint < end_ms - step_ms:  # leave room for a forward window to resolve against
@@ -192,6 +231,10 @@ def run_backtest(pairs: list[str], checkpoint_hours: int, workers: int) -> None:
                 results.append(r)
             if done % 10 == 0 or done == len(tasks):
                 print(f"  {done}/{len(tasks)} checkpoints done")
+
+    with open("backtest_results.json", "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+    print(f"\nFull results (including reasoning text for loss analysis) saved to backtest_results.json")
 
     _print_report(results)
 
@@ -249,7 +292,7 @@ Treat this as a fast directional signal, not a final verdict. The live
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--pairs", default="BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT")
-    parser.add_argument("--checkpoint-hours", type=int, default=4)
+    parser.add_argument("--checkpoint-hours", type=int, default=2)
     parser.add_argument("--workers", type=int, default=6)
     args = parser.parse_args()
 

@@ -7,7 +7,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 BINGX_BASE_URL = "https://open-api-vst.bingx.com"
-TIMEFRAMES = {"4h": "4h", "1h": "1h", "15min": "15m", "5min": "5m"}
+TIMEFRAMES = {"1d": "1d", "4h": "4h", "1h": "1h", "15min": "15m", "5min": "5m"}
 BARS_PER_TIMEFRAME = 50
 
 # BingX's public kline endpoint is rate-limited to 5 requests per 15 minutes
@@ -16,19 +16,23 @@ BARS_PER_TIMEFRAME = 50
 # can't change more often than its own period anyway, cache each (symbol,
 # interval) response for roughly its bar length — this cuts real request
 # volume by an order of magnitude while never serving genuinely stale data.
-_CACHE_TTL_SECONDS = {"4h": 4 * 3600, "1h": 3600, "15min": 15 * 60, "5min": 5 * 60}
+# 1d gets a 24h TTL, so it adds ~1 extra call/pair/day — negligible.
+_CACHE_TTL_SECONDS = {"1d": 24 * 3600, "4h": 4 * 3600, "1h": 3600, "15min": 15 * 60, "5min": 5 * 60}
 _cache: dict[tuple, tuple[float, list]] = {}
 
 
 _RETRY_AFTER_RE = re.compile(r"retry after time:\s*(\d+)")
 
 
-def _get_klines_with_retry(symbol: str, interval: str, outputsize: int) -> dict:
+def _get_klines_with_retry(symbol: str, interval: str, outputsize: int, end_time_ms: int | None = None) -> dict:
+    params = {"symbol": symbol, "interval": interval, "limit": outputsize}
+    if end_time_ms is not None:
+        params["endTime"] = end_time_ms
     for attempt in range(2):
         try:
             response = requests.get(
                 f"{BINGX_BASE_URL}/openApi/swap/v2/quote/klines",
-                params={"symbol": symbol, "interval": interval, "limit": outputsize},
+                params=params,
                 timeout=20,
             )
             response.raise_for_status()
@@ -56,8 +60,16 @@ def _get_klines_with_retry(symbol: str, interval: str, outputsize: int) -> dict:
     raise RuntimeError(f"BingX kline error for {symbol} {interval}: rate limited after retry")
 
 
-def fetch_bars(symbol: str, interval: str, outputsize: int = BARS_PER_TIMEFRAME) -> list[dict]:
-    """symbol like 'BTC-USDT'. Returns bars most-recent-first (BingX returns oldest-first)."""
+def fetch_bars(symbol: str, interval: str, outputsize: int = BARS_PER_TIMEFRAME,
+                end_time_ms: int | None = None) -> list[dict]:
+    """symbol like 'BTC-USDT'. Returns bars most-recent-first (BingX returns oldest-first).
+    end_time_ms is for historical/backtest pagination — those calls bypass the cache
+    (they're one-off point-in-time queries, not the "latest N bars" pattern the
+    cache assumes) but still go through the same rate-limit retry logic."""
+    if end_time_ms is not None:
+        data = _get_klines_with_retry(symbol, interval, outputsize, end_time_ms)
+        return _normalize(data)
+
     label = next((k for k, v in TIMEFRAMES.items() if v == interval), interval)
     ttl = _CACHE_TTL_SECONDS.get(label, 60)
     cache_key = (symbol, interval, outputsize)
@@ -67,11 +79,16 @@ def fetch_bars(symbol: str, interval: str, outputsize: int = BARS_PER_TIMEFRAME)
         return cached[1]
 
     data = _get_klines_with_retry(symbol, interval, outputsize)
+    normalized = _normalize(data)
+    _cache[cache_key] = (time.monotonic(), normalized)
+    return normalized
 
+
+def _normalize(data: dict) -> list[dict]:
+    """Normalize field names to what the rest of the app expects (Twelve Data-style
+    keys), and reverse BingX's oldest-first order to most-recent-first."""
     bars = data.get("data", [])
-    # normalize field names to what the rest of the app expects (Twelve Data-style keys),
-    # and reverse to most-recent-first
-    normalized = [
+    return [
         {
             "datetime": bar["time"],  # epoch ms, kept as-is; consumers that need it parse it
             "open": bar["open"],
@@ -82,8 +99,6 @@ def fetch_bars(symbol: str, interval: str, outputsize: int = BARS_PER_TIMEFRAME)
         }
         for bar in reversed(bars)
     ]
-    _cache[cache_key] = (time.monotonic(), normalized)
-    return normalized
 
 
 def fetch_multi_timeframe(symbol: str) -> dict[str, list[dict]]:
