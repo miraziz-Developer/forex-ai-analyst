@@ -97,14 +97,29 @@ Scan the 15-min and 5-min bars/charts for:
 - **Breakout vs. liquidity grab**: explicitly distinguish these two — a
   breakout continues with follow-through; a liquidity grab reverses sharply
   after sweeping the level. Confusing one for the other is a common losing mistake
+- **Premium / Discount (and Optimal Trade Entry)**: within the current swing
+  range (most recent significant swing high to swing low), the midpoint
+  splits it into a "premium" (upper) half and "discount" (lower) half. Longs
+  are structurally healthier bought from discount, shorts sold from premium —
+  buying premium or selling discount is fighting the range. The 61.8%-79%
+  retracement zone of the most recent impulse leg (the "Optimal Trade Entry"
+  zone) is where the highest-probability continuation entries tend to cluster
+- **Kill zone timing**: note whether the current time (UTC) falls inside a
+  major session overlap — roughly London (07:00-10:00 UTC), New York AM
+  (12:00-15:00 UTC), or the London/NY overlap (12:00-15:00 UTC is the most
+  liquid window). Setups forming inside a kill zone carry more weight than
+  the same-looking setup during low-liquidity hours (e.g. late Asia session);
+  say which zone (if any) applies and factor it into your confidence
 
 For each pattern found, state: which candle(s)/zone, timeframe, price level,
 and alignment with bias.
 
-### Step 5 — Key Level Identification
+### Step 5 — Key Level Identification (Support/Resistance)
 List: prior day high/low, most recent significant swing high/low, round-number
 psychological levels, identified order blocks / FVGs / liquidity zones, and
 any zone where multiple timeframes/concepts converge (highest-confidence zone).
+These are your support/resistance levels — treat prior support that breaks as
+new resistance and vice versa (polarity flip), a standard S/R principle.
 
 ### Step 6 — Institutional Positioning Check
 Using the funding rate / open interest / order book data provided:

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from indicators import atr_pct
 from market_data import fetch_bars
 
 load_dotenv()
@@ -29,7 +30,21 @@ AZURE_OPENAI_API_KEY = os.environ["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]
 
-TARGET_PCT, STOP_PCT = (float(x) for x in os.environ.get("TARGET_PCT_STOP_PCT", "1.5/0.6").split("/"))
+FALLBACK_TARGET_PCT, FALLBACK_STOP_PCT = (
+    float(x) for x in os.environ.get("TARGET_PCT_STOP_PCT", "1.5/0.6").split("/")
+)
+ATR_MULTIPLIER = float(os.environ.get("ATR_MULTIPLIER", "2.0"))
+REWARD_RISK_RATIO = float(os.environ.get("REWARD_RISK_RATIO", "2.5"))
+
+
+def compute_stop_target_pct(bars_1h: list[dict]) -> tuple[float, float]:
+    """Same volatility-adjusted logic as app.py — kept in sync so backtests
+    actually reflect live behavior."""
+    atr = atr_pct(bars_1h)
+    if atr is None:
+        return FALLBACK_TARGET_PCT, FALLBACK_STOP_PCT
+    stop_pct = atr * ATR_MULTIPLIER
+    return stop_pct * REWARD_RISK_RATIO, stop_pct
 
 with open("system_prompt.txt", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
@@ -88,10 +103,11 @@ def fetch_history_paginated(symbol: str, interval: str, pages: int) -> list[dict
     return all_bars
 
 
-def fetch_history(symbol: str) -> dict[str, list[dict]]:
+def fetch_history(symbol: str, pages: int = 2) -> dict[str, list[dict]]:
     """4H (1000 bars = ~166 days) and 1H (1000 bars = ~41 days) already comfortably
-    cover a useful backtest window in one call. 15min (1000 bars = ~10.4 days) is
-    the binding constraint on window length, so it gets paginated for more depth."""
+    cover a useful backtest window in one call. 15min (1000 bars = ~10.4 days/page) is
+    the binding constraint on window length, so it gets paginated for more depth —
+    `pages` controls how far back (2 = ~20.8 days, 4 = ~41.6 days, etc.)."""
     history = {}
     try:
         history["1d"] = fetch_bars(symbol, "1d", outputsize=200)
@@ -108,7 +124,7 @@ def fetch_history(symbol: str) -> dict[str, list[dict]]:
     except Exception as exc:
         print(f"  {symbol} 1h: fetch failed ({exc}), skipping this timeframe")
         history["1h"] = []
-    history["15min"] = fetch_history_paginated(symbol, "15m", pages=2)
+    history["15min"] = fetch_history_paginated(symbol, "15m", pages=pages)
     return history
 
 
@@ -118,13 +134,15 @@ def _bars_up_to(bars: list[dict], checkpoint_ms: int, count: int) -> list[dict]:
     return [b for b in bars if b["datetime"] <= checkpoint_ms][:count]
 
 
-def _build_checkpoint_prompt(symbol: str, checkpoint_ms: int, bars_1d, bars_4h, bars_1h, bars_15m) -> str:
+def _build_checkpoint_prompt(symbol: str, checkpoint_ms: int, bars_1d, bars_4h, bars_1h, bars_15m,
+                              target_pct: float, stop_pct: float) -> str:
     checkpoint_iso = datetime.fromtimestamp(checkpoint_ms / 1000, tz=timezone.utc).isoformat()
     return (
         BACKTEST_NOTE
         + f"Pair: {symbol} (perpetual futures, USDT-margined)\n"
         f"Current UTC time (backtest checkpoint): {checkpoint_iso}\n"
-        f"Configured target: {TARGET_PCT}% , max stop: {STOP_PCT}%\n\n"
+        f"Configured target: {target_pct:.3f}% , max stop: {stop_pct:.3f}% "
+        f"(volatility-adjusted: {ATR_MULTIPLIER}x 1H ATR, {REWARD_RISK_RATIO}:1 reward:risk)\n\n"
         f"1D bars (macro trend context, most recent first):\n{json.dumps(bars_1d[:30])}\n\n"
         f"4H bars (most recent first):\n{json.dumps(bars_4h[:20])}\n\n"
         f"1H bars:\n{json.dumps(bars_1h[:24])}\n\n"
@@ -155,7 +173,9 @@ def run_checkpoint(symbol: str, checkpoint_ms: int, history: dict) -> dict | Non
     if len(bars_1h) < 20 or len(bars_15m) < 20:
         return None  # not enough history yet at this checkpoint
 
-    prompt = _build_checkpoint_prompt(symbol, checkpoint_ms, bars_1d, bars_4h, bars_1h, bars_15m)
+    target_pct, stop_pct = compute_stop_target_pct(bars_1h)
+    prompt = _build_checkpoint_prompt(symbol, checkpoint_ms, bars_1d, bars_4h, bars_1h, bars_15m,
+                                       target_pct, stop_pct)
     try:
         response = openai_client.responses.create(
             model=AZURE_OPENAI_DEPLOYMENT,
@@ -181,9 +201,9 @@ def run_checkpoint(symbol: str, checkpoint_ms: int, history: dict) -> dict | Non
     entry = bars_1h[0]["close"] if bars_1h else None
     entry = float(entry)
     if direction == "BUY":
-        target, stop = entry * (1 + TARGET_PCT / 100), entry * (1 - STOP_PCT / 100)
+        target, stop = entry * (1 + target_pct / 100), entry * (1 - stop_pct / 100)
     else:
-        target, stop = entry * (1 - TARGET_PCT / 100), entry * (1 + STOP_PCT / 100)
+        target, stop = entry * (1 - target_pct / 100), entry * (1 + stop_pct / 100)
 
     forward = sorted(
         (b for b in history["1h"] if b["datetime"] > checkpoint_ms),
@@ -196,9 +216,15 @@ def run_checkpoint(symbol: str, checkpoint_ms: int, history: dict) -> dict | Non
     return result
 
 
-def run_backtest(pairs: list[str], checkpoint_hours: int, workers: int) -> None:
+def run_backtest(pairs: list[str], checkpoint_hours: int, workers: int,
+                  min_age_days: float = 0, max_age_days: float | None = None,
+                  history_pages: int = 2) -> None:
     print(f"Fetching bulk history for {pairs}...")
-    histories = {symbol: fetch_history(symbol) for symbol in pairs}
+    histories = {symbol: fetch_history(symbol, pages=history_pages) for symbol in pairs}
+
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    window_start_ms = now_ms - int(max_age_days * 86400 * 1000) if max_age_days else None
+    window_end_ms = now_ms - int(min_age_days * 86400 * 1000)
 
     tasks = []
     for symbol, history in histories.items():
@@ -210,7 +236,9 @@ def run_backtest(pairs: list[str], checkpoint_hours: int, workers: int) -> None:
         # bounded by whichever timeframe's window is shorter (usually 15min,
         # since it's the finest granularity and caps out fastest per API call)
         start_ms = max(bar_1h_times[0], bar_15m_times[0])
-        end_ms = min(bar_1h_times[-1], bar_15m_times[-1])
+        end_ms = min(bar_1h_times[-1], bar_15m_times[-1], window_end_ms)
+        if window_start_ms:
+            start_ms = max(start_ms, window_start_ms)
         step_ms = checkpoint_hours * 3600 * 1000
         checkpoint = start_ms + step_ms * 20  # skip the first ~20 checkpoints so bars_up_to has enough history
         while checkpoint < end_ms - step_ms:  # leave room for a forward window to resolve against
@@ -272,6 +300,14 @@ def _print_report(results: list[dict]) -> None:
     print(f"\n{'-' * 60}")
     print(f"OVERALL: {total_signals} signals — WIN {total_wins} / LOSS {total_losses} / "
           f"EXPIRED {total_expired} — win rate {overall_win_rate}%")
+
+    for direction in ("BUY", "SELL"):
+        dir_rows = [r for r in results if r.get("direction") == direction and r.get("outcome")]
+        d_wins = sum(1 for r in dir_rows if r["outcome"] == "WIN")
+        d_losses = sum(1 for r in dir_rows if r["outcome"] == "LOSS")
+        d_decided = d_wins + d_losses
+        d_rate = round(d_wins / d_decided * 100, 1) if d_decided else None
+        print(f"  {direction}: {len(dir_rows)} signals — WIN {d_wins} / LOSS {d_losses} — win rate {d_rate}%")
     print(f"{'-' * 60}")
     print("""
 Caveats — read before trusting this number:
@@ -294,7 +330,15 @@ if __name__ == "__main__":
     parser.add_argument("--pairs", default="BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT")
     parser.add_argument("--checkpoint-hours", type=int, default=2)
     parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--min-age-days", type=float, default=0,
+                         help="Only test checkpoints at least this many days old")
+    parser.add_argument("--max-age-days", type=float, default=None,
+                         help="Only test checkpoints at most this many days old (unset = no upper bound)")
+    parser.add_argument("--history-pages", type=int, default=2,
+                         help="15min kline pages to fetch (2 = ~20.8 days, 4 = ~41.6 days)")
     args = parser.parse_args()
 
     run_backtest([p.strip() for p in args.pairs.split(",") if p.strip()],
-                  args.checkpoint_hours, args.workers)
+                  args.checkpoint_hours, args.workers,
+                  min_age_days=args.min_age_days, max_age_days=args.max_age_days,
+                  history_pages=args.history_pages)
