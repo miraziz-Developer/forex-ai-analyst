@@ -132,8 +132,9 @@ def _maybe_send_daily_digest(telegram_bot_token: str, telegram_chat_id: str) -> 
         "Kunlik hisobot",
         f"Ochiq signallar: {stats['open_signals']}",
         f"Barcha vaqt — G'alaba: {all_time.get('WIN', 0)}, Zarar: {all_time.get('LOSS', 0)}, "
-        f"Muddati o'tgan: {all_time.get('EXPIRED', 0)}, Foiz: {all_time['win_rate_pct']}%",
+        f"Muddati o'tgan: {all_time.get('EXPIRED', 0)}, Foiz: {all_time['win_rate_pct']}%, "
+        f"Real P&L: {all_time['realized_pnl_usdt']:+.2f} USDT",
         f"So'nggi 30 kun — G'alaba: {last_30.get('WIN', 0)}, Zarar: {last_30.get('LOSS', 0)}, "
-        f"Foiz: {last_30['win_rate_pct']}%",
+        f"Foiz: {last_30['win_rate_pct']}%, Real P&L: {last_30['realized_pnl_usdt']:+.2f} USDT",
     ]
     send_telegram_message("\n".join(lines), telegram_bot_token, telegram_chat_id)

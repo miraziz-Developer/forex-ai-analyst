@@ -101,6 +101,14 @@ def log_signal(pair: str, direction: str, entry_price: float, target_price: floa
     return int(result["last_insert_rowid"])
 
 
+def has_open_signal(pair: str) -> bool:
+    """DB-backed (not in-memory) so this survives restarts/redeploys — without
+    it, a redeploy mid-setup could re-signal (and re-execute) the same TRADE
+    WATCH the in-memory version would have already deduped."""
+    result = _execute("SELECT count(*) AS n FROM signals WHERE pair = ? AND outcome IS NULL", [pair])
+    return _rows_as_dicts(result)[0]["n"] > 0
+
+
 def get_open_signals() -> list[dict]:
     result = _execute("SELECT * FROM signals WHERE outcome IS NULL ORDER BY signal_time")
     rows = _rows_as_dicts(result)
@@ -117,7 +125,10 @@ def resolve_signal(signal_id: int, outcome: str, price: float) -> None:
 
 
 def get_stats() -> dict:
-    result = _execute("SELECT outcome, signal_time FROM signals WHERE outcome IS NOT NULL")
+    result = _execute(
+        """SELECT outcome, signal_time, direction, entry_price, outcome_price, broker_qty
+           FROM signals WHERE outcome IS NOT NULL"""
+    )
     rows = _rows_as_dicts(result)
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
@@ -132,14 +143,30 @@ def get_stats() -> dict:
         decided = wins + losses
         return round(wins / decided * 100, 1) if decided else None
 
-    all_time = _counts(rows)
-    last_30d = _counts([r for r in rows if datetime.fromisoformat(r["signal_time"]) > cutoff])
+    def _realized_pnl_usdt(rows: list[dict]) -> float:
+        """Real P&L only, from signals that actually had a BingX order (broker_qty
+        set) — analysis-only signals never moved real (demo) money. This is what
+        actually answers 'is this profitable', more directly than win rate alone."""
+        total = 0.0
+        for row in rows:
+            if not row.get("broker_qty"):
+                continue
+            sign = 1 if row["direction"] == "BUY" else -1
+            total += (row["outcome_price"] - row["entry_price"]) * row["broker_qty"] * sign
+        return round(total, 4)
+
+    all_time_rows = rows
+    last_30d_rows = [r for r in rows if datetime.fromisoformat(r["signal_time"]) > cutoff]
+    all_time = _counts(all_time_rows)
+    last_30d = _counts(last_30d_rows)
 
     open_result = _execute("SELECT count(*) AS n FROM signals WHERE outcome IS NULL")
     open_count = _rows_as_dicts(open_result)[0]["n"]
 
     return {
         "open_signals": open_count,
-        "all_time": {**all_time, "win_rate_pct": _win_rate(all_time)},
-        "last_30_days": {**last_30d, "win_rate_pct": _win_rate(last_30d)},
+        "all_time": {**all_time, "win_rate_pct": _win_rate(all_time),
+                     "realized_pnl_usdt": _realized_pnl_usdt(all_time_rows)},
+        "last_30_days": {**last_30d, "win_rate_pct": _win_rate(last_30d),
+                          "realized_pnl_usdt": _realized_pnl_usdt(last_30d_rows)},
     }

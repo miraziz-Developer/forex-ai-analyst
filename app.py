@@ -169,9 +169,6 @@ def extract_price(analysis: str, label: str) -> float | None:
     return None
 
 
-_last_recommendation: dict[str, str] = {}
-
-
 def analyze_and_notify(symbol: str) -> dict:
     """Shared pipeline: trading-window check -> fetch bars -> full AI read -> Telegram
     only when the AI itself calls a new TRADE WATCH. Runs on every scheduler tick for
@@ -196,12 +193,15 @@ def analyze_and_notify(symbol: str) -> dict:
     recommendation = extract_recommendation(analysis)
     logger.info("%s verdict: %s", symbol, recommendation)
 
-    previous = _last_recommendation.get(symbol)
-    _last_recommendation[symbol] = recommendation
-
-    if recommendation != "TRADE_WATCH" or previous == "TRADE_WATCH":
-        # either nothing worth trading, or this is the same setup we already signaled
+    if recommendation != "TRADE_WATCH":
         return {"status": "no_signal", "recommendation": recommendation}
+
+    if storage.has_open_signal(symbol):
+        # already have an open, unresolved signal for this pair — don't stack
+        # another one on top. DB-backed (not in-memory) so this holds even
+        # across a redeploy mid-setup, unlike a plain in-process dedup would.
+        logger.info("%s: TRADE_WATCH but already has an open signal, skipping", symbol)
+        return {"status": "no_signal", "recommendation": recommendation, "reason": "already open"}
 
     message, executed = _log_and_maybe_execute_signal(symbol, bars, analysis, target_pct, stop_pct)
 
