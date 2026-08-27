@@ -71,6 +71,36 @@ def extract_recommendation(analysis: str) -> str:
     return "UNKNOWN"
 
 
+def extract_price(analysis: str, label: str) -> float | None:
+    for line in analysis.splitlines():
+        if label in line.upper():
+            match = re.search(r"[\d][\d,]*\.?\d*", line)
+            if match:
+                try:
+                    return float(match.group().replace(",", ""))
+                except ValueError:
+                    return None
+    return None
+
+
+def resolve_target_stop(entry_price: float, direction: str, ai_target: float | None, ai_stop: float | None,
+                         fallback_target_pct: float, fallback_stop_pct: float) -> tuple[float, float]:
+    """Same logic as app.py's _resolve_target_stop, kept in sync so the backtest
+    actually reflects live behavior — trust the model's structural levels unless
+    they fail a basic sanity check, then fall back to the ATR-based percentage."""
+    if ai_stop is not None and ai_target is not None:
+        stop_pct_actual = abs(entry_price - ai_stop) / entry_price * 100
+        on_correct_side = (direction == "BUY" and ai_stop < entry_price < ai_target) or \
+                           (direction == "SELL" and ai_target < entry_price < ai_stop)
+        sane_distance = 0.05 <= stop_pct_actual <= max(fallback_stop_pct * 6, 3.0)
+        if on_correct_side and sane_distance:
+            return ai_target, ai_stop
+
+    if direction == "BUY":
+        return entry_price * (1 + fallback_target_pct / 100), entry_price * (1 - fallback_stop_pct / 100)
+    return entry_price * (1 - fallback_target_pct / 100), entry_price * (1 + fallback_stop_pct / 100)
+
+
 def extract_direction(analysis: str) -> str | None:
     for line in analysis.splitlines():
         normalized = re.sub(r"[’‘'ʻʼ`´]", "", line).upper()
@@ -200,10 +230,9 @@ def run_checkpoint(symbol: str, checkpoint_ms: int, history: dict) -> dict | Non
 
     entry = bars_1h[0]["close"] if bars_1h else None
     entry = float(entry)
-    if direction == "BUY":
-        target, stop = entry * (1 + target_pct / 100), entry * (1 - stop_pct / 100)
-    else:
-        target, stop = entry * (1 - target_pct / 100), entry * (1 + stop_pct / 100)
+    ai_stop = extract_price(analysis, "STOP-LOSS NARXI")
+    ai_target = extract_price(analysis, "TAKE-PROFIT NARXI")
+    target, stop = resolve_target_stop(entry, direction, ai_target, ai_stop, target_pct, stop_pct)
 
     forward = sorted(
         (b for b in history["1h"] if b["datetime"] > checkpoint_ms),
