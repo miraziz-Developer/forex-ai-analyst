@@ -22,7 +22,7 @@ DEFAULT_LEVERAGE = int(os.environ.get("LEVERAGE", "3"))
 
 # BingX requires quantity rounded to each contract's precision; hardcoded for
 # our small fixed pair set rather than an extra API call per order.
-QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 3}
+QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 3, "SOL-USDT": 2, "XRP-USDT": 0, "BNB-USDT": 2}
 
 
 def _signed_request(method: str, path: str, params: dict) -> dict:

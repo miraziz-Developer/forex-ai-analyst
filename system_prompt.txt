@@ -23,7 +23,7 @@ exactly.
 - Configured target/stop percentages
 
 ### Trading rules you are analyzing against
-- Pairs covered: BTC-USDT, ETH-USDT (perpetual futures, USDT-margined)
+- Pairs covered: BTC-USDT, ETH-USDT, SOL-USDT, XRP-USDT, BNB-USDT (perpetual futures, USDT-margined)
 - Market is 24/7 — there is no weekly close or session gap like forex
 - Bias timeframes: 4-hour and 1-hour candles
 - Entry timeframes: 15-minute and 5-minute candles

@@ -12,7 +12,7 @@ from notifier import send_telegram_message
 
 logger = logging.getLogger(__name__)
 
-WATCH_PAIRS = [p.strip() for p in os.environ.get("WATCH_PAIRS", "BTC-USDT,ETH-USDT").split(",") if p.strip()]
+WATCH_PAIRS = [p.strip() for p in os.environ.get("WATCH_PAIRS", "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT").split(",") if p.strip()]
 POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "20"))
 RESOLVER_INTERVAL_MINUTES = int(os.environ.get("RESOLVER_INTERVAL_MINUTES", "15"))
 SIGNAL_EXPIRY_HOURS = int(os.environ.get("SIGNAL_EXPIRY_HOURS", "24"))
