@@ -25,12 +25,19 @@ _RETRY_AFTER_RE = re.compile(r"retry after time:\s*(\d+)")
 
 def _get_klines_with_retry(symbol: str, interval: str, outputsize: int) -> dict:
     for attempt in range(2):
-        response = requests.get(
-            f"{BINGX_BASE_URL}/openApi/swap/v2/quote/klines",
-            params={"symbol": symbol, "interval": interval, "limit": outputsize},
-            timeout=10,
-        )
-        response.raise_for_status()
+        try:
+            response = requests.get(
+                f"{BINGX_BASE_URL}/openApi/swap/v2/quote/klines",
+                params={"symbol": symbol, "interval": interval, "limit": outputsize},
+                timeout=20,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            if attempt == 0:
+                logger.warning("Network error fetching %s %s, retrying once: %s", symbol, interval, exc)
+                time.sleep(3)
+                continue
+            raise
         data = response.json()
         msg = str(data.get("msg", ""))
         if data.get("code") == 109400 and "within" in msg and attempt == 0:

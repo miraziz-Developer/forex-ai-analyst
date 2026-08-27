@@ -68,12 +68,16 @@ def extract_direction(analysis: str) -> str | None:
 
 
 def fetch_history(symbol: str) -> dict[str, list[dict]]:
-    """One bulk pull per timeframe (most-recent-first, like the live path)."""
-    return {
-        "4h": fetch_bars(symbol, "4h", outputsize=1000),
-        "1h": fetch_bars(symbol, "1h", outputsize=1000),
-        "15min": fetch_bars(symbol, "15m", outputsize=1000),
-    }
+    """One bulk pull per timeframe (most-recent-first, like the live path). A
+    failure on one timeframe/pair doesn't kill the whole backtest run."""
+    history = {}
+    for label, interval in (("4h", "4h"), ("1h", "1h"), ("15min", "15m")):
+        try:
+            history[label] = fetch_bars(symbol, interval, outputsize=1000)
+        except Exception as exc:
+            print(f"  {symbol} {label}: fetch failed ({exc}), skipping this timeframe")
+            history[label] = []
+    return history
 
 
 def _bars_up_to(bars: list[dict], checkpoint_ms: int, count: int) -> list[dict]:
