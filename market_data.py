@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 import requests
@@ -19,6 +20,9 @@ _CACHE_TTL_SECONDS = {"4h": 4 * 3600, "1h": 3600, "15min": 15 * 60, "5min": 5 * 
 _cache: dict[tuple, tuple[float, list]] = {}
 
 
+_RETRY_AFTER_RE = re.compile(r"retry after time:\s*(\d+)")
+
+
 def _get_klines_with_retry(symbol: str, interval: str, outputsize: int) -> dict:
     for attempt in range(2):
         response = requests.get(
@@ -28,9 +32,16 @@ def _get_klines_with_retry(symbol: str, interval: str, outputsize: int) -> dict:
         )
         response.raise_for_status()
         data = response.json()
-        if data.get("code") == 109400 and "within" in str(data.get("msg", "")) and attempt == 0:
-            logger.warning("BingX kline rate limit hit for %s %s, waiting 20s and retrying once", symbol, interval)
-            time.sleep(20)
+        msg = str(data.get("msg", ""))
+        if data.get("code") == 109400 and "within" in msg and attempt == 0:
+            wait_seconds = 20.0
+            match = _RETRY_AFTER_RE.search(msg)
+            if match:
+                retry_at_epoch_s = int(match.group(1)) / 1000
+                wait_seconds = max(retry_at_epoch_s - time.time(), 1) + 2  # +2s safety margin
+            logger.warning("BingX kline rate limit hit for %s %s, waiting %.1fs and retrying once",
+                            symbol, interval, wait_seconds)
+            time.sleep(wait_seconds)
             continue
         if data.get("code") != 0:
             raise RuntimeError(f"BingX kline error for {symbol} {interval}: {data.get('msg')}")
