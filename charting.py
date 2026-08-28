@@ -7,6 +7,12 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# The container only ships DejaVu Sans (regular/bold only, no medium/semibold),
+# so matplotlib's font substitution logs a WARNING per missing weight it tries
+# on every single chart render — dozens of harmless lines each cycle. The
+# fallback (using 400/700) is correct either way; this just silences the noise.
+logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+
 
 def bars_to_chart_base64(bars: list[dict], title: str = "") -> str | None:
     """Renders a candlestick+volume chart from our bar format (most-recent-first
