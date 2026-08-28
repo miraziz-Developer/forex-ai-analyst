@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,6 +19,14 @@ SIGNAL_EXPIRY_HOURS = int(os.environ.get("SIGNAL_EXPIRY_HOURS", "24"))
 
 _last_digest_date: date | None = None
 
+# Watchdog: tracks the last analysis_job tick where at least one pair was
+# checked without raising. If every pair keeps erroring (bad API key, BingX/
+# Azure outage, etc.) the process itself stays alive and /health stays "ok" —
+# this is the only signal that catches that specific silent-failure case.
+_last_successful_check: datetime | None = None
+_last_watchdog_alert: datetime | None = None
+_WATCHDOG_ALERT_COOLDOWN_MINUTES = 60
+
 
 def start_scheduler(on_check: Callable[[str], dict],
                      telegram_bot_token: str, telegram_chat_id: str) -> BackgroundScheduler:
@@ -29,9 +37,11 @@ def start_scheduler(on_check: Callable[[str], dict],
     scheduler = BackgroundScheduler(timezone="UTC")
 
     def analysis_job():
+        global _last_successful_check
         for pair in WATCH_PAIRS:
             try:
                 on_check(pair)
+                _last_successful_check = datetime.now(timezone.utc)
             except Exception:
                 logger.exception("Scheduler: check failed for %s", pair)
 
@@ -44,6 +54,10 @@ def start_scheduler(on_check: Callable[[str], dict],
             _maybe_send_daily_digest(telegram_bot_token, telegram_chat_id)
         except Exception:
             logger.exception("Scheduler: daily digest failed")
+        try:
+            _check_watchdog(telegram_bot_token, telegram_chat_id)
+        except Exception:
+            logger.exception("Scheduler: watchdog check failed")
 
     scheduler.add_job(analysis_job, "interval", minutes=POLL_INTERVAL_MINUTES,
                        next_run_time=datetime.now(timezone.utc))
@@ -113,6 +127,35 @@ def _resolve_one(signal: dict) -> None:
                                   signal["id"], symbol)
         storage.resolve_signal(signal["id"], "EXPIRED", latest_price)
         logger.info("Signal %s (%s) resolved: EXPIRED at %s", signal["id"], symbol, latest_price)
+
+
+def _check_watchdog(telegram_bot_token: str, telegram_chat_id: str) -> None:
+    """Alerts if analysis_job hasn't completed a single successful pair check in
+    a while — catches the case where the process is alive (/health still says
+    "ok") but every check has been silently erroring (expired API key, BingX/
+    Azure outage, etc.), which nothing else here would ever surface."""
+    global _last_watchdog_alert
+    now = datetime.now(timezone.utc)
+
+    if _last_successful_check is None:
+        return  # still starting up — first analysis_job tick hasn't landed yet
+
+    stale_for = now - _last_successful_check
+    threshold = timedelta(minutes=POLL_INTERVAL_MINUTES * 3)
+    if stale_for < threshold:
+        return
+
+    if _last_watchdog_alert and (now - _last_watchdog_alert) < timedelta(minutes=_WATCHDOG_ALERT_COOLDOWN_MINUTES):
+        return  # already alerted recently, don't spam every 15 min while it stays down
+
+    _last_watchdog_alert = now
+    hours = stale_for.total_seconds() / 3600
+    send_telegram_message(
+        f"⚠️ Ogohlantirish: {hours:.1f} soatdan beri birorta ham juftlik muvaffaqiyatli "
+        f"tekshirilmadi (barcha urinishlar xatolik bilan tugadi). Render loglarini tekshiring.",
+        telegram_bot_token, telegram_chat_id,
+    )
+    logger.warning("Watchdog: no successful analysis check in %.1f hours — alert sent", hours)
 
 
 def _bar_time(bar: dict) -> datetime:

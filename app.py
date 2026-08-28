@@ -202,7 +202,8 @@ def analyze_and_notify(symbol: str) -> dict:
         logger.info("%s: TRADE_WATCH but already has an open signal, skipping", symbol)
         return {"status": "no_signal", "recommendation": recommendation, "reason": "already open"}
 
-    message, executed = _log_and_maybe_execute_signal(symbol, bars, analysis, target_pct, stop_pct)
+    message, executed = _log_and_maybe_execute_signal(
+        symbol, bars, analysis, target_pct, stop_pct, institutional.get("funding_rate_pct"))
 
     sent = send_telegram_message(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
     logger.info("Signal sent for %s (telegram sent: %s, executed: %s)", symbol, sent, executed)
@@ -237,7 +238,8 @@ def _resolve_target_stop(entry_price: float, direction: str, ai_target: float | 
 
 
 def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
-                                   target_pct: float, stop_pct: float) -> tuple[str, bool]:
+                                   target_pct: float, stop_pct: float,
+                                   funding_rate_pct: float | None = None) -> tuple[str, bool]:
     """Computes entry/target/stop, optionally places a real BingX demo order, logs
     the signal (with the broker order ID/qty if one was opened), and returns the
     Telegram message text (analysis + an explicit execution status line) plus
@@ -280,7 +282,7 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
 
     try:
         signal_id = storage.log_signal(symbol, direction, entry_price, target_price, stop_price,
-                                        analysis, broker_order_id, broker_qty)
+                                        analysis, broker_order_id, broker_qty, funding_rate_pct)
         logger.info("%s: logged signal id=%s dir=%s entry=%s target=%s stop=%s order_id=%s qty=%s",
                      symbol, signal_id, direction, entry_price, target_price, stop_price,
                      broker_order_id, broker_qty)

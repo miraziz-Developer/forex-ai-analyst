@@ -78,6 +78,7 @@ def init_db() -> None:
     for migration in (
         "ALTER TABLE signals ADD COLUMN oanda_trade_id TEXT",  # generic broker order id (legacy name)
         "ALTER TABLE signals ADD COLUMN broker_qty REAL",
+        "ALTER TABLE signals ADD COLUMN funding_rate_pct REAL",  # BingX funding rate at signal open, for P&L estimate
     ):
         try:
             _execute(migration)
@@ -89,14 +90,15 @@ def init_db() -> None:
 
 def log_signal(pair: str, direction: str, entry_price: float, target_price: float,
                stop_price: float, analysis_text: str,
-               broker_order_id: str | None = None, broker_qty: float | None = None) -> int:
+               broker_order_id: str | None = None, broker_qty: float | None = None,
+               funding_rate_pct: float | None = None) -> int:
     signal_time = datetime.now(timezone.utc).isoformat()
     result = _execute(
         """INSERT INTO signals (pair, direction, entry_price, target_price, stop_price,
-                                 signal_time, analysis_text, oanda_trade_id, broker_qty)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                 signal_time, analysis_text, oanda_trade_id, broker_qty, funding_rate_pct)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [pair, direction, entry_price, target_price, stop_price, signal_time, analysis_text,
-         broker_order_id, broker_qty],
+         broker_order_id, broker_qty, funding_rate_pct],
     )
     return int(result["last_insert_rowid"])
 
@@ -124,9 +126,17 @@ def resolve_signal(signal_id: int, outcome: str, price: float) -> None:
     )
 
 
+# BingX USDT-perpetual taker fee — market-order entry and TP/SL-triggered exit are
+# both taker fills. Actual rate can differ slightly by VIP tier; this is the
+# standard/default rate, so realized_pnl_usdt is an estimate, not exchange-exact.
+_TAKER_FEE_PCT = 0.05
+_FUNDING_INTERVAL_HOURS = 8  # BingX perpetuals settle funding every 8h while a position is open
+
+
 def get_stats() -> dict:
     result = _execute(
-        """SELECT outcome, signal_time, direction, entry_price, outcome_price, broker_qty
+        """SELECT outcome, signal_time, outcome_time, direction, entry_price, outcome_price,
+                  broker_qty, funding_rate_pct
            FROM signals WHERE outcome IS NOT NULL"""
     )
     rows = _rows_as_dicts(result)
@@ -146,13 +156,36 @@ def get_stats() -> dict:
     def _realized_pnl_usdt(rows: list[dict]) -> float:
         """Real P&L only, from signals that actually had a BingX order (broker_qty
         set) — analysis-only signals never moved real (demo) money. This is what
-        actually answers 'is this profitable', more directly than win rate alone."""
+        actually answers 'is this profitable', more directly than win rate alone.
+        Nets out the round-trip taker fee and an estimated funding cost (using the
+        funding rate captured at signal-open, held constant for the trade's
+        duration — funding actually re-settles/re-prices every 8h, so this is a
+        reasonable estimate, not an exact replay of what BingX charged)."""
         total = 0.0
         for row in rows:
-            if not row.get("broker_qty"):
+            qty = row.get("broker_qty")
+            if not qty:
                 continue
             sign = 1 if row["direction"] == "BUY" else -1
-            total += (row["outcome_price"] - row["entry_price"]) * row["broker_qty"] * sign
+            entry_price, outcome_price = row["entry_price"], row["outcome_price"]
+
+            price_pnl = (outcome_price - entry_price) * qty * sign
+
+            entry_notional = entry_price * qty
+            exit_notional = outcome_price * qty
+            fee_cost = (entry_notional + exit_notional) * (_TAKER_FEE_PCT / 100)
+
+            funding_cost = 0.0
+            funding_rate_pct = row.get("funding_rate_pct")
+            if funding_rate_pct is not None and row.get("outcome_time"):
+                hours_held = (datetime.fromisoformat(row["outcome_time"])
+                              - datetime.fromisoformat(row["signal_time"])).total_seconds() / 3600
+                periods = int(hours_held // _FUNDING_INTERVAL_HOURS)
+                if periods > 0:
+                    # positive rate: longs pay shorts; negative rate: shorts pay longs
+                    funding_cost = funding_rate_pct / 100 * entry_notional * periods * sign
+
+            total += price_pnl - fee_cost - funding_cost
         return round(total, 4)
 
     all_time_rows = rows
