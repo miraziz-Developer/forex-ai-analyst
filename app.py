@@ -13,7 +13,7 @@ import storage
 from charting import bars_to_chart_base64
 from indicators import atr_pct
 from institutional_data import fetch_institutional_context, format_institutional_context
-from market_data import fetch_multi_timeframe
+from market_data import fetch_bars, fetch_multi_timeframe
 from notifier import send_telegram_message
 from scheduler import start_scheduler
 
@@ -89,6 +89,76 @@ def in_trading_window(now_utc: datetime) -> bool:
     return days_ok and window_ok
 
 
+def _pct_change(bars: list[dict], bars_back: int) -> float | None:
+    """% change from `bars_back` bars ago (bars[bars_back]) to the most recent
+    close (bars[0]). Bars are most-recent-first."""
+    if len(bars) <= bars_back:
+        return None
+    old_close, new_close = bars[bars_back]["close"], bars[0]["close"]
+    if not old_close:
+        return None
+    return (new_close - old_close) / old_close * 100
+
+
+def build_market_context_text(symbol: str) -> str:
+    """BTC still leads the whole crypto market's direction most of the time —
+    a real trader always has a 'what's BTC doing' backdrop even when trading
+    an altcoin. Cheap to fetch: BTC-USDT's 1h/4h bars get refreshed every
+    cycle anyway (BTC is itself one of the watched pairs), so this almost
+    always hits market_data's cache rather than spending extra rate-limit
+    budget. Deliberately just raw % moves, not a structure call — the model
+    already reads structure far better from the actual chart than a % number
+    could summarize; this is just the fast 'which way is the tide' context."""
+    if symbol == "BTC-USDT":
+        return ""  # BTC's own analysis already covers this directly
+    try:
+        btc_1h = fetch_bars("BTC-USDT", "1h", outputsize=24)
+        btc_4h = fetch_bars("BTC-USDT", "4h", outputsize=6)
+    except Exception:
+        logger.exception("Failed to fetch BTC market context")
+        return "Global market context (BTC-USDT): unavailable this cycle.\n\n"
+
+    change_4h = _pct_change(btc_1h, 4)
+    change_24h = _pct_change(btc_4h, 5)
+    if change_4h is None and change_24h is None:
+        return ""
+
+    parts = []
+    if change_4h is not None:
+        parts.append(f"last 4h {change_4h:+.2f}%")
+    if change_24h is not None:
+        parts.append(f"last ~24h {change_24h:+.2f}%")
+    return (
+        f"Global market context — BTC-USDT (crypto market's usual directional leader) "
+        f"is {', '.join(parts)}. Weigh this as backdrop: an altcoin setup that fights a "
+        f"strongly moving BTC is inherently higher risk, one that aligns with it is "
+        f"lower risk — but this is context, not a gate on its own.\n\n"
+    )
+
+
+def build_session_context_text(now_utc: datetime) -> str:
+    """Crypto trades 24/7, but liquidity isn't flat across the day — thinner
+    books mean wicks/fakeouts are more common and a 'clean' break is more
+    likely to be noise. A real trader carries this awareness; give the model
+    the same. Rough UTC session bands, not exact, just the general shape."""
+    hour = now_utc.hour
+    is_weekend = now_utc.weekday() >= 5  # Saturday=5, Sunday=6
+
+    if 12 <= hour < 16:
+        session = "London/Nyu-York ustma-ust tushishi — kunning eng yuqori likvidlik oynasi"
+    elif 7 <= hour < 12 or 16 <= hour < 21:
+        session = "London yoki Nyu-York sessiyasi — normal likvidlik"
+    elif 0 <= hour < 7:
+        session = "Osiyo sessiyasi — odatda pastroq likvidlik, ba'zan diapazonda harakat"
+    else:  # 21:00-24:00 UTC
+        session = "Nyu-York yopilgandan keyingi, Osiyo hali to'liq boshlanmagan oyna — odatda eng past likvidlik kunning"
+
+    weekend_note = " Dam olish kuni — hajmlar odatda haftaning ish kunlaridan past." if is_weekend else ""
+    return (f"Session context: {now_utc.strftime('%H:%M')} UTC, {session}.{weekend_note} "
+            f"Past likvidlik oynasida sindirish/breakout'larga ko'proq shubha bilan qarang — "
+            f"soxta sindirish (fakeout) ehtimoli yuqoriroq.\n\n")
+
+
 def build_analysis_text(symbol: str, bars: dict, institutional: dict, target_pct: float, stop_pct: float) -> str:
     return (
         f"Pair: {symbol} (perpetual futures, USDT-margined)\n"
@@ -96,6 +166,8 @@ def build_analysis_text(symbol: str, bars: dict, institutional: dict, target_pct
         f"Configured target: {target_pct:.3f}% , max stop: {stop_pct:.3f}% "
         f"(volatility-adjusted: {ATR_MULTIPLIER}x current 1H ATR, {REWARD_RISK_RATIO}:1 reward:risk)\n\n"
         f"{format_institutional_context(institutional)}\n\n"
+        f"{build_session_context_text(datetime.now(timezone.utc))}"
+        f"{build_market_context_text(symbol)}"
         f"{build_trade_history_text(symbol)}\n\n"
         f"1D bars (macro trend context, most recent first):\n{json.dumps(bars.get('1d', [])[:30])}\n\n"
         f"4H bars (most recent first):\n{json.dumps(bars.get('4h', [])[:20])}\n\n"
@@ -189,6 +261,21 @@ def build_trade_history_text(symbol: str) -> str:
     return "\n".join(lines)
 
 
+_CONFIDENCE_MULTIPLIERS = {"YUQORI": 1.0, "ORTA": 0.7, "PAST": 0.45}
+
+
+def extract_confidence(analysis: str) -> str | None:
+    """Reads the model's own 'Ishonch darajasi: ...' line. Returns 'YUQORI',
+    'ORTA', 'PAST', or None if unparseable (treated as ORTA — see caller)."""
+    for line in analysis.splitlines():
+        normalized = re.sub(r"[’‘'ʻʼ`´]", "", line).upper()
+        if "ISHONCH DARAJASI" in normalized:
+            for level in ("YUQORI", "ORTA", "PAST"):
+                if level in normalized:
+                    return level
+    return None
+
+
 def extract_price(analysis: str, label: str) -> float | None:
     """Reads a numeric price off a labeled line (e.g. 'Stop-loss narxi: 63,850')."""
     for line in analysis.splitlines():
@@ -271,6 +358,20 @@ def _resolve_target_stop(entry_price: float, direction: str, ai_target: float | 
     return target_price, stop_price, "atr_fallback"
 
 
+def _correlation_size_multiplier(direction: str) -> tuple[float, int]:
+    """The 5 watched pairs move together most of the time — 3 simultaneous BUYs
+    isn't diversification, it's the same directional bet 3x over. A real trader
+    sizes down as their same-direction exposure stacks up, even across
+    'different' correlated assets. Returns (multiplier, same_direction_count).
+    Formula: 1/(1+n), floored at 0.3x so it never goes to a token size."""
+    try:
+        same_direction = sum(1 for s in storage.get_open_signals() if s["direction"] == direction)
+    except Exception:
+        logger.exception("Failed to compute correlation exposure — defaulting to full size")
+        return 1.0, 0
+    return max(0.3, 1 / (1 + same_direction)), same_direction
+
+
 def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
                                    target_pct: float, stop_pct: float,
                                    funding_rate_pct: float | None = None) -> tuple[str, bool]:
@@ -301,14 +402,24 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
 
     if AUTO_EXECUTE_TRADES:
         try:
-            quantity = broker.round_quantity(symbol, POSITION_SIZE_USDT / entry_price)
+            correlation_mult, same_direction_count = _correlation_size_multiplier(direction)
+            confidence = extract_confidence(analysis)
+            confidence_mult = _CONFIDENCE_MULTIPLIERS.get(confidence, 0.7)  # unparsed -> treat as ORTA
+            size_multiplier = correlation_mult * confidence_mult
+
+            position_size_usdt = POSITION_SIZE_USDT * size_multiplier
+            quantity = broker.round_quantity(symbol, position_size_usdt / entry_price)
             fill = broker.place_market_order(symbol, direction, quantity, target_price, stop_price)
             broker_order_id = fill["order_id"]
             broker_qty = quantity
             executed = True
+
+            note_parts = [f"ishonch: {confidence or 'noaniq'} (x{confidence_mult:.2f})"]
+            if same_direction_count:
+                note_parts.append(f"{same_direction_count} bir xil yo'nalishdagi ochiq pozitsiya (x{correlation_mult:.2f})")
             execution_line = (
                 f"Ijro: BAJARILDI ✅ (BingX demo) — order #{broker_order_id}, "
-                f"narx {fill['fill_price']}, hajm {quantity}"
+                f"narx {fill['fill_price']}, hajm {quantity} ({', '.join(note_parts)})"
             )
         except Exception as exc:
             logger.exception("%s: order execution failed", symbol)

@@ -37,6 +37,11 @@ major news event) — not as a checklist every item must tick.
   real structure you find (see Step 7) — the percentage just flags if that
   structural distance has drifted unreasonably far from what a sane
   volatility-adjusted setup should look like
+- Session/liquidity context (current UTC time and roughly which trading
+  session is active) — weigh breakouts more skeptically in low-liquidity windows
+- For altcoins, BTC-USDT's recent % move as backdrop — it's the market's usual
+  directional leader; a setup fighting a strongly-moving BTC is higher risk
+- This pair's own recent resolved-trade history (see the dedicated section below)
 
 ### Recent trade history for this pair
 You'll see a short list of the last few *resolved* trades on this specific
@@ -236,11 +241,22 @@ AGAR "SAVDONI KUZATISH" BO'LSA:
 - Stop-loss narxi: [aniq raqam — struktura asosida: order block chekkasi / likvidlik wick / swing nuqta]
 - Take-profit narxi: [aniq raqam — keyingi real struktura darajasi]
 - Foyda/xavf nisbati: [hisoblangan qiymat, masalan "2.3:1"]
+- Ishonch darajasi: [YUQORI / ORTA / PAST]
 ```
 
 "Yo'nalish" har doim "SAVDONI KUZATISH" bilan birga, aniq ko'rsatilishi shart —
 bu maydon dastur tomonidan avtomatik o'qiladi, shuning uchun aynan shu ikki
 so'zdan ("SOTIB OLISH" yoki "SOTISH") birini tanlang, boshqa so'z ishlatmang.
+
+"Ishonch darajasi" ham dastur tomonidan avtomatik o'qiladi (pozitsiya hajmini
+moslashtirish uchun) — aynan shu uch so'zdan ("YUQORI", "ORTA" yoki "PAST")
+birini tanlang. Bu — realligingizning ochiq tan olinishi, "TAVSIYA"ni
+o'zgartirmaydi: agar biror jihat sizni ikkilantirsa (masalan counter-trend,
+4S to'liq mos emas, yaqin fundamental xavf) lekin struktura baribir yetarli
+aniq bo'lsa, TRADE WATCH qoldirib ISHONCH DARAJASIni PAST yoki ORTA deb
+belgilang — bu hajm kichikroq bo'lishiga olib keladi, signalning o'zi rad
+etilmaydi. Faqat hamma narsa mos kelib, struktura toza, macro/institutional
+qarshilik bo'lmasa — YUQORI belgilang.
 
 If conditions change intra-session, treat each check-in as a fresh Step 1–8
 pass — don't assume a prior verdict still holds.
