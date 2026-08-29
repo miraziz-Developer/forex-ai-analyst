@@ -149,8 +149,21 @@ free [UptimeRobot](https://uptimerobot.com) monitor pinging `/health` every
 ## 5. Execution details (BingX demo)
 With `AUTO_EXECUTE_TRADES=true`:
 - Leverage is set to `LEVERAGE` (default 3x) before each order
-- Position size is `POSITION_SIZE_USDT` (default 100) worth of margin,
-  converted to a contract quantity at the current price
+- Position size is **risk-based**, not fixed: sized so that if the stop is
+  hit, the loss equals `RISK_PCT_PER_TRADE`% (default 1.5%) of a *simulated*
+  equity — `STARTING_EQUITY_USDT` (default 200, the capital you'd actually
+  plan to deposit for real) plus our own tracked realized P&L. Deliberately
+  **not** BingX's demo wallet balance, which starts at an unrealistic
+  ~$99,932 — sizing off that would simulate a $100k account instead of the
+  small real one you're actually planning for. Tighter structural stops get a
+  bigger position, wider stops a smaller one, same $ risk either way — capped
+  at `MAX_MARGIN_PCT_OF_EQUITY` (20%) of equity used as margin (so at 3x
+  leverage, effectively a ~60%-of-equity notional ceiling), and falls back to
+  the flat `POSITION_SIZE_USDT` if the P&L lookup itself fails. That base
+  size is then further scaled down by two multipliers: confidence
+  (`YUQORI`/`ORTA`/`PAST` from the model's own self-assessment, 1.0x/0.7x/0.45x)
+  and correlation (fewer $ per trade the more same-direction positions are
+  already open across the 5 — mostly correlated — pairs, floor 0.3x)
 - No cap on concurrent open positions (demo money — removed deliberately);
   the only per-pair limit is one open signal at a time (a pair won't
   re-signal until its current one resolves)
@@ -174,7 +187,7 @@ stop/target distance now vary per trade.
 - **Change trading window/days**: `TRADING_DAYS`, `TRADING_WINDOW_START/END` in `.env` (all UTC)
 - **Change the sanity-bound target/stop**: `ATR_MULTIPLIER`, `REWARD_RISK_RATIO`, or the `TARGET_PCT_STOP_PCT` fallback
 - **Change how long a signal stays open**: `SIGNAL_EXPIRY_HOURS`
-- **Change position size / leverage**: `POSITION_SIZE_USDT`, `LEVERAGE`
+- **Change position size / leverage**: `RISK_PCT_PER_TRADE` and `STARTING_EQUITY_USDT` (real sizing basis), `POSITION_SIZE_USDT` (fallback only), `LEVERAGE`
 
 ## 8. Reliability notes
 - BingX, Azure OpenAI, or Turso API failures are caught, logged, and skip that step without crashing

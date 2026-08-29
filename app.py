@@ -65,7 +65,20 @@ def compute_stop_target_pct(bars_1h: list[dict]) -> tuple[float, float]:
     return target_pct, stop_pct
 
 AUTO_EXECUTE_TRADES = os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true"
-POSITION_SIZE_USDT = float(os.environ.get("POSITION_SIZE_USDT", "100"))
+POSITION_SIZE_USDT = float(os.environ.get("POSITION_SIZE_USDT", "100"))  # fallback only, if equity calc fails
+RISK_PCT_PER_TRADE = float(os.environ.get("RISK_PCT_PER_TRADE", "1.5"))  # % of equity risked if stop is hit
+# NOT BingX's demo wallet balance (~$99,932 by default — an unrealistic size
+# that would make every trade's risk math simulate a $100k account). This is
+# the capital you'd actually plan to deposit for real, so sizing and P&L stay
+# a meaningful simulation of "what would happen with real money", not
+# BingX's inflated demo playground balance.
+STARTING_EQUITY_USDT = float(os.environ.get("STARTING_EQUITY_USDT", "200"))
+LEVERAGE = int(os.environ.get("LEVERAGE", "3"))
+# Ceiling expressed as max MARGIN used per trade (not raw notional) — a flat
+# % of notional makes no sense once leverage is in the picture (it would
+# either never bind at small equity or be meaninglessly loose at large
+# equity). 20% of equity as margin, at LEVERAGE x, is the actual notional cap.
+MAX_MARGIN_PCT_OF_EQUITY = 0.20
 
 WEEKDAY_CODES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
@@ -372,6 +385,35 @@ def _correlation_size_multiplier(direction: str) -> tuple[float, int]:
     return max(0.3, 1 / (1 + same_direction)), same_direction
 
 
+def _risk_based_position_size(stop_distance_pct: float) -> tuple[float, str]:
+    """Position notional such that, if the stop is hit, the loss equals
+    RISK_PCT_PER_TRADE % of equity — not a fixed dollar amount regardless of
+    account size. Tighter structural stops justify a bigger position (same $
+    risk); wider stops get a smaller one. 'Equity' here is STARTING_EQUITY_USDT
+    plus our own tracked realized P&L (not BingX's demo wallet balance — see
+    STARTING_EQUITY_USDT's definition for why), so this simulates what would
+    actually happen starting from the capital you plan to really deposit.
+    Capped at MAX_MARGIN_PCT_OF_EQUITY of equity used as margin (at LEVERAGE x,
+    that's the notional cap) as a hard ceiling — protects against a freak
+    very-tight stop blowing this up — and falls back to the flat
+    POSITION_SIZE_USDT if the P&L lookup itself fails. Returns (size_usdt, source)."""
+    try:
+        realized_pnl = storage.get_stats()["all_time"]["realized_pnl_usdt"]
+    except Exception:
+        logger.exception("Failed to fetch realized P&L for equity calc — falling back to flat POSITION_SIZE_USDT")
+        return POSITION_SIZE_USDT, "flat_fallback"
+
+    equity = max(STARTING_EQUITY_USDT + realized_pnl, 10.0)  # floor so a deep drawdown can't zero/invert sizing
+
+    if stop_distance_pct <= 0:
+        return POSITION_SIZE_USDT, "flat_fallback"
+
+    risk_based = equity * RISK_PCT_PER_TRADE / stop_distance_pct
+    notional_cap = equity * MAX_MARGIN_PCT_OF_EQUITY * LEVERAGE
+    capped = min(risk_based, notional_cap)
+    return max(capped, 10.0), "equity_risk"  # BingX's practical minimum trade size
+
+
 def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
                                    target_pct: float, stop_pct: float,
                                    funding_rate_pct: float | None = None) -> tuple[str, bool]:
@@ -407,14 +449,19 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
             confidence_mult = _CONFIDENCE_MULTIPLIERS.get(confidence, 0.7)  # unparsed -> treat as ORTA
             size_multiplier = correlation_mult * confidence_mult
 
-            position_size_usdt = POSITION_SIZE_USDT * size_multiplier
+            stop_distance_pct = abs(entry_price - stop_price) / entry_price * 100
+            base_size_usdt, size_source = _risk_based_position_size(stop_distance_pct)
+            position_size_usdt = base_size_usdt * size_multiplier
             quantity = broker.round_quantity(symbol, position_size_usdt / entry_price)
             fill = broker.place_market_order(symbol, direction, quantity, target_price, stop_price)
             broker_order_id = fill["order_id"]
             broker_qty = quantity
             executed = True
 
-            note_parts = [f"ishonch: {confidence or 'noaniq'} (x{confidence_mult:.2f})"]
+            size_basis = (f"risk-based, {RISK_PCT_PER_TRADE}% equity" if size_source == "equity_risk"
+                          else "fixed fallback")
+            note_parts = [f"asos: ${base_size_usdt:.0f} ({size_basis})",
+                          f"ishonch: {confidence or 'noaniq'} (x{confidence_mult:.2f})"]
             if same_direction_count:
                 note_parts.append(f"{same_direction_count} bir xil yo'nalishdagi ochiq pozitsiya (x{correlation_mult:.2f})")
             execution_line = (
