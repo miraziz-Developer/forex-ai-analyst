@@ -96,6 +96,7 @@ def build_analysis_text(symbol: str, bars: dict, institutional: dict, target_pct
         f"Configured target: {target_pct:.3f}% , max stop: {stop_pct:.3f}% "
         f"(volatility-adjusted: {ATR_MULTIPLIER}x current 1H ATR, {REWARD_RISK_RATIO}:1 reward:risk)\n\n"
         f"{format_institutional_context(institutional)}\n\n"
+        f"{build_trade_history_text(symbol)}\n\n"
         f"1D bars (macro trend context, most recent first):\n{json.dumps(bars.get('1d', [])[:30])}\n\n"
         f"4H bars (most recent first):\n{json.dumps(bars.get('4h', [])[:20])}\n\n"
         f"1H bars:\n{json.dumps(bars.get('1h', [])[:24])}\n\n"
@@ -153,6 +154,39 @@ def extract_direction(analysis: str) -> str | None:
             if "SOTISH" in normalized:
                 return "SELL"
     return None
+
+
+def extract_reasoning(analysis: str) -> str | None:
+    """Reads the model's own 'ASOSLASH: ...' line — used to give a future check
+    a one-line summary of *why* a past trade was taken, not just its outcome."""
+    for line in analysis.splitlines():
+        if line.upper().startswith("ASOSLASH"):
+            return line.split(":", 1)[1].strip() if ":" in line else line.strip()
+    return None
+
+
+def build_trade_history_text(symbol: str) -> str:
+    """Last few resolved trades for this pair, as soft context for the next
+    check — NOT a rule to extrapolate from (see system_prompt.txt for how the
+    model is told to use this). Sample per pair is small, so this is framed as
+    awareness, not a pattern."""
+    try:
+        history = storage.get_recent_resolved_signals(symbol, limit=5)
+    except Exception:
+        logger.exception("%s: failed to fetch trade history", symbol)
+        return "Recent trade history: unavailable this cycle."
+
+    if not history:
+        return "Recent trade history for this pair: none yet (no resolved trades)."
+
+    lines = ["Recent trade history for this pair (most recent first, small sample — see instructions):"]
+    for row in history:
+        reasoning = extract_reasoning(row.get("analysis_text") or "") or "(no reasoning captured)"
+        lines.append(
+            f"- {row['signal_time'][:16]} UTC — {row['direction']} @ {row['entry_price']} "
+            f"-> {row['outcome']} @ {row['outcome_price']}. Reasoning was: {reasoning[:220]}"
+        )
+    return "\n".join(lines)
 
 
 def extract_price(analysis: str, label: str) -> float | None:

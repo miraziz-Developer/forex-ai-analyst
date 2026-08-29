@@ -111,6 +111,23 @@ def has_open_signal(pair: str) -> bool:
     return _rows_as_dicts(result)[0]["n"] > 0
 
 
+def get_recent_resolved_signals(pair: str, limit: int = 5) -> list[dict]:
+    """Last N resolved signals for this pair, most recent first — fed back into
+    the next analysis as soft context (see system_prompt.txt) so the model has
+    some awareness of its own recent track record on this pair, not just a
+    blank slate every cycle. Deliberately NOT used to hard-code any rule from
+    this — the sample per pair is tiny, so this is framed to the model as
+    context to weigh, not a pattern to mechanically extrapolate from."""
+    result = _execute(
+        """SELECT direction, entry_price, target_price, stop_price, outcome, outcome_price,
+                  signal_time, analysis_text
+           FROM signals WHERE pair = ? AND outcome IS NOT NULL
+           ORDER BY signal_time DESC LIMIT ?""",
+        [pair, limit],
+    )
+    return _rows_as_dicts(result)
+
+
 def get_open_signals() -> list[dict]:
     result = _execute("SELECT * FROM signals WHERE outcome IS NULL ORDER BY signal_time")
     rows = _rows_as_dicts(result)
