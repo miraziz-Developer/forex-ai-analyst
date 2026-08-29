@@ -171,7 +171,7 @@ def build_trade_history_text(symbol: str) -> str:
     model is told to use this). Sample per pair is small, so this is framed as
     awareness, not a pattern."""
     try:
-        history = storage.get_recent_resolved_signals(symbol, limit=5)
+        history = storage.get_recent_resolved_signals(symbol, limit=15)
     except Exception:
         logger.exception("%s: failed to fetch trade history", symbol)
         return "Recent trade history: unavailable this cycle."

@@ -111,7 +111,7 @@ def has_open_signal(pair: str) -> bool:
     return _rows_as_dicts(result)[0]["n"] > 0
 
 
-def get_recent_resolved_signals(pair: str, limit: int = 5) -> list[dict]:
+def get_recent_resolved_signals(pair: str, limit: int = 15) -> list[dict]:
     """Last N resolved signals for this pair, most recent first — fed back into
     the next analysis as soft context (see system_prompt.txt) so the model has
     some awareness of its own recent track record on this pair, not just a
