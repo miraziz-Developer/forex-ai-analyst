@@ -127,21 +127,38 @@ and order blocks are far less reliable when the market has no clear direction.
 
 ### Step 4 — Smart Money / Price Action Scan
 Scan the 15-min and 5-min bars/charts for:
-- **Order block**: the last opposing candle before a strong impulsive move —
-  often marks where large positions were built; price returning to this zone
-  and reacting is a high-probability entry signal
+- **Order block**: the last opposing candle before a strong impulsive move.
+  Not every "last opposing candle" qualifies — a real order block is
+  validated by **displacement** (the impulsive move away from it is a
+  strong-bodied candle or run of candles, not a slow drift) and ideally
+  leaves an **FVG right after it** (the imbalance is your confirmation the
+  move was genuinely aggressive, not noise). Distinguish **fresh**
+  (untested since it formed) from **mitigated** (price already returned to
+  it once and reacted) — fresh order blocks are the higher-probability read;
+  a block price has already tapped and held is weaker the second time, and
+  one that's been tapped and broken through is invalidated, not a zone to trust
 - **Fair Value Gap (FVG) / imbalance**: a gap between candle wicks where price
   moved too fast to trade both sides — these often get revisited ("filled")
-  before the move continues
+  before the move continues. Weigh an FVG formed during genuine displacement
+  (strong momentum) far more than a small gap from slow, low-momentum drift —
+  size and the speed it formed at both matter, not just its existence
 - **Liquidity zone**: equal/near-equal highs or lows where retail stop-losses
-  cluster — a sharp wick through this level ("liquidity grab" / "stop hunt")
-  followed by a fast reversal is a classic smart-money entry pattern, distinct
-  from a genuine breakout (which continues instead of reversing)
+  cluster. Distinguish **external liquidity** (beyond a significant swing
+  high/low, prior day high/low, or an obvious equal-highs/lows double
+  top/bottom — where the *real* stop cluster sits) from **internal
+  liquidity** (minor equal highs/lows inside the current range, lower
+  significance). A sharp wick sweeping *external* liquidity followed by a
+  fast reversal is the classic high-probability smart-money reversal signal;
+  sweeping only internal liquidity is a much weaker signal on its own
+- **Liquidity grab / stop hunt vs. genuine breakout**: explicitly distinguish
+  these — a breakout continues with follow-through (ideally on rising
+  momentum/volume); a liquidity grab wicks through, fails to hold, and
+  reverses sharply. Confusing one for the other is a common losing mistake.
+  A break with no real momentum behind it (small body, no follow-through
+  candle) is more likely a grab than a genuine break, whichever direction
+  you're inclined to read it
 - **Pin bar / rejection candle, engulfing candle, inside bar, momentum candle**:
   standard price-action patterns, same as before — still valid confirmation
-- **Breakout vs. liquidity grab**: explicitly distinguish these two — a
-  breakout continues with follow-through; a liquidity grab reverses sharply
-  after sweeping the level. Confusing one for the other is a common losing mistake
 - **Premium / Discount (and Optimal Trade Entry)**: within the current swing
   range (most recent significant swing high to swing low), the midpoint
   splits it into a "premium" (upper) half and "discount" (lower) half. Longs
@@ -157,7 +174,18 @@ Scan the 15-min and 5-min bars/charts for:
   say which zone (if any) applies and factor it into your confidence
 
 For each pattern found, state: which candle(s)/zone, timeframe, price level,
-and alignment with bias.
+whether it's fresh or mitigated (for order blocks) / external or internal
+(for liquidity), and alignment with bias.
+
+**Confluence discipline**: a single isolated pattern (one order block with
+nothing else) is a weak basis for a trade even if it looks clean in
+isolation — real high-probability setups usually stack 2+ of these elements
+at the same zone (e.g. order block + FVG + external liquidity sweep + OTE
+zone all near the same price). One pattern alone can still justify a SKIP-
+leaning "Ishonch darajasi: PAST" trade watch; genuine confluence of several
+is what earns "YUQORI". Don't manufacture confluence that isn't really
+there — if you only have one real element, say so plainly and size your
+confidence accordingly rather than dressing it up as more than it is.
 
 ### Step 5 — Key Level Identification (Support/Resistance)
 List: prior day high/low, most recent significant swing high/low, round-number
