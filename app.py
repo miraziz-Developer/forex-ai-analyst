@@ -327,6 +327,12 @@ def analyze_and_notify(symbol: str) -> dict:
     logger.info("%s verdict: %s", symbol, recommendation)
 
     if recommendation != "TRADE_WATCH":
+        # Log the model's own one-line reasoning even on SKIP — otherwise there's
+        # no way to ever tell, from the logs, WHY it's skipping (too strict a
+        # rule vs. genuinely quiet market vs. something misconfigured).
+        reasoning = extract_reasoning(analysis)
+        if reasoning:
+            logger.info("%s reasoning: %s", symbol, reasoning)
         return {"status": "no_signal", "recommendation": recommendation}
 
     if storage.has_open_signal(symbol):
