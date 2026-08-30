@@ -289,6 +289,57 @@ def extract_confidence(analysis: str) -> str | None:
     return None
 
 
+def extract_field(analysis: str, label: str) -> str | None:
+    """Generic 'LABEL: rest of line' text extractor (not just a number — used
+    for fields like 'Kuzatiladigan setup' or 'Foyda/xavf nisbati')."""
+    for line in analysis.splitlines():
+        normalized = re.sub(r"[’‘'ʻʼ`´]", "'", line).strip().lstrip("- ")
+        if normalized.upper().startswith(label.upper()):
+            return normalized.split(":", 1)[1].strip() if ":" in normalized else None
+    return None
+
+
+def extract_patterns_block(analysis: str) -> str | None:
+    """Pulls just the bullet list under 'TOPILGAN NAMUNALAR:' (the concrete
+    SMC patterns found) — the specific evidence, without the surrounding
+    step-by-step prose (macro/4h/1h/institutional/fundamental paragraphs)."""
+    for block in analysis.split("\n\n"):
+        if block.strip().upper().startswith("TOPILGAN NAMUNALAR"):
+            bullets = [l for l in block.splitlines()[1:] if l.strip().startswith("-")]
+            return "\n".join(bullets) if bullets else None
+    return None
+
+
+def build_telegram_summary(symbol: str, analysis: str) -> str:
+    """Condensed Telegram message: the concrete call (direction/prices/R:R),
+    the model's own full 'why' (ASOSLASH — this is the actual answer to 'why',
+    kept in full, not truncated), and the specific patterns found — without
+    the full 8-step prose (macro/4h/1h/institutional/fundamental paragraphs),
+    which is process detail that informs the call but isn't itself the answer
+    to 'why'. The full analysis is still stored in the DB untouched, so
+    trade-history feedback and backtesting are unaffected."""
+    direction_label = {"BUY": "SOTIB OLISH", "SELL": "SOTISH"}.get(extract_direction(analysis), "?")
+    confidence = extract_confidence(analysis) or "noaniq"
+    entry = extract_field(analysis, "KIRISH NARXI")
+    stop = extract_field(analysis, "STOP-LOSS NARXI")
+    target = extract_field(analysis, "TAKE-PROFIT NARXI")
+    rr = extract_field(analysis, "FOYDA/XAVF NISBATI")
+    setup = extract_field(analysis, "KUZATILADIGAN SETUP")
+    reasoning = extract_reasoning(analysis) or "(asoslash topilmadi)"
+    patterns = extract_patterns_block(analysis)
+
+    lines = [
+        f"{symbol} — {direction_label} ({confidence} ishonch)",
+        f"Kirish: {entry} | Stop: {stop} | Target: {target} | R:R {rr}",
+    ]
+    if setup:
+        lines.append(f"Setup: {setup}")
+    lines.append(f"\nSabab: {reasoning}")
+    if patterns:
+        lines.append(f"\nAsosiy topilmalar:\n{patterns}")
+    return "\n".join(lines)
+
+
 def extract_price(analysis: str, label: str) -> float | None:
     """Reads a numeric price off a labeled line (e.g. 'Stop-loss narxi: 63,850')."""
     for line in analysis.splitlines():
@@ -487,7 +538,7 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
     except Exception:
         logger.exception("%s: failed to log signal to database", symbol)
 
-    return f"{symbol}\n\n{analysis}\n\n{execution_line}", executed
+    return f"{build_telegram_summary(symbol, analysis)}\n\n{execution_line}", executed
 
 
 @app.route("/health")
