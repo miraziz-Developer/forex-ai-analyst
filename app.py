@@ -107,7 +107,7 @@ def _pct_change(bars: list[dict], bars_back: int) -> float | None:
     close (bars[0]). Bars are most-recent-first."""
     if len(bars) <= bars_back:
         return None
-    old_close, new_close = bars[bars_back]["close"], bars[0]["close"]
+    old_close, new_close = float(bars[bars_back]["close"]), float(bars[0]["close"])
     if not old_close:
         return None
     return (new_close - old_close) / old_close * 100
