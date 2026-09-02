@@ -101,11 +101,20 @@ def _normalize(data: dict) -> list[dict]:
     ]
 
 
+# 1h is deliberately deeper than the rest: the ATR volatility-regime percentile
+# needs ~115 bars of history (14-period ATR ranked over a 100-bar lookback), and
+# fetching a second, differently-sized 1h series would be a separate cache key —
+# i.e. a whole extra API call per pair per cycle against a 5-req/15min limit.
+# One deeper fetch serves both uses. Consumers that want the old window slice it.
+BARS_PER_TIMEFRAME_OVERRIDES = {"1h": 150}
+
+
 def fetch_multi_timeframe(symbol: str) -> dict[str, list[dict]]:
     bars = {}
     for label, interval in TIMEFRAMES.items():
+        outputsize = BARS_PER_TIMEFRAME_OVERRIDES.get(label, BARS_PER_TIMEFRAME)
         try:
-            bars[label] = fetch_bars(symbol, interval)
+            bars[label] = fetch_bars(symbol, interval, outputsize=outputsize)
         except (requests.RequestException, RuntimeError) as exc:
             logger.error("Failed to fetch %s %s bars: %s", symbol, label, exc)
             bars[label] = []

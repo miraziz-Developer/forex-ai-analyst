@@ -124,9 +124,24 @@ Using the 4H and 1H bars/chart:
   BOS in the new direction (structure actually establishing itself, not just
   the first crack) is a meaningfully stronger case than CHoCH alone.
 
-Report both timeframes separately. If 4H and 1H disagree, say so explicitly —
-this is a lower-confidence setup, lean toward SKIP unless the 5-min pattern is
-exceptionally clean.
+Report both timeframes separately.
+
+**Multi-timeframe alignment is a hard requirement, not a preference.** State
+the direction implied by each of the three: daily (Step 1), 4H, and 1H.
+- **3/3 agree** with your intended trade direction → this is the only case that
+  can carry "Ishonch darajasi: YUQORI"
+- **2/3 agree** (typically one timeframe mixed/ranging) → allowed, but cap the
+  confidence at ORTA and name explicitly in ASOSLASH which timeframe disagrees
+- **The daily or 4H actively disagrees** with your direction (not merely mixed —
+  actually pointing the other way) → **SKIP**. Do not talk yourself past this
+  with an exceptionally clean 5-min pattern; that is precisely the trade that
+  looks best and performs worst.
+
+This is measured, not stylistic: trades aligned on at least two timeframes
+show roughly 67% success versus 49% for single-timeframe reads, while signals
+taken *against* the higher-timeframe bias collapse to about 38%. A clean lower
+timeframe pattern inside an opposing higher-timeframe trend is a countertrend
+scalp wearing a continuation setup's clothing.
 
 ### Step 3 — Trending vs. Chop Determination
 Classify current conditions as **TRENDING** or **CHOPPY**. If choppy, default
@@ -213,10 +228,24 @@ new resistance and vice versa (polarity flip), a standard S/R principle.
 
 ### Step 6 — Institutional Positioning Check
 Using the funding rate / open interest / order book data provided:
+- **Funding rate — use these actual numbers, don't eyeball "extreme"** (rates
+  given per 8h funding period):
+  - **|funding| under ~0.01%** — neutral. This is the ordinary resting state,
+    NOT evidence of crowd positioning in either direction. Say "neutral" and
+    move on; do not build a squeeze narrative on a 0.01% reading
+  - **~0.03-0.05%** — mildly crowded, worth a mention, not a thesis
+  - **~0.05-0.10%+** — genuinely crowded, leveraged positioning on that side.
+    This is where squeeze risk is real: the crowd is paying to hold, and a move
+    against them unwinds fast
+  - Direction: positive = longs pay shorts (crowd long); negative = shorts pay
+    longs (crowd short)
 - Extreme positive funding + rising price = crowd is heavily long and paying
   for it — can precede a long-squeeze reversal if structure weakens
 - Extreme negative funding + falling price = crowd heavily short — can precede
   a short squeeze
+- Funding and OI read together: rising OI *with* extreme funding confirms real
+  directional crowding; falling OI with extreme funding means the crowded trade
+  is already unwinding — the squeeze may be behind you, not ahead
 - Open interest change (given as % vs. its own recent history): rising OI with
   price trending = new money confirming the move (healthy trend); rising OI
   with price stalling = potential exhaustion/trap; falling OI = positions

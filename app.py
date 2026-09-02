@@ -11,7 +11,7 @@ from openai import OpenAI
 import broker
 import storage
 from charting import bars_to_chart_base64
-from indicators import atr_pct
+from indicators import atr_pct, atr_percentile
 from institutional_data import fetch_institutional_context, format_institutional_context
 from market_data import fetch_bars, fetch_multi_timeframe
 from notifier import send_telegram_message
@@ -51,6 +51,14 @@ FALLBACK_TARGET_PCT, FALLBACK_STOP_PCT = (
 # Target stays at the same reward:risk ratio our fixed 1.5/0.6 config already used.
 ATR_MULTIPLIER = float(os.environ.get("ATR_MULTIPLIER", "2.0"))
 REWARD_RISK_RATIO = float(os.environ.get("REWARD_RISK_RATIO", "2.5"))
+# Volatility-regime gate, checked BEFORE the (expensive) model call. Below the
+# floor the market is asleep — sideways chop where structure reads produce
+# fakeouts; above the ceiling it's a news/liquidation spike that doesn't respect
+# structure at all. Both are documented as the highest-false-signal regimes for
+# intraday crypto. Percentile, not an absolute ATR level, so it self-adjusts as
+# a pair's own volatility regime shifts. See RESEARCH_FINDINGS.md.
+ATR_PERCENTILE_MIN = float(os.environ.get("ATR_PERCENTILE_MIN", "20"))
+ATR_PERCENTILE_MAX = float(os.environ.get("ATR_PERCENTILE_MAX", "90"))
 # Hard code-level floor, not just a prompt instruction. Evidence forced this:
 # signals #14 and #15 had the model state its OWN computed R:R at 1.1:1 and
 # 0.72:1 respectively — both well under the "at least ~1.5-2x" floor Step 7
@@ -202,8 +210,12 @@ def build_analysis_input(symbol: str, bars: dict, institutional: dict, target_pc
     content = [{"type": "input_text",
                 "text": build_analysis_text(symbol, bars, institutional, target_pct, stop_pct)}]
 
+    # Sliced to 50 so the rendered chart stays the same window the model has
+    # always seen — 1h is now fetched 150 deep purely for the ATR percentile,
+    # and a suddenly 3x-zoomed-out chart would change the visual read for no
+    # reason. See BARS_PER_TIMEFRAME_OVERRIDES in market_data.py.
     for label, tf_name in (("1h", "1 soatlik"), ("15min", "15 daqiqalik")):
-        chart_b64 = bars_to_chart_base64(bars.get(label, []), title=f"{symbol} {tf_name}")
+        chart_b64 = bars_to_chart_base64(bars.get(label, [])[:50], title=f"{symbol} {tf_name}")
         if chart_b64:
             content.append({"type": "input_text", "text": f"({tf_name} grafik rasmi quyida)"})
             content.append({"type": "input_image", "image_url": f"data:image/png;base64,{chart_b64}"})
@@ -372,6 +384,21 @@ def analyze_and_notify(symbol: str) -> dict:
 
     try:
         bars = fetch_multi_timeframe(symbol)
+    except Exception:
+        logger.exception("Failed to fetch bars for %s", symbol)
+        return {"status": "error", "reason": "bar fetch failed"}
+
+    # Volatility-regime gate before spending a model call: a dead or a violent
+    # market is where structure-based reads fail most often, whatever the chart
+    # happens to look like. None (not enough history yet) means don't gate.
+    regime_pct = atr_percentile(bars.get("1h", []))
+    if regime_pct is not None and not (ATR_PERCENTILE_MIN <= regime_pct <= ATR_PERCENTILE_MAX):
+        regime = "juda tinch (chop xavfi)" if regime_pct < ATR_PERCENTILE_MIN else "juda tartibsiz (yangilik/portlash)"
+        logger.info("%s skipped — ATR percentile %.0f outside [%.0f, %.0f]: %s",
+                     symbol, regime_pct, ATR_PERCENTILE_MIN, ATR_PERCENTILE_MAX, regime)
+        return {"status": "no_signal", "reason": "volatility regime", "atr_percentile": regime_pct}
+
+    try:
         institutional = fetch_institutional_context(symbol)
         target_pct, stop_pct = compute_stop_target_pct(bars.get("1h", []))
         model_input = build_analysis_input(symbol, bars, institutional, target_pct, stop_pct)
