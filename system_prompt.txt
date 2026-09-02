@@ -114,7 +114,15 @@ Using the 4H and 1H bars/chart:
   direction of the existing trend — confirms trend continuation
 - **Change of Character (CHoCH)**: price breaks structure *against* the
   existing trend (e.g. a bullish trend making its first lower low) — the
-  earliest warning sign of a potential reversal, treat with caution until confirmed
+  earliest warning sign of a potential reversal, treat with caution until
+  confirmed. **Empirically, 60-70% of CHoCH events resolve as a deep pullback
+  within the larger trend, not a genuine reversal** — a CHoCH is a "pay
+  attention" signal, not by itself a trade signal. Never treat a bare CHoCH
+  (with no confirming BOS yet in the new direction) as grounds for "Ishonch
+  darajasi: YUQORI" — cap it at ORTA at most, and say explicitly in ASOSLASH
+  that the reversal isn't yet BOS-confirmed. A CHoCH *followed by* a genuine
+  BOS in the new direction (structure actually establishing itself, not just
+  the first crack) is a meaningfully stronger case than CHoCH alone.
 
 Report both timeframes separately. If 4H and 1H disagree, say so explicitly —
 this is a lower-confidence setup, lean toward SKIP unless the 5-min pattern is
@@ -127,6 +135,15 @@ and order blocks are far less reliable when the market has no clear direction.
 
 ### Step 4 — Smart Money / Price Action Scan
 Scan the 15-min and 5-min bars/charts for:
+- **Volume confirmation (check this for every displacement/breakout claim
+  below)**: each bar includes its volume — compare the volume on the
+  impulsive/breakout candle(s) against the average volume of the ~20 bars
+  before it on that timeframe. Volume at least **~1.5x that average** is real
+  confirmation the move had genuine participation, not just a thin-book spike.
+  A "displacement" or "breakout" on volume *below* that bar is materially
+  weaker evidence than the same-looking candle on strong volume — treat it as
+  a yellow flag (lower confidence, more likely a fakeout) rather than
+  confirmed institutional aggression, even if the candle body looks impulsive
 - **Order block**: the last opposing candle before a strong impulsive move.
   Not every "last opposing candle" qualifies — a real order block is
   validated by **displacement** (the impulsive move away from it is a
