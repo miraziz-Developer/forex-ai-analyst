@@ -51,6 +51,12 @@ FALLBACK_TARGET_PCT, FALLBACK_STOP_PCT = (
 # Target stays at the same reward:risk ratio our fixed 1.5/0.6 config already used.
 ATR_MULTIPLIER = float(os.environ.get("ATR_MULTIPLIER", "2.0"))
 REWARD_RISK_RATIO = float(os.environ.get("REWARD_RISK_RATIO", "2.5"))
+# Hard code-level floor, not just a prompt instruction. Evidence forced this:
+# signals #14 and #15 had the model state its OWN computed R:R at 1.1:1 and
+# 0.72:1 respectively — both well under the "at least ~1.5-2x" floor Step 7
+# explicitly tells it to enforce — and still recommend TRADE WATCH. Asking
+# nicely in the prompt clearly isn't sufficient on its own; this backstops it.
+MIN_REWARD_RISK_RATIO = float(os.environ.get("MIN_REWARD_RISK_RATIO", "1.5"))
 
 
 def compute_stop_target_pct(bars_1h: list[dict]) -> tuple[float, float]:
@@ -493,6 +499,23 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
     target_price, stop_price, level_source = _resolve_target_stop(
         entry_price, direction, ai_target, ai_stop, target_pct, stop_pct)
     logger.info("%s: stop/target source=%s stop=%s target=%s", symbol, level_source, stop_price, target_price)
+
+    reward = abs(target_price - entry_price)
+    risk = abs(entry_price - stop_price)
+    actual_rr = reward / risk if risk > 0 else 0.0
+    if actual_rr < MIN_REWARD_RISK_RATIO:
+        logger.warning(
+            "%s: TRADE WATCH rejected by code-level R:R gate — actual %.2f:1 is below the %.1f:1 floor "
+            "(entry=%s target=%s stop=%s, source=%s). The model's own Step 7 rule says SKIP a setup like "
+            "this, but that instruction alone wasn't reliably followed — this is a hard backstop, not logged "
+            "as a signal since it was never actually going to be taken.",
+            symbol, actual_rr, MIN_REWARD_RISK_RATIO, entry_price, target_price, stop_price, level_source)
+        return (
+            f"{symbol} — TRADE WATCH bekor qilindi (kod darajasidagi xavfsizlik)\n\n"
+            f"AI \"SAVDONI KUZATISH\" dedi, lekin haqiqiy foyda/xavf nisbati ({actual_rr:.2f}:1) "
+            f"belgilangan minimal {MIN_REWARD_RISK_RATIO}:1 dan past. Xavfsizlik uchun avtomatik "
+            f"bekor qilindi — savdo ochilmadi, bazaga ham yozilmadi."
+        ), False
 
     broker_order_id = None
     broker_qty = None
