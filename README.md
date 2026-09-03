@@ -101,6 +101,32 @@ curl http://localhost:5000/health
 curl http://localhost:5000/stats
 ```
 
+### Monitoring dashboard and Telegram commands
+
+Open `http://localhost:5000/dashboard` to see summary cards and a filterable
+order table containing OPEN/WIN/LOSS/EXPIRED state, entry/target/stop/outcome,
+execution state, estimated per-order P&L, timestamps, and the full AI analysis.
+The page refreshes every 30 seconds and is mobile-friendly.
+
+For a deployed private dashboard, set:
+
+```env
+PUBLIC_BASE_URL=https://your-service.example.com
+DASHBOARD_TOKEN=use-a-long-random-secret
+```
+
+Then open `/dashboard?token=<DASHBOARD_TOKEN>`. The configured Telegram chat can
+also use these commands (messages from every other chat ID are ignored):
+
+- `/status` — process mode, UTC time, and private dashboard link
+- `/stats` — all-time and 30-day WIN/LOSS/win-rate/P&L
+- `/open` — up to 10 current open signals
+- `/recent` — the 10 most recent resolved signals
+- `/help` — command list and dashboard link
+
+The command listener uses Telegram long polling and starts together with
+`python app.py`; no webhook configuration is needed.
+
 ## 3. Deploy (so it keeps running without your computer on)
 - **Render.com** (recommended) — free tier, connects to a GitHub repo
 - A small VPS (DigitalOcean, Linode, ~$5/mo) if you want more control

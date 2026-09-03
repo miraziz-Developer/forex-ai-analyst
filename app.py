@@ -2,13 +2,15 @@ import json
 import logging
 import os
 import re
+import secrets
 from datetime import datetime, time, timezone
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify
+from flask import Flask, abort, jsonify, render_template, request
 from openai import OpenAI
 
 import broker
+import monitoring
 import storage
 from charting import bars_to_chart_base64
 from indicators import atr_pct, atr_percentile
@@ -33,6 +35,8 @@ AZURE_OPENAI_ENDPOINT = os.environ["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_DEPLOYMENT = os.environ["AZURE_OPENAI_DEPLOYMENT"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 
 # Crypto perpetuals trade 24/7 — this stays available for anyone who wants a
 # restricted window, but defaults to no restriction at all.
@@ -601,6 +605,36 @@ def stats():
     return jsonify(storage.get_stats())
 
 
+def _require_dashboard_access() -> None:
+    if not DASHBOARD_TOKEN:
+        return
+    supplied = request.args.get("token") or request.headers.get("X-Dashboard-Token", "")
+    if not secrets.compare_digest(supplied, DASHBOARD_TOKEN):
+        abort(401)
+
+
+@app.route("/dashboard")
+def dashboard():
+    _require_dashboard_access()
+    return render_template("dashboard.html", dashboard_token=request.args.get("token", ""))
+
+
+@app.route("/api/signals")
+def signals_api():
+    _require_dashboard_access()
+    try:
+        data = storage.get_signals(
+            status=request.args.get("status", "ALL"),
+            pair=request.args.get("pair") or None,
+            direction=request.args.get("direction") or None,
+            limit=request.args.get("limit", 100, type=int),
+            offset=request.args.get("offset", 0, type=int),
+        )
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(data)
+
+
 if __name__ == "__main__":
     storage.init_db()
     start_scheduler(
@@ -608,4 +642,9 @@ if __name__ == "__main__":
         telegram_bot_token=TELEGRAM_BOT_TOKEN,
         telegram_chat_id=TELEGRAM_CHAT_ID,
     )
+    dashboard_url = f"{PUBLIC_BASE_URL}/dashboard" if PUBLIC_BASE_URL else ""
+    if dashboard_url and DASHBOARD_TOKEN:
+        dashboard_url += f"?token={DASHBOARD_TOKEN}"
+    monitoring.start_command_listener(
+        TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, AUTO_EXECUTE_TRADES, dashboard_url)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

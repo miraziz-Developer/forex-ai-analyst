@@ -150,6 +150,84 @@ _TAKER_FEE_PCT = 0.05
 _FUNDING_INTERVAL_HOURS = 8  # BingX perpetuals settle funding every 8h while a position is open
 
 
+def estimate_signal_pnl(row: dict) -> float | None:
+    """Estimated net P&L for an executed, resolved signal; analysis-only/open
+    signals return None. Includes round-trip taker fees and estimated funding."""
+    qty = row.get("broker_qty")
+    outcome_price = row.get("outcome_price")
+    if not qty or outcome_price is None:
+        return None
+
+    sign = 1 if row["direction"] == "BUY" else -1
+    entry_price = float(row["entry_price"])
+    outcome_price = float(outcome_price)
+    qty = float(qty)
+    price_pnl = (outcome_price - entry_price) * qty * sign
+    fee_cost = (entry_price * qty + outcome_price * qty) * (_TAKER_FEE_PCT / 100)
+
+    funding_cost = 0.0
+    funding_rate_pct = row.get("funding_rate_pct")
+    if funding_rate_pct is not None and row.get("outcome_time") and row.get("signal_time"):
+        signal_time = row["signal_time"]
+        outcome_time = row["outcome_time"]
+        if isinstance(signal_time, str):
+            signal_time = datetime.fromisoformat(signal_time)
+        if isinstance(outcome_time, str):
+            outcome_time = datetime.fromisoformat(outcome_time)
+        hours_held = (outcome_time - signal_time).total_seconds() / 3600
+        periods = int(hours_held // _FUNDING_INTERVAL_HOURS)
+        funding_cost = float(funding_rate_pct) / 100 * entry_price * qty * periods * sign
+
+    return round(price_pnl - fee_cost - funding_cost, 4)
+
+
+def get_signals(status: str = "ALL", pair: str | None = None,
+                direction: str | None = None, limit: int = 100,
+                offset: int = 0) -> dict:
+    """Filtered, newest-first signal history for the monitoring UI/API."""
+    status = status.upper()
+    direction = direction.upper() if direction else None
+    allowed_statuses = {"ALL", "OPEN", "RESOLVED", "WIN", "LOSS", "EXPIRED"}
+    if status not in allowed_statuses:
+        raise ValueError(f"Unsupported status: {status}")
+    if direction not in {None, "BUY", "SELL"}:
+        raise ValueError(f"Unsupported direction: {direction}")
+
+    conditions, args = [], []
+    if status == "OPEN":
+        conditions.append("outcome IS NULL")
+    elif status == "RESOLVED":
+        conditions.append("outcome IS NOT NULL")
+    elif status != "ALL":
+        conditions.append("outcome = ?")
+        args.append(status)
+    if pair:
+        conditions.append("pair = ?")
+        args.append(pair.upper())
+    if direction:
+        conditions.append("direction = ?")
+        args.append(direction)
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    count_result = _execute(f"SELECT count(*) AS n FROM signals{where}", args)
+    total = _rows_as_dicts(count_result)[0]["n"]
+    safe_limit = min(max(int(limit), 1), 250)
+    safe_offset = max(int(offset), 0)
+    result = _execute(
+        "SELECT id, pair, direction, entry_price, target_price, stop_price, "
+        "signal_time, analysis_text, outcome, outcome_price, outcome_time, "
+        f"oanda_trade_id, broker_qty, funding_rate_pct FROM signals{where} "
+        "ORDER BY signal_time DESC LIMIT ? OFFSET ?",
+        [*args, safe_limit, safe_offset],
+    )
+    rows = _rows_as_dicts(result)
+    for row in rows:
+        row["status"] = row.get("outcome") or "OPEN"
+        row["executed"] = bool(row.get("broker_qty"))
+        row["estimated_pnl_usdt"] = estimate_signal_pnl(row)
+    return {"signals": rows, "total": total, "limit": safe_limit, "offset": safe_offset}
+
+
 def get_stats() -> dict:
     result = _execute(
         """SELECT outcome, signal_time, outcome_time, direction, entry_price, outcome_price,
@@ -178,32 +256,7 @@ def get_stats() -> dict:
         funding rate captured at signal-open, held constant for the trade's
         duration — funding actually re-settles/re-prices every 8h, so this is a
         reasonable estimate, not an exact replay of what BingX charged)."""
-        total = 0.0
-        for row in rows:
-            qty = row.get("broker_qty")
-            if not qty:
-                continue
-            sign = 1 if row["direction"] == "BUY" else -1
-            entry_price, outcome_price = row["entry_price"], row["outcome_price"]
-
-            price_pnl = (outcome_price - entry_price) * qty * sign
-
-            entry_notional = entry_price * qty
-            exit_notional = outcome_price * qty
-            fee_cost = (entry_notional + exit_notional) * (_TAKER_FEE_PCT / 100)
-
-            funding_cost = 0.0
-            funding_rate_pct = row.get("funding_rate_pct")
-            if funding_rate_pct is not None and row.get("outcome_time"):
-                hours_held = (datetime.fromisoformat(row["outcome_time"])
-                              - datetime.fromisoformat(row["signal_time"])).total_seconds() / 3600
-                periods = int(hours_held // _FUNDING_INTERVAL_HOURS)
-                if periods > 0:
-                    # positive rate: longs pay shorts; negative rate: shorts pay longs
-                    funding_cost = funding_rate_pct / 100 * entry_notional * periods * sign
-
-            total += price_pnl - fee_cost - funding_cost
-        return round(total, 4)
+        return round(sum(pnl for row in rows if (pnl := estimate_signal_pnl(row)) is not None), 4)
 
     all_time_rows = rows
     last_30d_rows = [r for r in rows if datetime.fromisoformat(r["signal_time"]) > cutoff]

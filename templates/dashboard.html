@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crypto AI Analyst — Dashboard</title>
+  <style>
+    :root { color-scheme: dark; --bg:#070b14; --panel:#111827; --line:#263244; --muted:#94a3b8; --text:#f8fafc; --green:#22c55e; --red:#ef4444; --yellow:#f59e0b; --blue:#38bdf8; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(circle at top right,#13213b 0,#070b14 38%); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; min-height:100vh; }
+    .wrap { max-width:1450px; margin:auto; padding:28px; }
+    header { display:flex; justify-content:space-between; gap:20px; align-items:center; margin-bottom:24px; }
+    h1 { margin:0; font-size:clamp(24px,4vw,38px); letter-spacing:-.04em; }
+    .subtitle,.muted { color:var(--muted); }
+    .live { display:flex; align-items:center; gap:8px; padding:9px 14px; border:1px solid #14532d; background:#052e1a; color:#86efac; border-radius:999px; white-space:nowrap; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 14px var(--green); }
+    .cards { display:grid; grid-template-columns:repeat(6,minmax(145px,1fr)); gap:14px; margin-bottom:20px; }
+    .card,.filters,.table-wrap { background:rgba(17,24,39,.9); border:1px solid var(--line); border-radius:16px; box-shadow:0 14px 35px rgba(0,0,0,.2); }
+    .card { padding:18px; }
+    .card span { color:var(--muted); font-size:13px; }
+    .card strong { display:block; margin-top:7px; font-size:26px; }
+    .green { color:var(--green)!important; } .red { color:var(--red)!important; } .yellow { color:var(--yellow)!important; } .blue { color:var(--blue)!important; }
+    .filters { display:flex; gap:12px; padding:14px; margin-bottom:16px; flex-wrap:wrap; }
+    select,button { background:#0b1220; border:1px solid #334155; color:var(--text); padding:10px 13px; border-radius:10px; font:inherit; }
+    select { min-width:145px; } button { cursor:pointer; } button:hover { border-color:var(--blue); }
+    .updated { margin-left:auto; align-self:center; font-size:13px; color:var(--muted); }
+    .table-wrap { overflow:auto; }
+    table { width:100%; border-collapse:collapse; min-width:1100px; }
+    th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.07em; text-align:left; padding:15px; border-bottom:1px solid var(--line); }
+    td { padding:14px 15px; border-bottom:1px solid #1d2737; font-size:14px; }
+    tr:hover td { background:#172033; }
+    .badge { display:inline-block; padding:5px 9px; border-radius:999px; font-size:12px; font-weight:700; }
+    .WIN { color:#86efac; background:#14532d; } .LOSS { color:#fca5a5; background:#5f1717; } .OPEN { color:#fde68a; background:#53380b; } .EXPIRED { color:#cbd5e1; background:#334155; }
+    .BUY { color:#86efac; } .SELL { color:#fca5a5; }
+    .details { color:var(--blue); background:transparent; padding:5px 8px; }
+    .empty,.error { padding:42px; text-align:center; color:var(--muted); }
+    dialog { width:min(850px,92vw); max-height:85vh; border:1px solid var(--line); border-radius:16px; background:#0b1220; color:var(--text); padding:0; }
+    dialog::backdrop { background:rgba(0,0,0,.75); }
+    .modal-head { position:sticky; top:0; display:flex; justify-content:space-between; align-items:center; padding:16px 20px; background:#111827; border-bottom:1px solid var(--line); }
+    pre { white-space:pre-wrap; word-wrap:break-word; padding:20px; font:14px/1.6 ui-monospace,SFMono-Regular,monospace; color:#dbeafe; }
+    @media(max-width:1000px){ .cards{grid-template-columns:repeat(3,1fr)} }
+    @media(max-width:600px){ .wrap{padding:16px}.cards{grid-template-columns:repeat(2,1fr)} header{align-items:flex-start;flex-direction:column}.updated{margin-left:0}.card strong{font-size:21px} }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header><div><h1>Crypto AI Analyst</h1><div class="subtitle">Signallar, natijalar va demo P&amp;L monitoringi</div></div><div class="live"><span class="dot"></span> LIVE</div></header>
+  <section class="cards">
+    <div class="card"><span>Ochiq</span><strong id="open" class="yellow">—</strong></div>
+    <div class="card"><span>WIN</span><strong id="wins" class="green">—</strong></div>
+    <div class="card"><span>LOSS</span><strong id="losses" class="red">—</strong></div>
+    <div class="card"><span>EXPIRED</span><strong id="expired">—</strong></div>
+    <div class="card"><span>Win rate</span><strong id="winrate" class="blue">—</strong></div>
+    <div class="card"><span>Ijro qilingan P&amp;L</span><strong id="pnl">—</strong></div>
+  </section>
+  <section class="filters">
+    <select id="status"><option value="ALL">Barcha status</option><option value="OPEN">OPEN</option><option value="WIN">WIN</option><option value="LOSS">LOSS</option><option value="EXPIRED">EXPIRED</option></select>
+    <select id="pair"><option value="">Barcha juftlik</option><option>BTC-USDT</option><option>ETH-USDT</option><option>SOL-USDT</option><option>XRP-USDT</option><option>BNB-USDT</option></select>
+    <select id="direction"><option value="">Barcha yo'nalish</option><option value="BUY">BUY</option><option value="SELL">SELL</option></select>
+    <button id="refresh">↻ Yangilash</button><span id="updated" class="updated"></span>
+  </section>
+  <section class="table-wrap"><table><thead><tr><th>ID / status</th><th>Juftlik</th><th>Yo'nalish</th><th>Kirish</th><th>Target</th><th>Stop</th><th>Natija narxi</th><th>P&amp;L</th><th>Ijro</th><th>Vaqt (UTC)</th><th>Tahlil</th></tr></thead><tbody id="rows"></tbody></table><div id="message" class="empty" hidden></div></section>
+</div>
+<dialog id="modal"><div class="modal-head"><strong id="modal-title">AI tahlili</strong><button onclick="document.getElementById('modal').close()">✕</button></div><pre id="analysis"></pre></dialog>
+<script>
+const token={{ dashboard_token|tojson }};
+const state={signals:[]};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const price=v=>v==null?'—':Number(v).toLocaleString('en-US',{maximumFractionDigits:8});
+const api=(path)=>fetch(path+(path.includes('?')?'&':'?')+'token='+encodeURIComponent(token)).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
+function showAnalysis(id){const s=state.signals.find(x=>x.id===id);$('modal-title').textContent=`#${id} ${s.pair} — to'liq AI tahlili`;$('analysis').textContent=s.analysis_text;$('modal').showModal()}
+async function load(){
+  $('message').hidden=true;
+  try{
+    const params=new URLSearchParams({status:$('status').value,limit:'100'}); if($('pair').value)params.set('pair',$('pair').value);if($('direction').value)params.set('direction',$('direction').value);
+    const [stats,data]=await Promise.all([api('/stats'),api('/api/signals?'+params)]); state.signals=data.signals;
+    const a=stats.all_time;$('open').textContent=stats.open_signals;$('wins').textContent=a.WIN||0;$('losses').textContent=a.LOSS||0;$('expired').textContent=a.EXPIRED||0;$('winrate').textContent=(a.win_rate_pct??0)+'%';
+    const pnl=Number(a.realized_pnl_usdt||0);$('pnl').textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+' USDT';$('pnl').className=pnl>=0?'green':'red';
+    $('rows').innerHTML=data.signals.map(s=>`<tr><td><span class="badge ${s.status}">${esc(s.status)}</span><br><span class="muted">#${s.id}</span></td><td><strong>${esc(s.pair)}</strong></td><td class="${s.direction}"><strong>${esc(s.direction)}</strong></td><td>${price(s.entry_price)}</td><td class="green">${price(s.target_price)}</td><td class="red">${price(s.stop_price)}</td><td>${price(s.outcome_price)}</td><td class="${(s.estimated_pnl_usdt??0)>=0?'green':'red'}">${s.estimated_pnl_usdt==null?'—':(s.estimated_pnl_usdt>=0?'+':'')+Number(s.estimated_pnl_usdt).toFixed(2)}</td><td>${s.executed?'DEMO':'Tahlil'}</td><td>${esc(String(s.signal_time).slice(0,16).replace('T',' '))}</td><td><button class="details" onclick="showAnalysis(${s.id})">Ko'rish</button></td></tr>`).join('');
+    $('message').hidden=data.signals.length>0;if(!data.signals.length){$('message').textContent="Tanlangan filter bo'yicha signal yo'q.";$('message').hidden=false}$('updated').textContent='Yangilandi: '+new Date().toLocaleTimeString();
+  }catch(e){$('rows').innerHTML='';$('message').textContent='Ma’lumot yuklanmadi: '+e.message;$('message').hidden=false}
+}
+['status','pair','direction'].forEach(id=>$(id).addEventListener('change',load));$('refresh').addEventListener('click',load);load();setInterval(load,30000);
+</script>
+</body></html>
