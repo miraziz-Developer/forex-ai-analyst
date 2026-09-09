@@ -137,6 +137,10 @@ The command listener uses Telegram long polling and starts together with
 Push this folder to a GitHub repo, connect it on Render, set all the `.env`
 variables in Render's dashboard (never commit your real `.env`). If
 `BINGX_API_KEY`/`BINGX_SECRET` aren't set, the bot just runs analysis-only.
+The repository's `render.yaml` pins the build command, `python app.py` start
+command, and `/health` check. The health response includes Render's deployed
+commit SHA and the active strategy/exit policy, so a successful response proves
+both the revision and the fail-closed `volatility_breakout` 2 ATR / 2.5R policy.
 
 **Auto-deploy caveat (learned the hard way):** Render's "Auto-Deploy: On
 Commit" setting can silently stop firing on GitHub push (happened here after

@@ -653,7 +653,16 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
 
 @app.route("/health")
 def health():
-    return jsonify(status="ok")
+    policy = load_promoted_policy()
+    return jsonify(
+        status="ok" if policy else "degraded",
+        commit=os.environ.get("RENDER_GIT_COMMIT", "local"),
+        policy={
+            "strategy": policy.name,
+            "atr_stop": policy.atr_stop,
+            "reward_risk": policy.reward_risk,
+        } if policy else None,
+    ), 200 if policy else 503
 
 
 @app.route("/stats")

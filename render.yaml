@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: forex-ai-analyst
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: DASHBOARD_TOKEN
+        generateValue: true
+      - key: AUTO_EXECUTE_TRADES
+        value: "false"
+      - key: ATR_MULTIPLIER
+        value: "2.0"
+      - key: REWARD_RISK_RATIO
+        value: "2.5"
