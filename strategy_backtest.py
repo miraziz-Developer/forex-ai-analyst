@@ -6,14 +6,13 @@ solely for win rate: it must also be profitable after estimated taker fees.
 """
 
 import argparse
-import itertools
 import json
 import os
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict
 
 from market_data import fetch_bars
-from strategy_engine import StrategyConfig, candidate_levels, ema, evaluate_candidate
+from strategy_engine import StrategyConfig, candidate_levels, evaluate_candidate
 
 FOUR_HOURS_MS = 4 * 3600 * 1000
 DAY_MS = 24 * 3600 * 1000
@@ -50,50 +49,10 @@ def _resolve(direction, entry, target, stop, forward):
     return "EXPIRED", signed_move / risk if risk else 0.0, len(forward) - 1
 
 
-def _resolve_trend_exit(direction, entry, initial_stop, forward, chronological,
-                        entry_index, config, signal_atr):
-    """Resolve trend trades with a next-bar-safe trailing/structural exit."""
-    risk = abs(entry - initial_stop)
-    stop = initial_stop
-    extreme = entry
-    for offset, bar in enumerate(forward):
-        high, low, close = (float(bar[key]) for key in ("high", "low", "close"))
-        stop_hit = low <= stop if direction == "BUY" else high >= stop
-        if stop_hit:
-            signed = stop - entry if direction == "BUY" else entry - stop
-            return ("WIN" if signed > 0 else "LOSS"), signed / risk if risk else 0.0, offset
-
-        absolute_index = entry_index + offset
-        history = chronological[:absolute_index + 1]
-        closes = [float(item["close"]) for item in history]
-        structural_exit = False
-        fast, slow = ema(closes, config.fast_ema), ema(closes, config.slow_ema)
-        structural_exit = (fast is not None and slow is not None
-                           and (fast <= slow if direction == "BUY" else fast >= slow))
-        if structural_exit:
-            signed = close - entry if direction == "BUY" else entry - close
-            return ("WIN" if signed > 0 else "LOSS"), signed / risk if risk else 0.0, offset
-
-        # The newly observed extreme only changes the stop for the next bar,
-        # avoiding optimistic same-bar ordering assumptions.
-        if direction == "BUY":
-            extreme = max(extreme, high)
-            stop = max(stop, extreme - 3.0 * signal_atr)
-        else:
-            extreme = min(extreme, low)
-            stop = min(stop, extreme + 3.0 * signal_atr)
-
-    close = float(forward[-1]["close"])
-    signed = close - entry if direction == "BUY" else entry - close
-    return "EXPIRED", signed / risk if risk else 0.0, len(forward) - 1
-
-
 def simulate(bars: list[dict], config: StrategyConfig, start_ms: int, end_ms: int,
              expiry_bars: int = 6, fee_pct_round_trip: float = 0.10,
              slippage_pct_round_trip: float = 0.0,
-             funding_pct_per_8h: float = 0.0,
-             ensemble_members: tuple[StrategyConfig, ...] = (),
-             min_votes: int = 1) -> list[dict]:
+             funding_pct_per_8h: float = 0.0) -> list[dict]:
     if expiry_bars < 1:
         raise ValueError("expiry_bars must be at least 1")
     if min(fee_pct_round_trip, slippage_pct_round_trip, funding_pct_per_8h) < 0:
@@ -112,21 +71,7 @@ def simulate(bars: list[dict], config: StrategyConfig, start_ms: int, end_ms: in
         closed = list(reversed(chronological[:index + 1]))
         current_day_ms = int(signal_bar["datetime"]) // DAY_MS * DAY_MS
         completed_daily = [bar for bar in all_daily if int(bar["datetime"]) < current_day_ms]
-        if ensemble_members:
-            candidates = [evaluate_candidate(closed[:180], completed_daily, member)
-                          for member in ensemble_members]
-            candidates = [item for item in candidates if item]
-            buy_votes = sum(item["direction"] == "BUY" for item in candidates)
-            sell_votes = sum(item["direction"] == "SELL" for item in candidates)
-            direction = "BUY" if buy_votes >= min_votes and buy_votes > sell_votes else (
-                "SELL" if sell_votes >= min_votes and sell_votes > buy_votes else None)
-            matching = [item for item in candidates if item["direction"] == direction]
-            candidate = ({"direction": direction,
-                          "atr": sum(float(item["atr"]) for item in matching) / len(matching),
-                          "strategy": "+".join(member.name for member in ensemble_members)}
-                         if direction else None)
-        else:
-            candidate = evaluate_candidate(closed[:180], completed_daily, config)
+        candidate = evaluate_candidate(closed[:180], completed_daily, config)
         if not candidate:
             continue
         entry_bar = chronological[index + 1]
@@ -138,17 +83,11 @@ def simulate(bars: list[dict], config: StrategyConfig, start_ms: int, end_ms: in
         forward = [bar for bar in full_forward if int(bar["datetime"]) < end_ms]
         if not forward:
             continue
-        if config.name == "snr_trend_following":
-            outcome, result_r, exit_index = _resolve_trend_exit(
-                candidate["direction"], entry, stop, forward, chronological,
-                index + 1, config, float(candidate["atr"]),
-            )
-        else:
-            outcome, result_r, exit_index = _resolve(
-                candidate["direction"], entry, target, stop, forward)
+        outcome, result_r, exit_index = _resolve(
+            candidate["direction"], entry, target, stop, forward)
         if outcome == "EXPIRED" and len(forward) < len(full_forward):
             continue
-        if outcome == "WIN" and config.name != "snr_trend_following":
+        if outcome == "WIN":
             result_r = config.reward_risk
         risk_pct = abs(entry - stop) / entry * 100
         holding_8h_periods = (exit_index + 1) / 2
@@ -192,6 +131,11 @@ def _profit_factor_score(result: dict) -> float:
     return float("inf") if result["net_r"] > 0 else 0.0
 
 
+def _expectancy_score(result: dict) -> float:
+    expectancy = result["expectancy_r"]
+    return expectancy if expectancy is not None else float("-inf")
+
+
 def _resolved_trades(result: dict) -> int:
     return result["wins"] + result["losses"]
 
@@ -214,24 +158,8 @@ def _meets_edge_requirements(result: dict, min_resolved_trades: int,
 
 
 def parameter_grid():
-    """Two restrained, pre-declared variants for ten independent hypotheses."""
-    base = StrategyConfig()
-    families = (
-        "snr_trend_following", "ema_trend_pullback", "donchian_breakout",
-        "macd_continuation", "supertrend_continuation", "bollinger_trend_pullback",
-        "bollinger_reversion", "rsi_reversion", "volatility_breakout", "range_breakout",
-    )
-    for name in families:
-        for variant in (0, 1):
-            yield replace(
-                base, name=name, fast_ema=(12, 20)[variant], slow_ema=(40, 55)[variant],
-                adx_min=(18.0, 24.0)[variant], channel_lookback=(20, 40)[variant],
-                sr_lookback=(30, 50)[variant], sr_tolerance_atr=(0.35, 0.55)[variant],
-                bollinger_std=(2.0, 2.5)[variant], rsi_long_min=(35.0, 40.0)[variant],
-                rsi_long_max=(65.0, 60.0)[variant], atr_expansion_min=(1.05, 1.20)[variant],
-                volume_ratio_min=(1.0, 1.2)[variant], atr_stop=(1.5, 2.0)[variant],
-                reward_risk=(2.0, 2.5)[variant], min_confirmations=2,
-            )
+    """Yield only the immutable, promoted 2 ATR / 2.5R policy."""
+    yield StrategyConfig()
 
 
 def fetch_history_paginated(symbol: str, pages: int = 3) -> list[dict]:
@@ -288,24 +216,6 @@ def _pair_metrics(histories, config, start_ms, end_ms):
     )) for pair, bars in histories.items()}
 
 
-def _ensemble_trades(histories, members, start_ms, end_ms, min_votes):
-    execution = replace(members[0], name="range_breakout")
-    return sorted((trade for bars in histories.values() for trade in simulate(
-        bars, execution, start_ms, end_ms, expiry_bars=42,
-        fee_pct_round_trip=0.10, slippage_pct_round_trip=0.04,
-        funding_pct_per_8h=0.01, ensemble_members=tuple(members), min_votes=min_votes,
-    )), key=lambda trade: int(trade["time"]))
-
-
-def _ensemble_pair_metrics(histories, members, start_ms, end_ms, min_votes):
-    execution = replace(members[0], name="range_breakout")
-    return {pair: metrics(simulate(
-        bars, execution, start_ms, end_ms, expiry_bars=42,
-        fee_pct_round_trip=0.10, slippage_pct_round_trip=0.04,
-        funding_pct_per_8h=0.01, ensemble_members=tuple(members), min_votes=min_votes,
-    )) for pair, bars in histories.items()}
-
-
 def _economically_positive(result: dict, min_trades: int) -> bool:
     return (result["trades"] >= min_trades and result["net_r"] > 0
             and result["expectancy_r"] is not None and result["expectancy_r"] > 0
@@ -317,7 +227,9 @@ def run_three_month_research(histories: dict[str, list[dict]],
     """Select on pre-holdout rolling months; evaluate once on the final 90 days."""
     if type(min_train_trades) is not int or min_train_trades < 1:
         raise ValueError("min_train_trades must be a positive integer")
-    populated = {pair: bars for pair, bars in histories.items() if bars}
+    # Canonical pair order makes same-timestamp trade ordering and JSON output
+    # deterministic regardless of caller or filesystem iteration order.
+    populated = dict(sorted((pair, bars) for pair, bars in histories.items() if bars))
     if not populated:
         return {"status": "insufficient_data", "reason": "no historical bars"}
     latest = min(max(int(bar["datetime"]) for bar in bars) for bars in populated.values())
@@ -354,7 +266,7 @@ def run_three_month_research(histories: dict[str, list[dict]],
         selectable = eligible or variants
         selected_item = max(selectable, key=lambda item: (
             item["profitable_months"] / max(item["active_months"], 1),
-            item["development"]["expectancy_r"],
+            _expectancy_score(item["development"]),
             _profit_factor_score(item["development"]),
             -item["development"]["max_drawdown_r"],
         ))
@@ -377,35 +289,11 @@ def run_three_month_research(histories: dict[str, list[dict]],
 
     development_ranked = sorted(
         (item for item in families if item.get("policy")),
-        key=lambda item: (item["development"]["expectancy_r"],
+        key=lambda item: (_expectancy_score(item["development"]),
                           _profit_factor_score(item["development"]),
                           -item["development"]["max_drawdown_r"]), reverse=True)
-    finalists = development_ranked[:4]
-    combinations = []
-    for size in (2, 3):
-        for selected_items in itertools.combinations(finalists, size):
-            members = [StrategyConfig(**item["policy"]) for item in selected_items]
-            min_votes = 2
-            development = metrics(_ensemble_trades(
-                populated, members, development_start, test_start, min_votes))
-            train_eligible = _economically_positive(development, min_train_trades)
-            holdout = metrics(_ensemble_trades(
-                populated, members, test_start, test_end, min_votes))
-            pairs = _ensemble_pair_metrics(populated, members, test_start, test_end, min_votes)
-            positive_pairs = sum(item["net_r"] > 0 for item in pairs.values())
-            combination_passed = (train_eligible and _economically_positive(holdout, 10)
-                                  and positive_pairs >= 3)
-            combinations.append({"members": [item.name for item in members],
-                                 "min_votes": min_votes,
-                                 "status": ("passed" if combination_passed else
-                                            "rejected" if train_eligible else "no_train_edge"),
-                                 "eligible_for_promotion": train_eligible,
-                                 "development": development, "holdout_90d": holdout,
-                                 "holdout_by_pair": pairs,
-                                 "positive_holdout_pairs": positive_pairs})
-
     best_observed = max(families, key=lambda item: (
-        item["holdout_90d"]["expectancy_r"],
+        _expectancy_score(item["holdout_90d"]),
         _profit_factor_score(item["holdout_90d"]),
         -item["holdout_90d"]["max_drawdown_r"],
     )) if families else None
@@ -434,11 +322,10 @@ def run_three_month_research(histories: dict[str, list[dict]],
         "families": families,
         "development_leaderboard": [item["family"] for item in development_ranked],
         "holdout_leaderboard": [item["family"] for item in sorted(
-            families, key=lambda item: (item["holdout_90d"]["expectancy_r"],
+            families, key=lambda item: (_expectancy_score(item["holdout_90d"]),
                                         _profit_factor_score(item["holdout_90d"]),
                                         -item["holdout_90d"]["max_drawdown_r"]), reverse=True)],
-        "combinations": combinations,
-        "combination_note": "Ensembles are research-only until the live policy schema supports voting.",
+        "policy_scope": "single immutable volatility_breakout policy with 2 ATR stop and 2.5R target",
     }
 
 
@@ -471,7 +358,7 @@ def run_monthly_research(histories: dict[str, list[dict]], min_train_trades: int
     families = []
     for name, candidates in sorted(grouped.items()):
         train, selected = max(candidates, key=lambda item: (
-            item[0]["expectancy_r"], _profit_factor_score(item[0]),
+            _expectancy_score(item[0]), _profit_factor_score(item[0]),
             -item[0]["max_drawdown_r"], item[0]["trades"]))
         monthly = []
         all_evaluation_trades = []

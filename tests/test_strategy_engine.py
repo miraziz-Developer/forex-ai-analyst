@@ -7,7 +7,7 @@ from unittest.mock import patch
 from strategy_backtest import (
     FOUR_HOURS_MS,
     _profit_factor_score,
-    _resolve_trend_exit,
+    _expectancy_score,
     _meets_edge_requirements,
     _resolve,
     _validate_research_thresholds,
@@ -29,18 +29,19 @@ from strategy_engine import (
     load_promoted_policy,
     macd_histogram,
     rsi,
+    stochastic_rsi,
     supertrend_direction,
     support_resistance_levels,
 )
 
 
 class StrategyEngineTests(unittest.TestCase):
-    def test_research_grid_contains_ten_predeclared_families(self):
+    def test_research_grid_contains_only_promoted_policy(self):
         configs = list(parameter_grid())
-        self.assertEqual(len(configs), 20)
-        self.assertEqual(len({item.name for item in configs}), 10)
-        self.assertTrue(all(sum(other.name == item.name for other in configs) == 2
-                            for item in configs))
+        self.assertEqual(configs, [StrategyConfig()])
+        self.assertEqual(configs[0].name, "volatility_breakout")
+        self.assertEqual(configs[0].atr_stop, 2.0)
+        self.assertEqual(configs[0].reward_risk, 2.5)
 
     def test_support_resistance_uses_confirmed_historical_pivots(self):
         chronological = [
@@ -59,6 +60,13 @@ class StrategyEngineTests(unittest.TestCase):
 
     def test_rsi_extremes(self):
         self.assertEqual(rsi(list(range(20))), 100.0)
+
+    def test_stochastic_rsi_is_bounded_and_tracks_latest_rsi(self):
+        values = [100 + ((index % 7) - 3) + index * 0.1 for index in range(60)]
+        value = stochastic_rsi(values)
+        self.assertIsNotNone(value)
+        self.assertGreaterEqual(value, 0)
+        self.assertLessEqual(value, 100)
 
     def test_macd_and_bollinger_on_rising_prices(self):
         prices = [float(value ** 2) for value in range(1, 61)]
@@ -141,22 +149,23 @@ class StrategyEngineTests(unittest.TestCase):
         self.assertAlmostEqual(result_r, 0.6)
         self.assertEqual(exit_index, 0)
 
-    def test_trend_exit_applies_initial_stop_conservatively(self):
-        bars = [{"open": 100, "high": 101, "low": 97, "close": 100}]
-        result = _resolve_trend_exit(
-            "BUY", 100, 98, bars, bars, 0,
-            StrategyConfig(name="momentum_breakout"), 1,
-        )
-        self.assertEqual(result, ("LOSS", -1.0, 0))
-
     def test_policy_loader_fails_closed_and_reads_promoted_config(self):
         self.assertIsNone(load_promoted_policy("/definitely/missing/policy.json"))
         with tempfile.NamedTemporaryFile(mode="w+", suffix=".json") as policy_file:
-            json.dump({"name": "snr_trend_following", "adx_min": 26.0}, policy_file)
+            json.dump(StrategyConfig().__dict__, policy_file)
             policy_file.flush()
             config = load_promoted_policy(policy_file.name)
-        self.assertEqual(config.name, "snr_trend_following")
-        self.assertEqual(config.adx_min, 26.0)
+        self.assertEqual(config, StrategyConfig())
+
+    def test_policy_loader_rejects_any_unvalidated_parameter_change(self):
+        for change in ({"name": "range_breakout"}, {"reward_risk": 3.0},
+                       {"atr_stop": 1.5}, {"adx_min": 23.0}):
+            policy = StrategyConfig().__dict__ | change
+            with self.subTest(change=change), \
+                    tempfile.NamedTemporaryFile(mode="w+", suffix=".json") as policy_file:
+                json.dump(policy, policy_file)
+                policy_file.flush()
+                self.assertIsNone(load_promoted_policy(policy_file.name))
 
     def test_policy_loader_fails_closed_for_invalid_policy(self):
         with tempfile.NamedTemporaryFile(mode="w+", suffix=".json") as policy_file:
@@ -182,6 +191,12 @@ class StrategyEngineTests(unittest.TestCase):
         result = metrics([{"outcome": "WIN", "net_r": 1.9}])
         self.assertIsNone(result["profit_factor"])
         self.assertEqual(_profit_factor_score(result), float("inf"))
+
+    def test_expectancy_score_ranks_empty_results_last(self):
+        self.assertEqual(_expectancy_score(metrics([])), float("-inf"))
+        self.assertEqual(_expectancy_score(metrics([
+            {"outcome": "WIN", "net_r": 0.5},
+        ])), 0.5)
 
     def test_edge_requirements_enforce_resolved_sample_and_60_pct_win_rate(self):
         passing = metrics([

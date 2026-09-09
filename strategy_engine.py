@@ -13,25 +13,29 @@ import os
 
 @dataclass(frozen=True)
 class StrategyConfig:
-    name: str = "snr_trend_following"
+    """The single, immutable policy validated for production use."""
+    name: str = "volatility_breakout"
     fast_ema: int = 20
-    slow_ema: int = 50
+    slow_ema: int = 55
     daily_ema: int = 20
-    adx_min: float = 20.0
+    adx_min: float = 24.0
     volume_ratio_min: float = 1.2
-    rsi_long_min: float = 42.0
-    rsi_long_max: float = 64.0
-    atr_stop: float = 1.5
-    reward_risk: float = 2.0
+    rsi_long_min: float = 40.0
+    rsi_long_max: float = 60.0
+    atr_stop: float = 2.0
+    reward_risk: float = 2.5
     bollinger_period: int = 20
-    bollinger_std: float = 2.0
-    atr_expansion_min: float = 1.0
+    bollinger_std: float = 2.5
+    atr_expansion_min: float = 1.2
     supertrend_multiplier: float = 3.0
-    min_confirmations: int = 3
+    min_confirmations: int = 2
     pivot_span: int = 2
-    sr_lookback: int = 40
-    sr_tolerance_atr: float = 0.45
-    channel_lookback: int = 20
+    sr_lookback: int = 50
+    sr_tolerance_atr: float = 0.55
+    channel_lookback: int = 40
+
+
+PROMOTED_POLICY = StrategyConfig()
 
 
 def _values(bars: list[dict], key: str) -> list[float]:
@@ -128,6 +132,21 @@ def rsi(values: list[float], period: int = 14) -> float | None:
         return 100.0
     relative_strength = average_gain / average_loss
     return 100 - 100 / (1 + relative_strength)
+
+
+def stochastic_rsi(values: list[float], rsi_period: int = 14,
+                   stochastic_period: int = 14) -> float | None:
+    """Current Stochastic RSI on a 0..100 scale, using only supplied closes."""
+    needed = rsi_period + stochastic_period
+    if len(values) < needed:
+        return None
+    readings = [rsi(values[:end], rsi_period)
+                for end in range(rsi_period + 1, len(values) + 1)]
+    window = [value for value in readings[-stochastic_period:] if value is not None]
+    if len(window) < stochastic_period:
+        return None
+    low, high = min(window), max(window)
+    return 50.0 if high == low else 100 * (window[-1] - low) / (high - low)
 
 
 def atr(bars: list[dict], period: int = 14) -> float | None:
@@ -294,14 +313,9 @@ def _evaluate_snr_candidate(primary_bars: list[dict], daily_bars: list[dict],
 
 def evaluate_candidate(primary_bars: list[dict], daily_bars: list[dict],
                        config: StrategyConfig) -> dict | None:
-    """Evaluate one pre-declared family from closed bars without look-ahead."""
-    if config.name == "snr_trend_following":
-        return _evaluate_snr_candidate(primary_bars, daily_bars, config)
-    valid = {"ema_trend_pullback", "donchian_breakout", "macd_continuation",
-             "supertrend_continuation", "bollinger_trend_pullback", "bollinger_reversion",
-             "rsi_reversion", "volatility_breakout", "range_breakout"}
-    if config.name not in valid:
-        raise ValueError(f"Unknown strategy: {config.name}")
+    """Evaluate the promoted closed-bar volatility breakout without look-ahead."""
+    if config != PROMOTED_POLICY:
+        raise ValueError("Only the promoted volatility_breakout policy is supported")
     needed = max(config.slow_ema + 5, config.channel_lookback + 2,
                  config.bollinger_period + 2, 40)
     if len(primary_bars) < needed or len(daily_bars) < config.daily_ema + 2:
@@ -313,65 +327,17 @@ def evaluate_candidate(primary_bars: list[dict], daily_bars: list[dict],
     bias = _daily_bias(daily_bars, config.daily_ema)
     if None in (fast, slow, strength, momentum, volatility, volume_ratio) or not bias:
         return None
-    current = primary_bars[0]
-    close, open_price = float(current["close"]), float(current["open"])
-    high, low = float(current["high"]), float(current["low"])
-    previous_close = float(primary_bars[1]["close"])
-    bullish = close > open_price
+    close = float(primary_bars[0]["close"])
     trend = "BUY" if fast > slow and close > slow else "SELL" if fast < slow and close < slow else None
     aligned = trend == bias and strength >= config.adx_min
     channel = primary_bars[1:config.channel_lookback + 1]
     channel_high = max(float(bar["high"]) for bar in channel)
     channel_low = min(float(bar["low"]) for bar in channel)
-    needs_bands = config.name in {"bollinger_trend_pullback", "bollinger_reversion"}
-    bands = (bollinger_bands(closes, config.bollinger_period, config.bollinger_std)
-             if needs_bands else None)
-    upper, middle, lower = bands if bands else (None, None, None)
-    histogram = macd_histogram(closes) if config.name == "macd_continuation" else None
-    previous_histogram = (macd_histogram(closes[:-1])
-                          if config.name == "macd_continuation" else None)
-    expansion = (atr_expansion_ratio(primary_bars)
-                 if config.name == "volatility_breakout" else None)
-    current_supertrend = (supertrend_direction(
-        primary_bars, multiplier=config.supertrend_multiplier)
-        if config.name == "supertrend_continuation" else None)
-
-    if config.name == "ema_trend_pullback":
-        signal = aligned and ((trend == "BUY" and low <= fast < close and bullish) or
-                              (trend == "SELL" and high >= fast > close and not bullish))
-    elif config.name == "donchian_breakout":
-        signal = aligned and ((trend == "BUY" and close > channel_high) or
-                              (trend == "SELL" and close < channel_low))
-    elif config.name == "macd_continuation":
-        signal = aligned and histogram is not None and previous_histogram is not None and (
-            (trend == "BUY" and histogram > 0 >= previous_histogram) or
-            (trend == "SELL" and histogram < 0 <= previous_histogram))
-    elif config.name == "supertrend_continuation":
-        signal = aligned and current_supertrend == trend and (
-            (trend == "BUY" and previous_close <= fast < close) or
-            (trend == "SELL" and previous_close >= fast > close))
-    elif config.name == "bollinger_trend_pullback":
-        signal = aligned and middle is not None and (
-            (trend == "BUY" and low <= middle < close and bullish) or
-            (trend == "SELL" and high >= middle > close and not bullish))
-    elif config.name == "volatility_breakout":
-        signal = aligned and expansion is not None and expansion >= config.atr_expansion_min \
-            and volume_ratio >= config.volume_ratio_min and (
-                (trend == "BUY" and close > channel_high) or
-                (trend == "SELL" and close < channel_low))
-    elif config.name == "range_breakout":
-        signal = strength >= config.adx_min and (close > channel_high or close < channel_low)
-        trend = "BUY" if close > channel_high else "SELL"
-    elif config.name == "bollinger_reversion":
-        signal = strength < config.adx_min and lower is not None and upper is not None and (
-            (previous_close < lower and close > lower and bullish) or
-            (previous_close > upper and close < upper and not bullish))
-        trend = "BUY" if bullish else "SELL"
-    else:  # rsi_reversion
-        signal = strength < config.adx_min and (
-            (momentum < config.rsi_long_min and bullish) or
-            (momentum > config.rsi_long_max and not bullish))
-        trend = "BUY" if bullish else "SELL"
+    expansion = atr_expansion_ratio(primary_bars)
+    signal = aligned and expansion is not None and expansion >= config.atr_expansion_min \
+        and volume_ratio >= config.volume_ratio_min and (
+            (trend == "BUY" and close > channel_high) or
+            (trend == "SELL" and close < channel_low))
     if not signal or trend is None:
         return None
     return {"direction": trend, "strategy": config.name, "atr": volatility,
@@ -399,12 +365,6 @@ def config_from_dict(values: dict) -> StrategyConfig:
     if unknown:
         raise ValueError(f"Unknown strategy policy fields: {', '.join(sorted(unknown))}")
     config = StrategyConfig(**{key: value for key, value in values.items() if key in allowed})
-    valid_names = {"snr_trend_following", "ema_trend_pullback", "donchian_breakout",
-                   "macd_continuation", "supertrend_continuation", "bollinger_trend_pullback",
-                   "bollinger_reversion", "rsi_reversion", "volatility_breakout",
-                   "range_breakout"}
-    if config.name not in valid_names:
-        raise ValueError(f"Unknown strategy: {config.name}")
     periods = ("fast_ema", "slow_ema", "daily_ema", "bollinger_period",
                "min_confirmations", "pivot_span", "sr_lookback", "channel_lookback")
     if any(type(getattr(config, key)) is not int or getattr(config, key) <= 0 for key in periods):
@@ -430,6 +390,8 @@ def config_from_dict(values: dict) -> StrategyConfig:
         raise ValueError("ADX thresholds cannot be negative")
     if not 0 <= config.rsi_long_min < config.rsi_long_max <= 100:
         raise ValueError("RSI thresholds must be ordered within 0..100")
+    if config != PROMOTED_POLICY:
+        raise ValueError("Policy does not exactly match the promoted volatility_breakout policy")
     return config
 
 

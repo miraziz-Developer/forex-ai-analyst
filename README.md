@@ -262,20 +262,17 @@ Run the reproducible, no-LLM three-month strategy research separately:
 python3 strategy_backtest.py --mode three-month
 ```
 
-It compares two pre-declared variants of ten independent hypotheses: S/R rejection,
-EMA pullback, Donchian breakout, MACD continuation, Supertrend continuation,
-Bollinger trend pullback, Bollinger and RSI mean reversion, volatility breakout,
-and range breakout. The top development families are also tested as strict
-two-vote ensembles. Entries use the next 4H bar's open and same-bar target/stop
+It replays only the promoted `volatility_breakout` policy. Alternative strategy
+families, ensembles, and exit variants were removed after the completed comparison,
+so research and live execution cannot silently drift away from the validated
+configuration. Entries use the next 4H bar's open and same-bar target/stop
 collisions resolve as losses. Results deduct estimated
 0.10% round-trip taker fees, 0.04% slippage, and a conservative 0.01% funding
-drag per eight hours. Pre-holdout rolling months select one policy per family;
+drag per eight hours. Pre-holdout rolling months verify the fixed policy;
 the newest 90 days are then evaluated once. Promotion requires positive Net R,
 expectancy, and profit factor, at least ten holdout trades, and positive results
-on at least three of five pairs. Only the development-selected candidate may be
-promoted; the holdout leaderboard is diagnostic and cannot replace it after the
-fact. Research ensembles remain report-only until live voting has its own policy
-schema.
+on at least three of five pairs. Policy loading is fail-closed and rejects every
+parameter set except the exact promoted 2 ATR stop / fixed 2.5R target policy.
 
 The 2026-06-11 through 2026-09-09 untouched holdout promoted the development-selected
 `volatility_breakout` policy: 25 trades, +6.469R, +0.259R expectancy, 1.505 profit
