@@ -106,7 +106,7 @@ def _normalize(data: dict) -> list[dict]:
 # fetching a second, differently-sized 1h series would be a separate cache key —
 # i.e. a whole extra API call per pair per cycle against a 5-req/15min limit.
 # One deeper fetch serves both uses. Consumers that want the old window slice it.
-BARS_PER_TIMEFRAME_OVERRIDES = {"1h": 150}
+BARS_PER_TIMEFRAME_OVERRIDES = {"1h": 150, "4h": 180}
 
 
 def fetch_multi_timeframe(symbol: str) -> dict[str, list[dict]]:

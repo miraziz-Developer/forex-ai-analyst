@@ -6,9 +6,9 @@ BNB-USDT perpetual futures itself, 24/7, no exchange dashboard needed. Every
 structure, Smart Money Concepts (order blocks, FVGs, liquidity, BOS/CHoCH),
 institutional positioning (funding rate, open interest trend, order book
 imbalance), and an actual visual read of rendered charts — combined into one
-TRADE WATCH / SKIP verdict. There's no mechanical indicator gating it; the
-model decides every single time, using the daily/macro trend and
-institutional data as *confirmation*, not independent gates. It only
+TRADE WATCH / SKIP verdict. The model performs the setup judgment using the
+daily/macro trend and institutional data as confirmation; code-level
+volatility, confidence, and reward/risk gates then reject unsafe candidates. It only
 messages you when its verdict is a genuine TRADE WATCH. Every signal is
 logged to a database and automatically checked against real price history
 (or the real broker outcome, if execution is on), so you get a measured win
@@ -29,6 +29,9 @@ USDT) account. See section 5.**
 - `broker.py` — optional BingX demo execution (only used if `AUTO_EXECUTE_TRADES=true`)
 - `system_prompt.txt` — the analyst's full instructions (auto-loaded by app.py)
 - `backtest.py` — replays the same AI analyst against real historical data for a much faster (hours, not weeks) directional read — see section 9
+- `strategy_engine.py` — deterministic pivot S/R + trend-confirmation strategy
+- `strategy_backtest.py` — cost-aware rolling-month selection → untouched 90-day
+  deterministic research without paid LLM calls
 - `requirements.txt`, `.env.example`
 
 ## Why crypto, not forex
@@ -187,7 +190,8 @@ With `AUTO_EXECUTE_TRADES=true`:
   leverage, effectively a ~60%-of-equity notional ceiling), and falls back to
   the flat `POSITION_SIZE_USDT` if the P&L lookup itself fails. That base
   size is then further scaled down by two multipliers: confidence
-  (`YUQORI`/`ORTA`/`PAST` from the model's own self-assessment, 1.0x/0.7x/0.45x)
+  (`YUQORI`/`ORTA` from the model's own self-assessment, 1.0x/0.7x; `PAST` and
+  unparseable confidence are rejected by default via `MIN_SIGNAL_CONFIDENCE`)
   and correlation (fewer $ per trade the more same-direction positions are
   already open across the 5 — mostly correlated — pairs, floor 0.3x)
 - No cap on concurrent open positions (demo money — removed deliberately);
@@ -212,6 +216,7 @@ stop/target distance now vary per trade.
 - **Change check frequency**: `POLL_INTERVAL_MINUTES`, `RESOLVER_INTERVAL_MINUTES` — see the rate-limit comment in `.env.example` before lowering either or adding pairs
 - **Change trading window/days**: `TRADING_DAYS`, `TRADING_WINDOW_START/END` in `.env` (all UTC)
 - **Change the sanity-bound target/stop**: `ATR_MULTIPLIER`, `REWARD_RISK_RATIO`, or the `TARGET_PCT_STOP_PCT` fallback
+- **Change the minimum accepted confidence**: `MIN_SIGNAL_CONFIDENCE` (`ORTA` by default)
 - **Change how long a signal stays open**: `SIGNAL_EXPIRY_HOURS`
 - **Change position size / leverage**: `RISK_PCT_PER_TRADE` and `STARTING_EQUITY_USDT` (real sizing basis), `POSITION_SIZE_USDT` (fallback only), `LEVERAGE`
 
@@ -227,7 +232,8 @@ stop/target distance now vary per trade.
 ## 9. Backtesting
 ```bash
 python backtest.py --pairs BTC-USDT,ETH-USDT --checkpoint-hours 3 \
-    --min-age-days 0 --max-age-days 15 --history-pages 2 --workers 8
+    --min-age-days 0 --max-age-days 15 --history-pages 2 --workers 8 \
+    --holdout-ratio 0.30 --min-train-trades 20
 ```
 Replays the exact same system prompt against real historical bars (no web
 search / institutional data / chart images at each historical point — those
@@ -240,6 +246,43 @@ against the same window until a number looks good; that's overfitting to
 noise, and will likely make live performance worse, not better. Always
 sanity-check any prompt change against a *different* time window than the
 one that motivated it before trusting it.
+
+The report also performs a small-grid threshold analysis (`ORTA`/`YUQORI`
+confidence and 1.5/2.0/2.5 minimum R:R). It selects a policy using only the
+older train segment and evaluates it once on the newest holdout segment. The
+full audit is written to `backtest_policy_analysis.json`. If there are fewer
+than `--min-train-trades` qualifying observations, it deliberately makes no
+recommendation instead of optimizing noise.
+
+### Deterministic strategy research
+
+Run the reproducible, no-LLM three-month strategy research separately:
+
+```bash
+python3 strategy_backtest.py --mode three-month
+```
+
+It compares two pre-declared variants of ten independent hypotheses: S/R rejection,
+EMA pullback, Donchian breakout, MACD continuation, Supertrend continuation,
+Bollinger trend pullback, Bollinger and RSI mean reversion, volatility breakout,
+and range breakout. The top development families are also tested as strict
+two-vote ensembles. Entries use the next 4H bar's open and same-bar target/stop
+collisions resolve as losses. Results deduct estimated
+0.10% round-trip taker fees, 0.04% slippage, and a conservative 0.01% funding
+drag per eight hours. Pre-holdout rolling months select one policy per family;
+the newest 90 days are then evaluated once. Promotion requires positive Net R,
+expectancy, and profit factor, at least ten holdout trades, and positive results
+on at least three of five pairs. Only the development-selected candidate may be
+promoted; the holdout leaderboard is diagnostic and cannot replace it after the
+fact. Research ensembles remain report-only until live voting has its own policy
+schema.
+
+The 2026-06-11 through 2026-09-09 untouched holdout promoted the development-selected
+`volatility_breakout` policy: 25 trades, +6.469R, +0.259R expectancy, 1.505 profit
+factor, 10.275R max drawdown, and 5/5 positive pairs. The live pipeline now fails
+closed without a valid policy, requires the promoted closed-4H signal to agree with
+the AI direction, and uses the promoted 2 ATR stop and 2.5R target. This result is
+one historical sample, not a guarantee of future profitability.
 
 ## Known limitations (be honest with yourself about these)
 - The model gets both raw OHLC numbers and rendered chart images, but it's

@@ -18,6 +18,8 @@ from institutional_data import fetch_institutional_context, format_institutional
 from market_data import fetch_bars, fetch_multi_timeframe
 from notifier import send_telegram_message
 from scheduler import start_scheduler
+from signal_quality import confidence_meets_minimum, reward_risk_ratio
+from strategy_engine import candidate_levels, evaluate_candidate, load_promoted_policy
 
 load_dotenv()
 
@@ -69,6 +71,11 @@ ATR_PERCENTILE_MAX = float(os.environ.get("ATR_PERCENTILE_MAX", "90"))
 # explicitly tells it to enforce — and still recommend TRADE WATCH. Asking
 # nicely in the prompt clearly isn't sufficient on its own; this backstops it.
 MIN_REWARD_RISK_RATIO = float(os.environ.get("MIN_REWARD_RISK_RATIO", "1.5"))
+# Low-confidence ideas were previously still accepted and merely sized down.
+# For an immediate market-order system that admits the setup is weak, that is
+# the wrong trade-off: reject it and wait for a cleaner checkpoint instead.
+MIN_SIGNAL_CONFIDENCE = os.environ.get("MIN_SIGNAL_CONFIDENCE", "ORTA").strip().upper()
+confidence_meets_minimum(MIN_SIGNAL_CONFIDENCE, MIN_SIGNAL_CONFIDENCE)  # validate at startup
 
 
 def compute_stop_target_pct(bars_1h: list[dict]) -> tuple[float, float]:
@@ -301,7 +308,7 @@ _CONFIDENCE_MULTIPLIERS = {"YUQORI": 1.0, "ORTA": 0.7, "PAST": 0.45}
 
 def extract_confidence(analysis: str) -> str | None:
     """Reads the model's own 'Ishonch darajasi: ...' line. Returns 'YUQORI',
-    'ORTA', 'PAST', or None if unparseable (treated as ORTA — see caller)."""
+    'ORTA', 'PAST', or None if unparseable (rejected by the quality gate)."""
     for line in analysis.splitlines():
         normalized = re.sub(r"[’‘'ʻʼ`´]", "", line).upper()
         if "ISHONCH DARAJASI" in normalized:
@@ -375,6 +382,20 @@ def extract_price(analysis: str, label: str) -> float | None:
     return None
 
 
+def promoted_live_candidate(bars: dict, now_ms: int) -> tuple[object | None, dict | None]:
+    """Return the promoted closed-bar signal, failing closed on any missing input."""
+    policy = load_promoted_policy()
+    if policy is None:
+        return None, None
+    closed_4h = [bar for bar in bars.get("4h", [])
+                 if int(bar["datetime"]) + 4 * 3600 * 1000 <= now_ms]
+    completed_daily = [bar for bar in bars.get("1d", [])
+                       if int(bar["datetime"]) + 24 * 3600 * 1000 <= now_ms]
+    if not closed_4h or not completed_daily:
+        return policy, None
+    return policy, evaluate_candidate(closed_4h, completed_daily, policy)
+
+
 def analyze_and_notify(symbol: str) -> dict:
     """Shared pipeline: trading-window check -> fetch bars -> full AI read -> Telegram
     only when the AI itself calls a new TRADE WATCH. Runs on every scheduler tick for
@@ -391,6 +412,15 @@ def analyze_and_notify(symbol: str) -> dict:
     except Exception:
         logger.exception("Failed to fetch bars for %s", symbol)
         return {"status": "error", "reason": "bar fetch failed"}
+
+    policy, deterministic_candidate = promoted_live_candidate(
+        bars, int(now_utc.timestamp() * 1000))
+    if policy is None:
+        logger.warning("%s skipped — no valid promoted deterministic policy", symbol)
+        return {"status": "no_signal", "reason": "no promoted policy"}
+    if deterministic_candidate is None:
+        logger.info("%s skipped — promoted %s has no closed-bar signal", symbol, policy.name)
+        return {"status": "no_signal", "reason": "deterministic strategy gate"}
 
     # Volatility-regime gate before spending a model call: a dead or a violent
     # market is where structure-based reads fail most often, whatever the chart
@@ -423,6 +453,26 @@ def analyze_and_notify(symbol: str) -> dict:
             logger.info("%s reasoning: %s", symbol, reasoning)
         return {"status": "no_signal", "recommendation": recommendation}
 
+    confidence = extract_confidence(analysis)
+    if not confidence_meets_minimum(confidence, MIN_SIGNAL_CONFIDENCE):
+        logger.info(
+            "%s: TRADE_WATCH rejected — confidence %s is below minimum %s",
+            symbol, confidence or "UNPARSEABLE", MIN_SIGNAL_CONFIDENCE,
+        )
+        return {
+            "status": "no_signal",
+            "recommendation": recommendation,
+            "reason": "confidence below minimum",
+            "confidence": confidence,
+        }
+
+    ai_direction = extract_direction(analysis)
+    if ai_direction != deterministic_candidate["direction"]:
+        logger.info("%s rejected — AI direction %s disagrees with promoted %s direction %s",
+                    symbol, ai_direction, policy.name, deterministic_candidate["direction"])
+        return {"status": "no_signal", "reason": "direction disagreement",
+                "strategy_direction": deterministic_candidate["direction"]}
+
     if storage.has_open_signal(symbol):
         # already have an open, unresolved signal for this pair — don't stack
         # another one on top. DB-backed (not in-memory) so this holds even
@@ -431,7 +481,8 @@ def analyze_and_notify(symbol: str) -> dict:
         return {"status": "no_signal", "recommendation": recommendation, "reason": "already open"}
 
     message, executed = _log_and_maybe_execute_signal(
-        symbol, bars, analysis, target_pct, stop_pct, institutional.get("funding_rate_pct"))
+        symbol, bars, analysis, target_pct, stop_pct, institutional.get("funding_rate_pct"),
+        policy, deterministic_candidate)
 
     sent = send_telegram_message(message, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
     logger.info("Signal sent for %s (telegram sent: %s, executed: %s)", symbol, sent, executed)
@@ -510,7 +561,9 @@ def _risk_based_position_size(stop_distance_pct: float) -> tuple[float, str]:
 
 def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
                                    target_pct: float, stop_pct: float,
-                                   funding_rate_pct: float | None = None) -> tuple[str, bool]:
+                                   funding_rate_pct: float | None = None,
+                                   strategy_config=None,
+                                   strategy_candidate: dict | None = None) -> tuple[str, bool]:
     """Computes entry/target/stop, optionally places a real BingX demo order, logs
     the signal (with the broker order ID/qty if one was opened), and returns the
     Telegram message text (analysis + an explicit execution status line) plus
@@ -525,15 +578,18 @@ def _log_and_maybe_execute_signal(symbol: str, bars: dict, analysis: str,
     # (possibly rounded/approximate) restated number.
     entry_price = float(freshest_5min[0]["close"])
 
-    ai_stop = extract_price(analysis, "STOP-LOSS NARXI")
-    ai_target = extract_price(analysis, "TAKE-PROFIT NARXI")
-    target_price, stop_price, level_source = _resolve_target_stop(
-        entry_price, direction, ai_target, ai_stop, target_pct, stop_pct)
+    if strategy_config is not None and strategy_candidate is not None:
+        target_price, stop_price = candidate_levels(
+            entry_price, strategy_candidate, strategy_config)
+        level_source = f"promoted_{strategy_config.name}"
+    else:
+        ai_stop = extract_price(analysis, "STOP-LOSS NARXI")
+        ai_target = extract_price(analysis, "TAKE-PROFIT NARXI")
+        target_price, stop_price, level_source = _resolve_target_stop(
+            entry_price, direction, ai_target, ai_stop, target_pct, stop_pct)
     logger.info("%s: stop/target source=%s stop=%s target=%s", symbol, level_source, stop_price, target_price)
 
-    reward = abs(target_price - entry_price)
-    risk = abs(entry_price - stop_price)
-    actual_rr = reward / risk if risk > 0 else 0.0
+    actual_rr = reward_risk_ratio(entry_price, target_price, stop_price)
     if actual_rr < MIN_REWARD_RISK_RATIO:
         logger.warning(
             "%s: TRADE WATCH rejected by code-level R:R gate — actual %.2f:1 is below the %.1f:1 floor "

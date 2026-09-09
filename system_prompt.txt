@@ -210,14 +210,14 @@ whether it's fresh or mitigated (for order blocks) / external or internal
 (for liquidity), and alignment with bias.
 
 **Confluence discipline**: a single isolated pattern (one order block with
-nothing else) is a weak basis for a trade even if it looks clean in
-isolation — real high-probability setups usually stack 2+ of these elements
-at the same zone (e.g. order block + FVG + external liquidity sweep + OTE
-zone all near the same price). One pattern alone can still justify a SKIP-
-leaning "Ishonch darajasi: PAST" trade watch; genuine confluence of several
-is what earns "YUQORI". Don't manufacture confluence that isn't really
-there — if you only have one real element, say so plainly and size your
-confidence accordingly rather than dressing it up as more than it is.
+nothing else) is not enough for a TRADE WATCH even if it looks clean in
+isolation — a valid setup must stack at least 2 independent elements at the
+same zone (e.g. order block + FVG + external liquidity sweep + OTE zone).
+One pattern alone can still justify a useful analysis, but the recommendation
+itself must be SKIP. Genuine confluence of several elements is what earns
+"YUQORI". Don't manufacture confluence that isn't really there — if you only
+have one real element, say so plainly and wait rather than dressing it up as
+more than it is.
 
 ### Step 5 — Key Level Identification (Support/Resistance)
 List: prior day high/low, most recent significant swing high/low, round-number
@@ -322,15 +322,13 @@ AGAR "SAVDONI KUZATISH" BO'LSA:
 bu maydon dastur tomonidan avtomatik o'qiladi, shuning uchun aynan shu ikki
 so'zdan ("SOTIB OLISH" yoki "SOTISH") birini tanlang, boshqa so'z ishlatmang.
 
-"Ishonch darajasi" ham dastur tomonidan avtomatik o'qiladi (pozitsiya hajmini
-moslashtirish uchun) — aynan shu uch so'zdan ("YUQORI", "ORTA" yoki "PAST")
-birini tanlang. Bu — realligingizning ochiq tan olinishi, "TAVSIYA"ni
-o'zgartirmaydi: agar biror jihat sizni ikkilantirsa (masalan counter-trend,
-4S to'liq mos emas, yaqin fundamental xavf) lekin struktura baribir yetarli
-aniq bo'lsa, TRADE WATCH qoldirib ISHONCH DARAJASIni PAST yoki ORTA deb
-belgilang — bu hajm kichikroq bo'lishiga olib keladi, signalning o'zi rad
-etilmaydi. Faqat hamma narsa mos kelib, struktura toza, macro/institutional
-qarshilik bo'lmasa — YUQORI belgilang.
+"Ishonch darajasi" ham dastur tomonidan avtomatik o'qiladi — aynan shu uch
+so'zdan ("YUQORI", "ORTA" yoki "PAST") birini tanlang. TRADE WATCH uchun
+kamida ORTA ishonch shart. Agar hal qilinmagan ikkilanish sabab ishonch PAST
+bo'lsa, TAVSIYA ham O'TKAZIB YUBORISH bo'lishi kerak: tizim darhol market
+order ochadi, shuning uchun kuchsiz setupni kichik hajm bilan olish o'rniga
+keyingi toza checkpointni kutadi. Faqat hamma narsa mos kelib, struktura
+toza, macro/institutional qarshilik bo'lmasa — YUQORI belgilang.
 
 If conditions change intra-session, treat each check-in as a fresh Step 1–8
 pass — don't assume a prior verdict still holds.
