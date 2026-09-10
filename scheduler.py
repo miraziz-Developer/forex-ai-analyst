@@ -76,6 +76,34 @@ def _resolve_open_signals() -> None:
         _resolve_one(signal)
 
 
+def _notify_resolution(signal: dict, outcome: str, exit_price: float) -> None:
+    """Notify the user when a tracked signal closes, without overstating P&L."""
+    resolved = dict(signal)
+    resolved["outcome"] = outcome
+    resolved["outcome_price"] = exit_price
+    resolved["outcome_time"] = datetime.now(timezone.utc)
+    estimated_pnl = storage.estimate_signal_pnl(resolved)
+    outcome_text = {"WIN": "FOYDA ✅", "LOSS": "ZARAR ❌", "EXPIRED": "MUDDAT TUGADI ⏱️"}[outcome]
+    lines = [
+        f"SAVDO YOPILDI — {outcome_text}",
+        f"#{signal['id']} | {signal['pair']} | {signal['direction']}",
+        f"Kirish: {float(signal['entry_price']):.8g}",
+        f"Chiqish: {exit_price:.8g}",
+    ]
+    if estimated_pnl is None:
+        lines.append("P&L: hisoblanmadi (bu faqat analysis/alert signal edi, order ochilmagan)")
+    else:
+        label = "Sof taxminiy foyda" if estimated_pnl >= 0 else "Sof taxminiy zarar"
+        lines.append(f"{label}: {estimated_pnl:+.2f} USDT (taker fee va funding hisobida)")
+    send_telegram_message("\n".join(lines), os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+                          os.environ.get("TELEGRAM_CHAT_ID", ""))
+
+
+def _resolve_and_notify(signal: dict, outcome: str, exit_price: float) -> None:
+    storage.resolve_signal(signal["id"], outcome, exit_price)
+    _notify_resolution(signal, outcome, exit_price)
+
+
 def _resolve_one(signal: dict) -> None:
     symbol = signal["pair"]
     try:
@@ -106,11 +134,11 @@ def _resolve_one(signal: dict) -> None:
             hit_target, hit_stop = low <= target, high >= stop
 
         if hit_stop:  # if both hit in the same bar, treat conservatively as the loss
-            storage.resolve_signal(signal["id"], "LOSS", stop)
+            _resolve_and_notify(signal, "LOSS", stop)
             logger.info("Signal %s (%s) resolved: LOSS at %s", signal["id"], symbol, stop)
             return
         if hit_target:
-            storage.resolve_signal(signal["id"], "WIN", target)
+            _resolve_and_notify(signal, "WIN", target)
             logger.info("Signal %s (%s) resolved: WIN at %s", signal["id"], symbol, target)
             return
 
@@ -120,12 +148,13 @@ def _resolve_one(signal: dict) -> None:
         broker_qty = signal.get("broker_qty")
         if broker_qty:
             try:
-                broker.close_position(symbol, direction, broker_qty)
+                close_fill = broker.close_position(symbol, direction, broker_qty)
+                latest_price = float(close_fill["fill_price"])
                 logger.info("Force-closed expired broker position for signal %s (%s)", signal["id"], symbol)
             except Exception:
                 logger.exception("Resolver: failed to force-close expired position for signal %s (%s)",
                                   signal["id"], symbol)
-        storage.resolve_signal(signal["id"], "EXPIRED", latest_price)
+        _resolve_and_notify(signal, "EXPIRED", latest_price)
         logger.info("Signal %s (%s) resolved: EXPIRED at %s", signal["id"], symbol, latest_price)
 
 

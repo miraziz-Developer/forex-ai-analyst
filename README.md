@@ -177,14 +177,16 @@ free [UptimeRobot](https://uptimerobot.com) monitor pinging `/health` every
    resolved — from the real BingX order outcome if one exists, otherwise
    from price bars since it was logged; unresolved past `SIGNAL_EXPIRY_HOURS`
    = EXPIRED (force-closing the real position first, if one exists)
-6. Once a day, a win-rate + realized-P&L digest goes to Telegram
+6. Once a day, a win-rate + realized-P&L digest goes to Telegram. A separate
+   immediate message is also sent whenever a signal closes, showing entry/exit
+   prices and estimated net P&L for executed demo orders.
 
 ## 5. Execution details (BingX demo)
 With `AUTO_EXECUTE_TRADES=true`:
 - Leverage is set to `LEVERAGE` (default 3x) before each order
 - Position size is **risk-based**, not fixed: sized so that if the stop is
-  hit, the loss equals `RISK_PCT_PER_TRADE`% (default 1.5%) of a *simulated*
-  equity — `STARTING_EQUITY_USDT` (default 200, the capital you'd actually
+  hit, the loss is at most `RISK_PCT_PER_TRADE`% (default 2%) of a *simulated*
+  equity — `STARTING_EQUITY_USDT` (default 100, the capital you'd actually
   plan to deposit for real) plus our own tracked realized P&L. Deliberately
   **not** BingX's demo wallet balance, which starts at an unrealistic
   ~$99,932 — sizing off that would simulate a $100k account instead of the

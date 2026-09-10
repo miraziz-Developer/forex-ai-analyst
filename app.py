@@ -91,13 +91,13 @@ def compute_stop_target_pct(bars_1h: list[dict]) -> tuple[float, float]:
 
 AUTO_EXECUTE_TRADES = os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true"
 POSITION_SIZE_USDT = float(os.environ.get("POSITION_SIZE_USDT", "100"))  # fallback only, if equity calc fails
-RISK_PCT_PER_TRADE = float(os.environ.get("RISK_PCT_PER_TRADE", "1.5"))  # % of equity risked if stop is hit
+RISK_PCT_PER_TRADE = float(os.environ.get("RISK_PCT_PER_TRADE", "2.0"))  # % of equity risked if stop is hit
 # NOT BingX's demo wallet balance (~$99,932 by default — an unrealistic size
 # that would make every trade's risk math simulate a $100k account). This is
 # the capital you'd actually plan to deposit for real, so sizing and P&L stay
 # a meaningful simulation of "what would happen with real money", not
 # BingX's inflated demo playground balance.
-STARTING_EQUITY_USDT = float(os.environ.get("STARTING_EQUITY_USDT", "200"))
+STARTING_EQUITY_USDT = float(os.environ.get("STARTING_EQUITY_USDT", "100"))
 LEVERAGE = int(os.environ.get("LEVERAGE", "3"))
 # Ceiling expressed as max MARGIN used per trade (not raw notional) — a flat
 # % of notional makes no sense once leverage is in the picture (it would

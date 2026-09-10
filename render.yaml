@@ -29,3 +29,7 @@ services:
         value: "2.0"
       - key: REWARD_RISK_RATIO
         value: "2.5"
+      - key: STARTING_EQUITY_USDT
+        value: "100"
+      - key: RISK_PCT_PER_TRADE
+        value: "2.0"
