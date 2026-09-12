@@ -14,6 +14,8 @@ from flask import Flask, abort, jsonify, request
 
 from ai_trader import AITradeDecision, decide
 from institutional_data import fetch_institutional_context
+from learning import summarize as learning_summary
+from market_intelligence import context_for_pair, status as intelligence_status
 import knowledge
 from market_regime import classify_market_regime
 from multi_strategy_scheduler import start_scheduler
@@ -86,6 +88,8 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
         return [{"status": "SKIP", "reason": "yetarli yopilgan sham yo‘q"}]
     snapshot = {"pair": pair.upper(), "time_utc": now.isoformat(), "regime": str(regime.regime),
                 "regime_features": regime.features, "institutional": fetch_institutional_context(pair.upper()),
+                "market_intelligence": context_for_pair(pair, now),
+                "outcome_learning": learning_summary(scalping_storage.closed_paper_signals(500), pair),
                 "bars_5m": bars_5m[-80:], "bars_15m": bars_15m[-120:], "bars_1h": bars_1h[-120:]}
     excerpts = knowledge.search(f"{pair} {regime.regime} trend volatility risk")
     ai = decide(snapshot, excerpts, scalping_storage.recent_ai_reviews(pair))
@@ -137,6 +141,13 @@ def health():
 def signals_api():
     _require_dashboard_access()
     return jsonify({"signals": scalping_storage.recent_candidates(request.args.get("limit", 100, type=int))})
+
+
+@app.route("/api/intelligence")
+def intelligence_api():
+    _require_dashboard_access()
+    return jsonify({"market_intelligence": intelligence_status(),
+                    "reconciliation": scalping_storage.reconciliation_status()})
 
 
 @app.route("/telegram/webhook", methods=["POST"])

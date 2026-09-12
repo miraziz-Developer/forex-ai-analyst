@@ -50,6 +50,35 @@ def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
             logger.exception("paper resolver failed for %s", signal["fingerprint"])
 
 
+def reconcile_closed_vst_orders() -> None:
+    """Best effort: only persist numeric values actually returned by BingX VST."""
+    try:
+        import broker
+        for row in scalping_storage.closed_paper_signals(250):
+            if not row.get("broker_order_id") or row.get("reconciled_at"):
+                continue
+            started = int(datetime.fromisoformat(row["created_at"]).timestamp() * 1000)
+            gross = fees = funding = 0.0
+            has_numeric_income = False
+            for item in broker.income_history(row["pair"], started):
+                kind = str(item.get("incomeType", item.get("type", ""))).upper()
+                try:
+                    value = float(item.get("income", item.get("amount")))
+                except (TypeError, ValueError):
+                    continue
+                has_numeric_income = True
+                if "FUNDING" in kind:
+                    funding += value
+                elif "COMMISSION" in kind or "FEE" in kind:
+                    fees += abs(value)
+                elif "REALIZED" in kind or "PNL" in kind:
+                    gross += value
+            if has_numeric_income:
+                scalping_storage.reconcile_broker_pnl(row["fingerprint"], gross, fees, funding)
+    except Exception:
+        logger.exception("BingX VST reconciliation failed")
+
+
 def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: MarketDataProvider,
                     interval_seconds: int) -> BackgroundScheduler:
     if interval_seconds < 300:
@@ -59,6 +88,9 @@ def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: Mar
                       max_instances=1, coalesce=True, next_run_time=datetime.now(timezone.utc))
     scheduler.add_job(resolve_open_paper_signals, "interval", seconds=interval_seconds, args=[provider],
                       id="multi-strategy-resolve", max_instances=1, coalesce=True,
+                      next_run_time=datetime.now(timezone.utc))
+    scheduler.add_job(reconcile_closed_vst_orders, "interval", seconds=interval_seconds,
+                      id="bingx-vst-reconcile", max_instances=1, coalesce=True,
                       next_run_time=datetime.now(timezone.utc))
     scheduler.start()
     logger.info("Multi-strategy scheduler started: scan and resolver every %s seconds", interval_seconds)

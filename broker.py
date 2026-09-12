@@ -98,3 +98,11 @@ def close_position(symbol: str, direction: str, quantity: float) -> dict:
     })
     order = data["data"]["order"]
     return {"order_id": str(order["orderId"]), "fill_price": float(order["avgPrice"])}
+
+
+def income_history(symbol: str, start_time_ms: int) -> list[dict]:
+    """Documented V2 income endpoint; callers parse fields defensively."""
+    data = _signed_request("GET", "/openApi/swap/v2/user/income",
+                           {"symbol": symbol, "startTime": str(start_time_ms), "limit": "100"})
+    values = data.get("data", [])
+    return values if isinstance(values, list) else values.get("list", [])

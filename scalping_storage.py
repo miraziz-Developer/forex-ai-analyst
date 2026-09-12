@@ -54,6 +54,11 @@ def init_db() -> None:
         "ALTER TABLE signal_candidates ADD COLUMN broker_order_id TEXT",
         "ALTER TABLE signal_candidates ADD COLUMN broker_fill_price REAL",
         "ALTER TABLE signal_candidates ADD COLUMN broker_quantity REAL",
+        "ALTER TABLE signal_candidates ADD COLUMN gross_pnl_usdt REAL",
+        "ALTER TABLE signal_candidates ADD COLUMN actual_fees_usdt REAL",
+        "ALTER TABLE signal_candidates ADD COLUMN actual_funding_usdt REAL",
+        "ALTER TABLE signal_candidates ADD COLUMN actual_net_pnl_usdt REAL",
+        "ALTER TABLE signal_candidates ADD COLUMN reconciled_at TEXT",
     ):
         try:
             storage._execute(migration)
@@ -135,9 +140,10 @@ def open_paper_signals() -> list[dict]:
 
 def closed_paper_signals(limit: int = 10) -> list[dict]:
     """Newest resolved VST/paper orders with their realized journal P&L."""
-    safe_limit = min(max(int(limit), 1), 50)
-    result = storage._execute("""SELECT pair, direction, entry_price, outcome_price, outcome_time, status,
-                                      quantity, broker_order_id
+    safe_limit = min(max(int(limit), 1), 500)
+    result = storage._execute("""SELECT fingerprint, pair, direction, regime, entry_price, outcome_price, outcome_time, status,
+                                      quantity, broker_order_id, created_at, reconciled_at, gross_pnl_usdt,
+                                      actual_fees_usdt, actual_funding_usdt, actual_net_pnl_usdt
                                FROM signal_candidates
                                WHERE status IN ('WIN', 'LOSS', 'EXPIRED')
                                ORDER BY outcome_time DESC LIMIT ?""", [safe_limit])
@@ -215,3 +221,22 @@ def recent_candidates(limit: int = 100) -> list[dict]:
                                outcome_price, outcome_time, created_at FROM signal_candidates
                                ORDER BY created_at DESC LIMIT ?""", [safe_limit])
     return storage._rows_as_dicts(result)
+
+
+def reconcile_broker_pnl(fingerprint: str, gross_pnl: float, fees: float, funding: float) -> None:
+    """Persist exchange-derived values only; estimates must never be passed here."""
+    storage._execute("""UPDATE signal_candidates SET gross_pnl_usdt = ?, actual_fees_usdt = ?,
+                      actual_funding_usdt = ?, actual_net_pnl_usdt = ?, reconciled_at = ? WHERE fingerprint = ?""",
+                     [gross_pnl, fees, funding, gross_pnl - fees + funding,
+                      datetime.now(timezone.utc).isoformat(), fingerprint])
+
+
+def reconciliation_status() -> dict:
+    rows = storage._rows_as_dicts(storage._execute("""SELECT count(*) AS executed,
+        sum(CASE WHEN reconciled_at IS NOT NULL THEN 1 ELSE 0 END) AS reconciled,
+        sum(actual_net_pnl_usdt) AS actual_net_pnl_usdt FROM signal_candidates
+        WHERE broker_order_id IS NOT NULL AND status != 'ACCEPTED_PAPER'"""))
+    row = rows[0] if rows else {}
+    return {"executed_closed": int(row.get("executed") or 0), "reconciled": int(row.get("reconciled") or 0),
+            "actual_net_pnl_usdt": float(row.get("actual_net_pnl_usdt") or 0),
+            "policy": "Actual net P&L is shown only after BingX reports numeric income fields."}
