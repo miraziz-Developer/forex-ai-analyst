@@ -28,7 +28,9 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(telegram_chat.answer("Holat qanday?"), "Azure javob")
         openai_module.OpenAI.assert_called_once_with(
             api_key="azure-key", base_url="https://resource.openai.azure.com/openai/v1/")
-        self.assertEqual(client.chat.completions.create.call_args.kwargs["model"], "chat-deployment")
+        request = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["model"], "chat-deployment")
+        self.assertNotIn("max_tokens", request)
 
     @patch("telegram_bot.requests.post")
     def test_configure_webhook_registers_callback_updates_and_commands(self, post):

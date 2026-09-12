@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 import scalping_storage
@@ -9,6 +10,8 @@ import runtime_controls
 from ai_trader import _azure_openai_base_url
 from learning import summarize
 from market_intelligence import status as intelligence_status
+
+logger = logging.getLogger(__name__)
 
 
 def context() -> dict:
@@ -37,10 +40,14 @@ def answer(question: str) -> str:
             client = OpenAI(api_key=api_key)
             model = os.environ.get("AI_TRADER_MODEL", "gpt-4o-mini")
         response = client.chat.completions.create(
-            model=model, temperature=0.2, max_tokens=500,
+            # Do not send max_tokens: newer Azure deployments reject it in
+            # favour of max_completion_tokens, while older deployments do not
+            # all accept the replacement. The reply is bounded below instead.
+            model=model, temperature=0.2,
             messages=[{"role": "system", "content": "Siz Uzbek tilidagi read-only trading tizimi yordamchisisiz. Faqat berilgan JSON faktlariga tayangan holda qisqa tushuntiring. Hech qachon buyruq, runtime o'zgarish, order, credential, kod yoki live tradingni va'da qilmang. Moliyaviy maslahat bermang; noaniqlikni ayting."},
                       {"role": "user", "content": json.dumps({"savol": question[:1000], "tizim": context()}, ensure_ascii=False, default=str)}],
         )
         return (response.choices[0].message.content or "Javob olinmadi.")[:3500]
     except Exception as exc:
+        logger.warning("Telegram AI chat request failed: %s", exc)
         return f"AI chat vaqtincha javob bera olmadi: {type(exc).__name__}."
