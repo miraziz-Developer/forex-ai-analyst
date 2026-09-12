@@ -104,6 +104,14 @@ def _parse(payload: dict[str, Any]) -> AITradeDecision:
     )
 
 
+def _azure_openai_base_url(endpoint: str) -> str:
+    """Return an OpenAI-compatible Azure endpoint without duplicating ``/openai/v1``."""
+    normalized = endpoint.rstrip("/")
+    if normalized.endswith("/openai/v1"):
+        return f"{normalized}/"
+    return f"{normalized}/openai/v1/"
+
+
 def decide(snapshot: dict[str, Any], knowledge: list[dict], reviews: list[dict]) -> AITradeDecision:
     """Ask the configured model for a decision; safely skip if it cannot answer."""
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -114,12 +122,11 @@ def decide(snapshot: dict[str, Any], knowledge: list[dict], reviews: list[dict])
         return _skip("OpenAI yoki Azure OpenAI credentials configured emas; contextual AI trade ochilmadi")
     try:
         if azure_api_key and azure_endpoint and azure_deployment:
-            from openai import AzureOpenAI
-            client = AzureOpenAI(
-                api_key=azure_api_key,
-                azure_endpoint=azure_endpoint,
-                api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21"),
-            )
+            # Azure AI Foundry and Azure OpenAI expose an OpenAI-compatible
+            # /openai/v1 endpoint. AzureOpenAI would turn a Foundry URL into
+            # .../openai/v1/openai/deployments/... and produce a 404.
+            from openai import OpenAI
+            client = OpenAI(api_key=azure_api_key, base_url=_azure_openai_base_url(azure_endpoint))
             model = azure_deployment
         else:
             from openai import OpenAI

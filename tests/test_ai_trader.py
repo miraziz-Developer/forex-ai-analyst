@@ -38,14 +38,14 @@ class AITraderTests(unittest.TestCase):
             result = decide({}, [], [])
         self.assertEqual(result.action, "SKIP")
 
-    @patch("openai.AzureOpenAI")
-    def test_azure_credentials_use_deployment_as_model(self, client_class):
+    @patch("openai.OpenAI")
+    def test_azure_foundry_credentials_use_openai_compatible_endpoint(self, client_class):
         message = Mock(content='{"action":"WATCH","rationale":"wait","invalidation":"none","confidence":40}')
         client_class.return_value.chat.completions.create.return_value.choices = [Mock(message=message)]
         azure_environment = {
             "OPENAI_API_KEY": "",
             "AZURE_OPENAI_API_KEY": "azure-key",
-            "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
+            "AZURE_OPENAI_ENDPOINT": "https://example.services.ai.azure.com/openai/v1",
             "AZURE_OPENAI_DEPLOYMENT": "trader-deployment",
             "AZURE_OPENAI_API_VERSION": "2024-10-21",
         }
@@ -53,9 +53,14 @@ class AITraderTests(unittest.TestCase):
             result = decide({}, [], [])
         self.assertEqual(result.action, "WATCH")
         client_class.assert_called_once_with(
-            api_key="azure-key", azure_endpoint="https://example.openai.azure.com", api_version="2024-10-21",
+            api_key="azure-key", base_url="https://example.services.ai.azure.com/openai/v1/",
         )
         self.assertEqual(client_class.return_value.chat.completions.create.call_args.kwargs["model"], "trader-deployment")
+
+    def test_azure_base_url_adds_openai_v1_for_resource_endpoint(self):
+        from ai_trader import _azure_openai_base_url
+        self.assertEqual(_azure_openai_base_url("https://example.openai.azure.com/"),
+                         "https://example.openai.azure.com/openai/v1/")
 
 
 if __name__ == "__main__":

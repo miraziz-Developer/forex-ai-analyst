@@ -86,9 +86,8 @@ See [`.env.example`](.env.example). The production-safe defaults are:
 OPENAI_API_KEY=
 # Or use Azure OpenAI. Deployment is passed to the SDK as the model name.
 AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_ENDPOINT=https://your-resource.services.ai.azure.com/openai/v1
 AZURE_OPENAI_DEPLOYMENT=your-chat-deployment
-AZURE_OPENAI_API_VERSION=2024-10-21
 AUTO_EXECUTE_TRADES=false
 KILL_SWITCH=false
 MULTI_STRATEGY_PROVIDER=bingx
