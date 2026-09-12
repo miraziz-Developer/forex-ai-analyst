@@ -1,15 +1,35 @@
 import os
+import sys
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("TURSO_DATABASE_URL", "libsql://test.invalid")
 os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 
 import telegram_bot
+import telegram_chat
 
 
 class TelegramBotTests(unittest.TestCase):
+    @patch("telegram_chat.context", return_value={"safety": "read-only"})
+    def test_ai_chat_uses_azure_openai_deployment_when_configured(self, context):
+        completion = Mock()
+        completion.choices = [SimpleNamespace(message=SimpleNamespace(content="Azure javob"))]
+        client = Mock()
+        client.chat.completions.create.return_value = completion
+        openai_module = SimpleNamespace(OpenAI=Mock(return_value=client))
+        with patch.dict(sys.modules, {"openai": openai_module}), patch.dict(os.environ, {
+            "OPENAI_API_KEY": "", "AZURE_OPENAI_API_KEY": "azure-key",
+            "AZURE_OPENAI_ENDPOINT": "https://resource.openai.azure.com",
+            "AZURE_OPENAI_DEPLOYMENT": "chat-deployment",
+        }, clear=False):
+            self.assertEqual(telegram_chat.answer("Holat qanday?"), "Azure javob")
+        openai_module.OpenAI.assert_called_once_with(
+            api_key="azure-key", base_url="https://resource.openai.azure.com/openai/v1/")
+        self.assertEqual(client.chat.completions.create.call_args.kwargs["model"], "chat-deployment")
+
     @patch("telegram_bot.requests.post")
     def test_configure_webhook_registers_callback_updates_and_commands(self, post):
         post.return_value.raise_for_status.return_value = None
