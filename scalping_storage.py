@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS signal_candidates (
  entry_price REAL NOT NULL, stop_price REAL NOT NULL, target_price REAL NOT NULL, expiry_time TEXT NOT NULL,
   score INTEGER NOT NULL, confirmations_json TEXT NOT NULL, features_json TEXT NOT NULL,
   status TEXT NOT NULL, rejection_reason TEXT, risk_usdt REAL, quantity REAL,
-  outcome_price REAL, outcome_time TEXT, created_at TEXT NOT NULL
+  outcome_price REAL, outcome_time TEXT, broker_order_id TEXT, broker_fill_price REAL,
+  broker_quantity REAL, created_at TEXT NOT NULL
 );"""
 _CREATE_RISK = """
 CREATE TABLE IF NOT EXISTS daily_risk_state (
@@ -45,6 +46,9 @@ def init_db() -> None:
         "ALTER TABLE signal_candidates ADD COLUMN quantity REAL",
         "ALTER TABLE signal_candidates ADD COLUMN outcome_price REAL",
         "ALTER TABLE signal_candidates ADD COLUMN outcome_time TEXT",
+        "ALTER TABLE signal_candidates ADD COLUMN broker_order_id TEXT",
+        "ALTER TABLE signal_candidates ADD COLUMN broker_fill_price REAL",
+        "ALTER TABLE signal_candidates ADD COLUMN broker_quantity REAL",
     ):
         try:
             storage._execute(migration)
@@ -88,19 +92,21 @@ def risk_state() -> tuple[int, float]:
     return (int(rows[0]["trade_count"]), float(rows[0]["realized_pnl_usdt"])) if rows else (0, 0.0)
 
 
-def mark_accepted(decision: Decision, risk_usdt: float, quantity: float) -> None:
-    """Persist one idempotent accepted paper position and reserve its daily risk slot."""
+def mark_accepted(decision: Decision, risk_usdt: float, quantity: float, broker_order: dict | None = None) -> None:
+    """Persist one idempotent accepted signal and reserve its daily risk slot."""
     candidate = decision.candidate
     day, now = datetime.now(timezone.utc).date().isoformat(), datetime.now(timezone.utc).isoformat()
     result = storage._execute(
         """INSERT OR IGNORE INTO signal_candidates (fingerprint, strategy, pair, direction, regime, candle_time,
            entry_price, stop_price, target_price, expiry_time, score, confirmations_json, features_json,
-           status, rejection_reason, risk_usdt, quantity, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           status, rejection_reason, risk_usdt, quantity, broker_order_id, broker_fill_price, broker_quantity, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [candidate.fingerprint, candidate.strategy, candidate.pair, candidate.direction, candidate.regime,
          candidate.candle_time_ms, candidate.entry_price, candidate.stop_price, candidate.target_price,
          candidate.expires_at.isoformat(), candidate.score, json.dumps(candidate.confirmations),
-         json.dumps(candidate.features, sort_keys=True), decision.status, decision.reason, risk_usdt, quantity, now])
+         json.dumps(candidate.features, sort_keys=True), decision.status, decision.reason, risk_usdt, quantity,
+         (broker_order or {}).get("order_id"), (broker_order or {}).get("fill_price"),
+         (broker_order or {}).get("quantity"), now])
     if result.get("affected_row_count", 0) == 0:
         return
     storage._execute("INSERT INTO signal_decisions (fingerprint, status, reason, decided_at) VALUES (?, ?, ?, ?)",
@@ -117,7 +123,7 @@ def open_paper_positions() -> int:
 
 def open_paper_signals() -> list[dict]:
     result = storage._execute("""SELECT fingerprint, pair, direction, entry_price, target_price, stop_price,
-                               expiry_time, risk_usdt, quantity, candle_time
+                               expiry_time, risk_usdt, quantity, broker_order_id, broker_quantity, candle_time
                                FROM signal_candidates WHERE status = 'ACCEPTED_PAPER'""")
     return storage._rows_as_dicts(result)
 

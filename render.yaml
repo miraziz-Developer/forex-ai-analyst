@@ -18,10 +18,14 @@ services:
       - key: DASHBOARD_TOKEN
         generateValue: true
       - key: AUTO_EXECUTE_TRADES
-        # Demo compatibility only: the service remains paper-only and sends no broker orders.
+        # BingX VST/demo orders require this plus BINGX_API_KEY and BINGX_SECRET.
         value: "true"
+      - key: BINGX_API_KEY
+        sync: false
+      - key: BINGX_SECRET
+        sync: false
       # Public Binance Futures OHLCV only. No Binance account or API key is needed.
-      # This is the one, paper-only multi-strategy Render service.
+      # This is the one multi-strategy Render service; VST execution remains optional.
       - key: MULTI_STRATEGY_PROVIDER
         value: "binance_futures"
       - key: MULTI_STRATEGY_PAIRS
@@ -33,8 +37,10 @@ services:
       - key: MAX_DAILY_LOSS_USDT
         value: "2.00"
       - key: MAX_DAILY_TRADES
-        value: "3"
+        # Zero disables the accepted-signal count limit.
+        value: "0"
       - key: MAX_OPEN_POSITIONS
-        value: "1"
+        # Zero allows every accepted signal to remain open independently.
+        value: "0"
       - key: MIN_REWARD_RISK
         value: "1.3"

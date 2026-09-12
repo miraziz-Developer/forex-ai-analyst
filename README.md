@@ -1,6 +1,6 @@
 # Multi-Strategy Crypto Paper Bot
 
-One `main` branch and one Render web service. The bot is deliberately **paper-only**:
+One `main` branch and one Render web service:
 
 ```text
 Binance Futures public closed OHLCV
@@ -9,7 +9,7 @@ Binance Futures public closed OHLCV
   → Turso paper-signal/outcome ledger + Telegram notification
 ```
 
-It does not import or call a broker execution client. `AUTO_EXECUTE_TRADES=true` is accepted for demo-environment compatibility, but this service remains paper-only and never places an order. The `/health` response reports the configured value separately from the effective execution mode (`false`).
+By default this is paper-only. When `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET` are all configured, accepted signals also place a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
 
 ## Current strategies and controls
 
@@ -22,7 +22,7 @@ It does not import or call a broker execution client. `AUTO_EXECUTE_TRADES=true`
 - Only fully closed, validated, deduplicated candles are used. The provider caches one pair/timeframe result until the next closed-candle boundary to avoid duplicate REST requests during a scan/resolution cycle.
 - A candidate must have valid directional levels, score at least 65, and R:R at least 1.3.
 - Same-candle duplicates are persisted and rejected.
-- Maximum one open paper position, three accepted paper trades per UTC day, `$0.75` stop-risk per trade, and `$2.00` daily realized-loss limit by default.
+- Open-position and accepted-trade-count limits are disabled by default (`MAX_OPEN_POSITIONS=0`, `MAX_DAILY_TRADES=0`); every independently accepted signal is recorded. `$0.75` stop-risk per trade and the `$2.00` daily realized-loss protection remain by default.
 - Outcome resolution is candle-based and conservative: when a candle touches both stop and target, it records `LOSS`.
 
 ## Setup

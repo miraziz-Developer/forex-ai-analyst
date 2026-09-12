@@ -25,7 +25,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
-PAPER_ONLY = True
 AUTO_EXECUTE_TRADES_CONFIGURED = os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true"
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -40,13 +39,34 @@ def configured_pairs() -> tuple[str, ...]:
     return pairs
 
 
-def format_paper_signal(candidate, risk) -> str:
+def format_paper_signal(candidate, risk, broker_order: dict | None = None) -> str:
+    execution_note = (f"BingX VST demo order ochildi: #{broker_order['order_id']}; "
+                      f"fill: {broker_order['fill_price']:.6g}."
+                      if broker_order else "Bu paper signal. BingX order ochilmaydi.")
     return (f"📈 PAPER SIGNAL — {candidate.pair} {candidate.direction}\n\n"
             f"Strategy: {candidate.strategy}\nRegime: {candidate.regime}\nQuality score: {candidate.score}/100\n\n"
             f"Entry: {candidate.entry_price:.6g}\nStop: {candidate.stop_price:.6g}\n"
             f"Target: {candidate.target_price:.6g}\nR:R: {candidate.reward_risk:.2f}\n\nTasdiqlar:\n• " +
             "\n• ".join(candidate.confirmations) + f"\n\nRisk: ${risk.risk_usdt:.2f}; quantity: {risk.quantity:.8g}\n"
-            "Bu paper signal. BingX order ochilmaydi.")
+            + execution_note)
+
+
+def demo_execution_enabled() -> bool:
+    """Only enable the hardcoded BingX VST (virtual-money) execution client with both credentials."""
+    return (os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true" and
+            bool(os.environ.get("BINGX_API_KEY", "").strip()) and bool(os.environ.get("BINGX_SECRET", "").strip()))
+
+
+def execute_bingx_vst_order(candidate, risk) -> dict | None:
+    if not demo_execution_enabled():
+        return None
+    import broker
+    quantity = broker.round_quantity(candidate.pair, risk.quantity)
+    if quantity <= 0:
+        raise ValueError(f"BingX VST quantity rounds to zero for {candidate.pair}; increase RISK_USDT_PER_TRADE")
+    order = broker.place_market_order(candidate.pair, str(candidate.direction), quantity,
+                                      candidate.target_price, candidate.stop_price)
+    return {**order, "quantity": quantity}
 
 
 def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None) -> list[dict]:
@@ -76,9 +96,17 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
                 from scalping_core import CandidateStatus, Decision
                 decision = Decision(candidate, CandidateStatus.BLOCKED_BY_RISK, risk.reason)
             else:
-                scalping_storage.mark_accepted(decision, risk.risk_usdt, risk.quantity)
-                if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-                    send_telegram_message(format_paper_signal(candidate, risk), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                try:
+                    broker_order = execute_bingx_vst_order(candidate, risk)
+                except Exception as exc:
+                    logger.exception("BingX VST order failed for %s", candidate.pair)
+                    from scalping_core import CandidateStatus, Decision
+                    decision = Decision(candidate, CandidateStatus.BLOCKED_BY_RISK, f"BingX VST order failed: {exc}")
+                else:
+                    scalping_storage.mark_accepted(decision, risk.risk_usdt, risk.quantity, broker_order)
+                    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+                        send_telegram_message(format_paper_signal(candidate, risk, broker_order),
+                                              TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
         if not decision.accepted:
             scalping_storage.log_decision(decision)
         results.append({"status": decision.status, "reason": decision.reason, "fingerprint": candidate.fingerprint})
@@ -103,9 +131,10 @@ def _require_dashboard_access() -> None:
 
 @app.route("/health")
 def health():
-    return jsonify(status="ok", service="multi-strategy-paper", paper_only=True,
+    demo_execution = demo_execution_enabled()
+    return jsonify(status="ok", service="multi-strategy-paper", paper_only=not demo_execution, demo_only=True,
                    provider=os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "binance_futures",
-                   auto_execute_trades=False,
+                   auto_execute_trades=demo_execution,
                    auto_execute_trades_configured=AUTO_EXECUTE_TRADES_CONFIGURED), 200
 
 

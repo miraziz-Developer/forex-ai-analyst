@@ -3,6 +3,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
+import requests
+
 os.environ.setdefault("TURSO_DATABASE_URL", "libsql://test.invalid")
 os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 
@@ -46,6 +48,15 @@ class MultiStrategyTests(unittest.TestCase):
         self.assertEqual(request.call_args.kwargs["params"], {"symbol": "BTCUSDT", "interval": "5m", "limit": 2})
         self.assertEqual(result, [{"datetime": 1000, "open": "10", "high": "11", "low": "9", "close": "10.5", "volume": "42"}])
         self.assertEqual(binance_futures_symbol("ETH-USDT"), "ETHUSDT")
+
+    def test_binance_futures_provider_uses_next_host_after_failure(self):
+        failed, success = Mock(), Mock()
+        failed.raise_for_status.side_effect = requests.HTTPError("418 blocked")
+        success.json.return_value = [[1000, "10", "11", "9", "10.5", "42"]]
+        with patch("scalping_data.requests.get", side_effect=[failed, success]) as request:
+            result = fetch_binance_futures_bars("BTC-USDT", "5m", 2)
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(result[0]["close"], "10.5")
 
     def test_provider_defaults_to_binance_when_render_value_is_blank(self):
         with patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": ""}):
@@ -116,13 +127,19 @@ class MultiStrategyTests(unittest.TestCase):
 
     def test_risk_blocks_limits_and_sizes_from_stop(self):
         signal = candidate()
-        config = RiskConfig(risk_usdt_per_trade=.75, max_daily_loss_usdt=2, max_daily_trades=3)
+        config = RiskConfig(risk_usdt_per_trade=.75, max_daily_loss_usdt=2, max_daily_trades=3,
+                            max_open_positions=1)
         self.assertFalse(assess_risk(signal, open_positions=1, daily_trades=0, daily_realized_pnl=0, config=config).accepted)
         self.assertFalse(assess_risk(signal, open_positions=0, daily_trades=3, daily_realized_pnl=0, config=config).accepted)
         self.assertFalse(assess_risk(signal, open_positions=0, daily_trades=0, daily_realized_pnl=-2, config=config).accepted)
         decision = assess_risk(signal, open_positions=0, daily_trades=0, daily_realized_pnl=0, config=config)
         self.assertTrue(decision.accepted)
         self.assertAlmostEqual(decision.quantity, .375)
+
+    def test_zero_risk_limits_allow_multiple_open_and_daily_signals(self):
+        config = RiskConfig(max_daily_trades=0, max_open_positions=0)
+        self.assertTrue(assess_risk(candidate(), open_positions=99, daily_trades=99,
+                                    daily_realized_pnl=0, config=config).accepted)
 
     def test_trend_pullback_generates_valid_long(self):
         bars15 = [bar(index, 100 + index * .5, interval=900000, spread=.4) for index in range(260)]

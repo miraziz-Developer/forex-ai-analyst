@@ -38,8 +38,14 @@ def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
                     break
             else:
                 if datetime.fromisoformat(signal["expiry_time"]) <= now:
-                    scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.EXPIRED,
-                                                          float(bars[-1]["close"]))
+                    exit_price = float(bars[-1]["close"])
+                    if signal.get("broker_quantity"):
+                        import broker
+                        position_side = "LONG" if signal["direction"] == "BUY" else "SHORT"
+                        if broker.get_position(signal["pair"], position_side):
+                            exit_price = float(broker.close_position(signal["pair"], signal["direction"],
+                                                                     float(signal["broker_quantity"]))["fill_price"])
+                    scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.EXPIRED, exit_price)
         except Exception:
             logger.exception("paper resolver failed for %s", signal["fingerprint"])
 

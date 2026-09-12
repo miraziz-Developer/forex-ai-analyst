@@ -8,7 +8,12 @@ import os
 import requests
 
 _SECONDS = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
-_BINANCE_FUTURES_KLINES_URL = "https://fapi.binance.com/fapi/v1/klines"
+_BINANCE_FUTURES_KLINES_URLS = (
+    "https://fapi.binance.com/fapi/v1/klines",
+    "https://fapi1.binance.com/fapi/v1/klines",
+    "https://fapi2.binance.com/fapi/v1/klines",
+    "https://fapi3.binance.com/fapi/v1/klines",
+)
 
 
 def binance_futures_symbol(pair: str) -> str:
@@ -23,11 +28,19 @@ def fetch_binance_futures_bars(pair: str, timeframe: str, outputsize: int = 300)
     """Fetch public Binance USD-M Futures klines; no account or API key is used."""
     if timeframe not in _SECONDS:
         raise ValueError(f"unsupported Binance Futures timeframe: {timeframe}")
-    response = requests.get(_BINANCE_FUTURES_KLINES_URL, params={
-        "symbol": binance_futures_symbol(pair), "interval": timeframe,
-        "limit": max(1, min(int(outputsize), 1500)),
-    }, timeout=15)
-    response.raise_for_status()
+    params = {"symbol": binance_futures_symbol(pair), "interval": timeframe,
+              "limit": max(1, min(int(outputsize), 1500))}
+    errors = []
+    for url in _BINANCE_FUTURES_KLINES_URLS:
+        try:
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            errors.append(f"{url}: {exc}")
+    else:
+        raise RuntimeError("Binance Futures OHLCV unavailable from this Render region; all endpoints failed: " +
+                           "; ".join(errors))
     payload = response.json()
     if not isinstance(payload, list):
         raise ValueError("unexpected Binance Futures kline response")
