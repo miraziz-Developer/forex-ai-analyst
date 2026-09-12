@@ -45,7 +45,7 @@ The app creates and migrates its own signals, snapshots, AI reviews, knowledge d
 
 Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send `/start` once to open the button-based control panel: **Holat**, **So‘nggi signallar**, **Ochiq VST pozitsiyalar**, **Bilim bazasi**, **Bilimdan qidirish**, and **PDF yuklash**. Send a text-based PDF to the bot and it will extract/chunk the text into Turso. Scanned PDFs need OCR before upload. Legacy `/knowledge` and `/knowledge_search <query>` remain available for compatibility.
 
-Set `TELEGRAM_WEBHOOK_SECRET`, then register the deployed webhook once:
+Set `PUBLIC_BASE_URL` to the deployed HTTPS URL and `TELEGRAM_WEBHOOK_SECRET`; the service registers its webhook, callback updates, and command menu automatically on startup. If automatic setup is unavailable, register it manually once:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \

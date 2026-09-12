@@ -133,6 +133,44 @@ def open_paper_signals() -> list[dict]:
     return storage._rows_as_dicts(result)
 
 
+def closed_paper_signals(limit: int = 10) -> list[dict]:
+    """Newest resolved VST/paper orders with their realized journal P&L."""
+    safe_limit = min(max(int(limit), 1), 50)
+    result = storage._execute("""SELECT pair, direction, entry_price, outcome_price, outcome_time, status,
+                                      quantity, broker_order_id
+                               FROM signal_candidates
+                               WHERE status IN ('WIN', 'LOSS', 'EXPIRED')
+                               ORDER BY outcome_time DESC LIMIT ?""", [safe_limit])
+    rows = storage._rows_as_dicts(result)
+    for row in rows:
+        multiplier = 1 if row["direction"] == "BUY" else -1
+        row["realized_pnl_usdt"] = ((float(row["outcome_price"]) - float(row["entry_price"])) *
+                                    float(row["quantity"]) * multiplier)
+    return rows
+
+
+def performance_summary() -> dict:
+    """Return journal-level realized P&L and outcome counts for the button UI."""
+    result = storage._execute("""SELECT direction, entry_price, outcome_price, quantity, status, outcome_time
+                               FROM signal_candidates WHERE status IN ('WIN', 'LOSS', 'EXPIRED')""")
+    rows = storage._rows_as_dicts(result)
+    today = datetime.now(timezone.utc).date().isoformat()
+    pnl, today_pnl = 0.0, 0.0
+    counts = {"WIN": 0, "LOSS": 0, "EXPIRED": 0}
+    for row in rows:
+        multiplier = 1 if row["direction"] == "BUY" else -1
+        trade_pnl = ((float(row["outcome_price"]) - float(row["entry_price"])) *
+                     float(row["quantity"]) * multiplier)
+        pnl += trade_pnl
+        counts[row["status"]] += 1
+        if str(row["outcome_time"]).startswith(today):
+            today_pnl += trade_pnl
+    decided = counts["WIN"] + counts["LOSS"]
+    return {"closed_orders": len(rows), "wins": counts["WIN"], "losses": counts["LOSS"],
+            "expired": counts["EXPIRED"], "win_rate_pct": round(counts["WIN"] / decided * 100, 1) if decided else None,
+            "realized_pnl_usdt": pnl, "today_pnl_usdt": today_pnl}
+
+
 def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: float) -> None:
     """Close exactly one open paper position and account its realized, risk-sized P&L once."""
     if status not in {CandidateStatus.WIN, CandidateStatus.LOSS, CandidateStatus.EXPIRED}:

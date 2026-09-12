@@ -13,6 +13,10 @@ services:
         sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
         generateValue: true
+      # Public HTTPS service URL, for example https://forex-ai-analyst.onrender.com.
+      # Enables automatic Telegram command and inline-button webhook setup.
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN

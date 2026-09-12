@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 import requests
 
@@ -11,8 +12,9 @@ from notifier import send_telegram_message
 
 _AWAITING_KNOWLEDGE_SEARCH: set[str] = set()
 _MENU = {"inline_keyboard": [
-    [{"text": "📊 Holat", "callback_data": "status"}, {"text": "📈 So‘nggi signallar", "callback_data": "signals"}],
-    [{"text": "📌 Ochiq VST pozitsiyalar", "callback_data": "positions"}, {"text": "🔄 Yangilash", "callback_data": "menu"}],
+    [{"text": "📊 Umumiy holat", "callback_data": "status"}, {"text": "💰 Foyda / zarar", "callback_data": "performance"}],
+    [{"text": "📌 Ochiq orderlar", "callback_data": "positions"}, {"text": "✅ Yopiq orderlar", "callback_data": "closed_orders"}],
+    [{"text": "📈 So‘nggi signallar", "callback_data": "signals"}, {"text": "🔄 Panelni yangilash", "callback_data": "menu"}],
     [{"text": "📚 Bilim bazasi", "callback_data": "knowledge"}, {"text": "🔎 Bilimdan qidirish", "callback_data": "search"}],
     [{"text": "📤 PDF yuklash", "callback_data": "upload"}, {"text": "❓ Yordam", "callback_data": "help"}],
 ]}
@@ -21,6 +23,37 @@ _MENU = {"inline_keyboard": [
 def _allowed(chat_id: str) -> bool:
     allowed = {item.strip() for item in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if item.strip()}
     return bool(allowed) and chat_id in allowed
+
+
+def configure_webhook(public_base_url: str | None = None) -> bool:
+    """Register this service as Telegram's update receiver.
+
+    Telegram notifications only require ``sendMessage``, whereas commands and
+    inline buttons require an incoming webhook. Re-registering is safe and
+    ensures callback queries remain enabled after a deploy.
+    """
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    base_url = (public_base_url or os.environ.get("PUBLIC_BASE_URL", "")).strip().rstrip("/")
+    parsed = urlparse(base_url)
+    if not token or not secret or parsed.scheme != "https" or not parsed.netloc:
+        return False
+
+    api_url = f"https://api.telegram.org/bot{token}"
+    try:
+        response = requests.post(f"{api_url}/setWebhook", json={
+            "url": f"{base_url}/telegram/webhook",
+            "secret_token": secret,
+            "allowed_updates": ["message", "channel_post", "callback_query"],
+            "drop_pending_updates": False,
+        }, timeout=15)
+        response.raise_for_status()
+        # The control panel is intentionally button-first. /start remains Telegram's
+        # native entry point, but no command list is exposed to the user.
+        requests.post(f"{api_url}/setMyCommands", json={"commands": []}, timeout=15).raise_for_status()
+        return True
+    except requests.RequestException:
+        return False
 
 
 def _reply(chat_id: str, text: str, *, menu: bool = False) -> None:
@@ -66,7 +99,7 @@ def _download(file_id: str) -> bytes:
 
 
 def _menu(chat_id: str) -> None:
-    _reply(chat_id, "🤖 AI VST Trader boshqaruv paneli. Kerakli bo‘limni tanlang.", menu=True)
+    _reply(chat_id, "🤖 AI VST Trader boshqaruv paneli\n\nBarcha ma’lumotlarni quyidagi tugmalar orqali ko‘ring.", menu=True)
 
 
 def _status_text() -> str:
@@ -75,12 +108,16 @@ def _status_text() -> str:
                bool(os.environ.get("BINGX_API_KEY", "").strip()) and bool(os.environ.get("BINGX_SECRET", "").strip()))
     try:
         open_signals = scalping_storage.open_paper_positions()
+        daily_trades, daily_pnl = scalping_storage.risk_state()
     except Exception:
         open_signals = "ma’lumot vaqtincha olinmadi"
+        daily_trades, daily_pnl = "—", None
+    daily_pnl_text = "—" if daily_pnl is None else f"{daily_pnl:+.4g} USDT"
     return ("📊 Tizim holati\n\n"
             f"BingX VST execution: {'🟢 faol' if enabled else '🔴 o‘chiq'}\n"
             f"Kill switch: {'🔴 yoqilgan' if os.environ.get('KILL_SWITCH', 'false').lower() == 'true' else '🟢 o‘chiq'}\n"
-            f"Ochiq signal: {open_signals}\n"
+            f"Ochiq order: {open_signals}\n"
+            f"Bugungi trade: {daily_trades} | P&L: {daily_pnl_text}\n"
             f"Scan interval: {os.environ.get('MULTI_STRATEGY_SCAN_INTERVAL_SECONDS', '300')} soniya\n"
             "AI model qarori faqat BingX VST/demo uchun ishlatiladi.")
 
@@ -124,10 +161,46 @@ def _positions_text() -> str:
         return "📌 Ochiq pozitsiyalar vaqtincha olinmadi. Keyinroq 🔄 Yangilash tugmasini bosing."
     if not rows:
         return "📌 Hozir ochiq AI VST/paper pozitsiya yo‘q."
-    lines = ["📌 Ochiq AI VST/paper pozitsiyalar:"]
+    lines = ["📌 Ochiq AI VST/paper orderlar:"]
     for row in rows[:10]:
         order = f" | order: #{row['broker_order_id']}" if row.get("broker_order_id") else " | paper signal"
-        lines.append(f"• {row['pair']} {row['direction']}\n  Entry: {float(row['entry_price']):.6g} | TP: {float(row['target_price']):.6g} | SL: {float(row['stop_price']):.6g}{order}")
+        risk = f"${float(row['risk_usdt']):.4g}" if row.get("risk_usdt") is not None else "—"
+        quantity = f"{float(row['quantity']):.8g}" if row.get("quantity") is not None else "—"
+        lines.append(f"• {row['pair']} {row['direction']}{order}\n"
+                     f"  Entry: {float(row['entry_price']):.6g} | TP: {float(row['target_price']):.6g} | SL: {float(row['stop_price']):.6g}\n"
+                     f"  Risk: {risk} | Quantity: {quantity}")
+    return "\n".join(lines)
+
+
+def _performance_text() -> str:
+    try:
+        summary = scalping_storage.performance_summary()
+    except Exception:
+        return "💰 Foyda/zarar ma’lumoti vaqtincha olinmadi. Keyinroq 🔄 Panelni yangilash tugmasini bosing."
+    pnl = float(summary["realized_pnl_usdt"])
+    win_rate = summary["win_rate_pct"]
+    return ("💰 VST/paper foyda / zarar\n\n"
+            f"Jami yopilgan order: {summary['closed_orders']}\n"
+            f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⌛ EXPIRED: {summary['expired']}\n"
+            f"🎯 Win rate: {win_rate:.1f}%" if win_rate is not None else "💰 VST/paper foyda / zarar\n\n"
+            f"Jami yopilgan order: {summary['closed_orders']}\n"
+            f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⌛ EXPIRED: {summary['expired']}\n"
+            "🎯 Win rate: —") + f"\n💵 Jami P&L: {pnl:+.4g} USDT\nBugungi P&L: {float(summary['today_pnl_usdt']):+.4g} USDT"
+
+
+def _closed_orders_text() -> str:
+    try:
+        rows = scalping_storage.closed_paper_signals(10)
+    except Exception:
+        return "✅ Yopiq orderlar vaqtincha olinmadi. Keyinroq 🔄 Panelni yangilash tugmasini bosing."
+    if not rows:
+        return "✅ Hali yopilgan AI VST/paper order yo‘q."
+    lines = ["✅ So‘nggi 10 yopiq AI VST/paper order:"]
+    for row in rows:
+        pnl = float(row["realized_pnl_usdt"])
+        order = f" | order: #{row['broker_order_id']}" if row.get("broker_order_id") else " | paper signal"
+        lines.append(f"• {row['pair']} {row['direction']} — {row['status']}{order}\n"
+                     f"  Entry: {float(row['entry_price']):.6g} | Exit: {float(row['outcome_price']):.6g} | P&L: {pnl:+.4g} USDT")
     return "\n".join(lines)
 
 
@@ -140,10 +213,14 @@ def _handle_callback(callback: dict) -> None:
     action = str(callback.get("data", ""))
     if action == "status":
         _reply(chat_id, _status_text(), menu=True)
+    elif action == "performance":
+        _reply(chat_id, _performance_text(), menu=True)
     elif action == "signals":
         _reply(chat_id, _signals_text(), menu=True)
     elif action == "positions":
         _reply(chat_id, _positions_text(), menu=True)
+    elif action == "closed_orders":
+        _reply(chat_id, _closed_orders_text(), menu=True)
     elif action == "menu":
         _menu(chat_id)
     elif action == "knowledge":
@@ -154,7 +231,7 @@ def _handle_callback(callback: dict) -> None:
     elif action == "upload":
         _reply(chat_id, "📤 Endi PDF faylni shu chatga yuboring. Text-based PDF avtomatik bilim bazasiga qo‘shiladi.", menu=True)
     elif action == "help":
-        _reply(chat_id, "Tugmalardan status, signal, ochiq pozitsiya va knowledge bazani ko‘ring. PDF yuklash uchun PDF yuboring. Bu bot trade ochish/yopish tugmalarini bermaydi: execution faqat serverdagi AI risk qoidalari va BingX VST orqali boshqariladi.", menu=True)
+        _reply(chat_id, "Boshqaruv commandlarsiz ishlaydi: umumiy holat, foyda/zarar, ochiq/yopiq orderlar va signallarni tugmalardan ko‘ring. PDF yuklash yoki knowledge qidirish uchun mos tugmani bosing. Order ochish/yopish faqat serverdagi AI risk qoidalari va BingX VST orqali avtomatik boshqariladi.", menu=True)
 
 
 def handle_update(update: dict) -> None:
@@ -168,8 +245,18 @@ def handle_update(update: dict) -> None:
     if not chat_id or not _allowed(chat_id):
         return
     text = (message.get("text") or "").strip()
-    if text.startswith("/start") or text.startswith("/help"):
+    command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""
+    if command in {"/start", "/help"}:
         _menu(chat_id)
+        return
+    if command == "/status":
+        _reply(chat_id, _status_text(), menu=True)
+        return
+    if command == "/signals":
+        _reply(chat_id, _signals_text(), menu=True)
+        return
+    if command in {"/positions", "/open"}:
+        _reply(chat_id, _positions_text(), menu=True)
         return
     # Legacy commands remain compatible, but the primary UI is the button menu.
     if text.startswith("/knowledge_search"):

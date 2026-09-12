@@ -20,7 +20,7 @@ from multi_strategy_scheduler import start_scheduler
 from notifier import send_telegram_message
 from scalping_data import MarketDataProvider, provider_from_environment
 import scalping_storage
-from telegram_bot import handle_update
+from telegram_bot import configure_webhook, handle_update
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -151,6 +151,11 @@ def telegram_webhook():
 if __name__ == "__main__":
     scalping_storage.init_db()
     knowledge.init_db()
+    if os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():
+        if configure_webhook():
+            logger.info("Telegram webhook and command menu configured")
+        else:
+            logger.warning("Telegram webhook not configured; set HTTPS PUBLIC_BASE_URL and TELEGRAM_WEBHOOK_SECRET for commands and buttons")
     provider = provider_from_environment()
     start_scheduler(scan=scan_configured_pairs, provider=provider,
                     interval_seconds=int(os.environ.get("MULTI_STRATEGY_SCAN_INTERVAL_SECONDS", "300")))

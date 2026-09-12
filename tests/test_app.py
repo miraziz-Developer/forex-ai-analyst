@@ -68,6 +68,23 @@ class HealthTests(unittest.TestCase):
             response = app.app.test_client().get("/api/signals")
         self.assertEqual(response.status_code, 401)
 
+    @patch("app.handle_update")
+    def test_telegram_webhook_dispatches_authorized_update(self, handle_update):
+        with patch.dict(os.environ, {"TELEGRAM_WEBHOOK_SECRET": "secret"}):
+            response = app.app.test_client().post(
+                "/telegram/webhook", json={"message": {"text": "/start"}},
+                headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
+            )
+        self.assertEqual(response.status_code, 200)
+        handle_update.assert_called_once_with({"message": {"text": "/start"}})
+
+    @patch("app.handle_update")
+    def test_telegram_webhook_rejects_wrong_secret(self, handle_update):
+        with patch.dict(os.environ, {"TELEGRAM_WEBHOOK_SECRET": "secret"}):
+            response = app.app.test_client().post("/telegram/webhook", json={}, headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"})
+        self.assertEqual(response.status_code, 401)
+        handle_update.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

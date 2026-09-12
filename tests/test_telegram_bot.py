@@ -9,6 +9,26 @@ import telegram_bot
 
 
 class TelegramBotTests(unittest.TestCase):
+    @patch("telegram_bot.requests.post")
+    def test_configure_webhook_registers_callback_updates_and_commands(self, post):
+        post.return_value.raise_for_status.return_value = None
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_WEBHOOK_SECRET": "secret"}):
+            configured = telegram_bot.configure_webhook("https://bot.example.test/")
+        self.assertTrue(configured)
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_args_list[0].args[0], "https://api.telegram.org/bottoken/setWebhook")
+        self.assertEqual(post.call_args_list[0].kwargs["json"], {
+            "url": "https://bot.example.test/telegram/webhook",
+            "secret_token": "secret",
+            "allowed_updates": ["message", "channel_post", "callback_query"],
+            "drop_pending_updates": False,
+        })
+        self.assertEqual(post.call_args_list[1].kwargs["json"], {"commands": []})
+
+    def test_configure_webhook_requires_complete_https_configuration(self):
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_WEBHOOK_SECRET": "secret"}):
+            self.assertFalse(telegram_bot.configure_webhook("http://bot.example.test"))
+
     def test_unauthorized_chat_is_ignored(self):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}), patch("telegram_bot._reply") as reply:
             telegram_bot.handle_update({"message": {"chat": {"id": 7}, "text": "/help"}})
@@ -31,6 +51,13 @@ class TelegramBotTests(unittest.TestCase):
         self.assertIn("boshqaruv paneli", reply.call_args.args[1])
 
     @patch("telegram_bot._reply")
+    @patch("telegram_bot._status_text", return_value="status")
+    def test_status_command_uses_status_handler(self, status, reply):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "/status@my_bot"}})
+        reply.assert_called_once_with("42", "status", menu=True)
+
+    @patch("telegram_bot._reply")
     @patch("telegram_bot.knowledge.search", return_value=[])
     def test_search_button_waits_for_plain_text_query(self, search, reply):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
@@ -51,6 +78,30 @@ class TelegramBotTests(unittest.TestCase):
                                        "message": {"chat": {"id": 42}}}})
         self.assertIn("BTC-USDT BUY", reply.call_args.args[1])
         self.assertIn("#vst-7", reply.call_args.args[1])
+
+    @patch("telegram_bot._reply")
+    @patch("telegram_bot.scalping_storage.performance_summary", return_value={
+        "closed_orders": 3, "wins": 2, "losses": 1, "expired": 0, "win_rate_pct": 66.7,
+        "realized_pnl_usdt": 12.5, "today_pnl_usdt": -1.25,
+    })
+    def test_performance_button_shows_profit_loss_summary(self, summary, reply):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"callback_query": {"id": "callback-4", "data": "performance",
+                                        "message": {"chat": {"id": 42}}}})
+        self.assertIn("+12.5 USDT", reply.call_args.args[1])
+        self.assertIn("-1.25 USDT", reply.call_args.args[1])
+
+    @patch("telegram_bot._reply")
+    @patch("telegram_bot.scalping_storage.closed_paper_signals", return_value=[{
+        "pair": "BNB-USDT", "direction": "SELL", "entry_price": 731.0, "outcome_price": 727.0,
+        "status": "WIN", "realized_pnl_usdt": 43.48, "broker_order_id": "vst-8",
+    }])
+    def test_closed_orders_button_shows_exit_and_profit_loss(self, orders, reply):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"callback_query": {"id": "callback-5", "data": "closed_orders",
+                                        "message": {"chat": {"id": 42}}}})
+        self.assertIn("Exit: 727", reply.call_args.args[1])
+        self.assertIn("+43.48 USDT", reply.call_args.args[1])
 
     @patch("telegram_bot.scalping_storage.recent_candidates", side_effect=RuntimeError("Turso unavailable"))
     def test_signal_database_error_returns_safe_message(self, candidates):
