@@ -17,6 +17,7 @@ from institutional_data import fetch_institutional_context
 from learning import summarize as learning_summary
 from market_intelligence import context_for_pair, status as intelligence_status
 import knowledge
+import execution_alerts
 from market_regime import classify_market_regime
 from multi_strategy_scheduler import start_scheduler
 from notifier import send_telegram_message
@@ -141,10 +142,15 @@ def _require_dashboard_access() -> None:
 @app.route("/health")
 def health():
     demo_execution = demo_execution_enabled()
+    try:
+        alerts = execution_alerts.status()
+    except Exception:
+        alerts = {"unavailable": True}
     return jsonify(status="ok", service="multi-strategy-paper", paper_only=not demo_execution, demo_only=True,
                    provider=os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "bingx",
                    auto_execute_trades=demo_execution,
-                   auto_execute_trades_configured=AUTO_EXECUTE_TRADES_CONFIGURED), 200
+                   auto_execute_trades_configured=AUTO_EXECUTE_TRADES_CONFIGURED,
+                   execution_alerts=alerts), 200
 
 
 @app.route("/api/signals")
@@ -171,6 +177,7 @@ def telegram_webhook():
 
 if __name__ == "__main__":
     scalping_storage.init_db()
+    execution_alerts.init_db()
     runtime_controls.init_db()
     knowledge.init_db()
     if os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():

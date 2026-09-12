@@ -228,10 +228,10 @@ def _performance_text() -> str:
     win_rate = summary["win_rate_pct"]
     journal = ("💰 AI jurnal foyda / zarar (candle-based hisob)\n\n"
             f"Jami yopilgan order: {summary['closed_orders']}\n"
-            f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⌛ EXPIRED: {summary['expired']}\n"
+            f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⏱ TIME EXIT: {summary.get('time_exits', 0)}\n"
             f"🎯 Win rate: {win_rate:.1f}%" if win_rate is not None else "💰 AI jurnal foyda / zarar (candle-based hisob)\n\n"
             f"Jami yopilgan order: {summary['closed_orders']}\n"
-            f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⌛ EXPIRED: {summary['expired']}\n"
+            f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⏱ TIME EXIT: {summary.get('time_exits', 0)}\n"
             "🎯 Win rate: —") + f"\n💵 Journal P&L: {pnl:+.4g} USDT\nBugungi journal P&L: {float(summary['today_pnl_usdt']):+.4g} USDT"
     try:
         import broker

@@ -34,8 +34,8 @@ def _exit(direction: Direction, entry: float, stop: float, target: float, bars: 
         if target_hit:
             return "WIN", target, offset
     if not bars:
-        return "EXPIRED", entry, 0
-    return "EXPIRED", float(bars[min(len(bars), expiry_bars) - 1]["close"]), min(len(bars), expiry_bars)
+        return "TIME_EXIT", entry, 0
+    return "TIME_EXIT", float(bars[min(len(bars), expiry_bars) - 1]["close"]), min(len(bars), expiry_bars)
 
 
 def simulate(bars: list[dict], evaluator: Callable[[list[dict], datetime], list[CandidateSignal]], *,

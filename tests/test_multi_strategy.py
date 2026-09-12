@@ -286,7 +286,8 @@ class MultiStrategyTests(unittest.TestCase):
             resolve_open_paper_signals(provider)
 
         broker_mock.close_position.assert_called_once_with("BTC-USDT", "BUY", .1)
-        resolve.assert_called_once_with("vst-time-exit", CandidateStatus.TIME_EXIT, 101.25)
+        resolve.assert_called_once_with("vst-time-exit", CandidateStatus.TIME_EXIT, 101.25,
+                                        {"order_id": "close-1", "fill_price": 101.25})
 
     @patch("multi_strategy_scheduler.datetime")
     @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")

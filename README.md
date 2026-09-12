@@ -22,6 +22,8 @@ By default auto-execution is off. When either `OPENAI_API_KEY` or the complete A
 - Technical safety remains: allowed-pair whitelist, 1–125x leverage validation, structurally valid trade levels, exchange-side TP/SL, `KILL_SWITCH`, idempotency and fail-closed broker/data errors. Create BingX keys with **no withdrawal permission**.
 - Outcome resolution is candle-based and conservative: when a candle touches both stop and target, it records `LOSS`.
 - Telegram's **Foyda / zarar** button shows the local candle-based AI journal separately from BingX VST's API-reported account income. BingX income is account-scoped (manual/other-bot activity can be included), so it is never falsely attributed to an individual AI journal order.
+- Each VST time-close retains the immutable entry and close order IDs plus confirmed fills. On every scheduler start/run, closed VST rows are retried for order-ID reconciliation. A row becomes `VERIFIED` only if BingX's matching order response explicitly returns its P&L and commission fields; otherwise it remains `UNAVAILABLE` and an operational alert is retained. Funding and account-level income are never guessed or allocated to a signal.
+- Failed time closes, absent broker positions, reconciliation failures, and unavailable order-level values create durable, deduplicated VST incidents and Telegram alerts (when Telegram credentials are configured). `/health` exposes the current incident diagnostic without failing the web-service liveness check.
 
 ## Setup
 
@@ -63,7 +65,7 @@ The endpoint verifies Telegram's `X-Telegram-Bot-Api-Secret-Token` header. `call
 
 ## Legacy deterministic replay (research-only)
 
-`multi_strategy_backtest.py` and `production_backtest.py` remain available for historical deterministic-strategy research. They are not the deployed contextual AI/VST decision path and their fixed research limits do not override an AI trade decision. Their evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, expires stale trades, and resolves an OHLC candle touching both levels as `LOSS`.
+`multi_strategy_backtest.py` and `production_backtest.py` remain available for historical deterministic-strategy research. They are not the deployed contextual AI/VST decision path and their fixed research limits do not override an AI trade decision. Their evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, records stale trades as `TIME_EXIT`, and resolves an OHLC candle touching both levels as `LOSS`.
 
 Use `metrics(trades)` to report trade count, win rate, after-cost net P&L, expectancy, profit factor, maximum drawdown, and average holding time. Review results independently by `strategy`, `pair`, and `regime`; no strategy may be promoted beyond paper operation solely from an in-sample win rate.
 
@@ -104,7 +106,7 @@ Do not set the scan interval below 300 seconds. The scheduler scans pairs serial
 
 ## HTTP endpoints
 
-- `GET /health` — service/provider/paper-only status; used by Render.
+- `GET /health` — service/provider/VST-only status plus non-fatal execution-incident diagnostics; used by Render.
 - `GET /api/signals?limit=100` — recent AI candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
 - `POST /telegram/webhook` — authenticated Telegram button/callback/PDF receiver.
 
@@ -119,6 +121,10 @@ curl https://YOUR-RENDER-SERVICE.onrender.com/health
 ```
 
 Expected essentials before enabling demo orders: `"demo_only":true` and `"auto_execute_trades":false`. Upload a PDF and verify `/knowledge` before setting `AUTO_EXECUTE_TRADES=true`. Set `KILL_SWITCH=true` to prevent every new VST order; it does not force-close already-open exchange positions.
+
+## Live-money boundary
+
+This repository deliberately has **no live BingX endpoint, live credential variable, or configuration switch**. It must not be represented as a real-money execution platform. A future live-only service requires an independent security review and release, separate credentials/secrets rotation, explicit multi-step operator approval, hard maximum notional/per-trade/daily-loss limits, audited emergency rollback, and independent monitoring. VST forward testing with realistic fees, slippage, funding, restarts and API failures remains required before that work.
 
 ## Validation
 

@@ -20,7 +20,7 @@ class HealthTests(unittest.TestCase):
                                "5m", "15m", 1, 80, (), "test")
 
     def test_health_identifies_the_single_paper_only_service(self):
-        with patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": "bingx"}):
+        with patch("app.execution_alerts.status", return_value={"open_incidents": 0, "last_incident_at": None}), patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": "bingx"}):
             response = app.app.test_client().get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {
@@ -31,10 +31,11 @@ class HealthTests(unittest.TestCase):
             "provider": "bingx",
             "auto_execute_trades": False,
             "auto_execute_trades_configured": app.AUTO_EXECUTE_TRADES_CONFIGURED,
+            "execution_alerts": {"open_incidents": 0, "last_incident_at": None},
         })
 
     def test_auto_execute_requires_both_bingx_vst_credentials(self):
-        with patch.object(app, "AUTO_EXECUTE_TRADES_CONFIGURED", True):
+        with patch("app.execution_alerts.status", return_value={}), patch.object(app, "AUTO_EXECUTE_TRADES_CONFIGURED", True):
             with patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "", "BINGX_SECRET": ""}):
                 response = app.app.test_client().get("/health")
         self.assertEqual(response.status_code, 200)
@@ -43,7 +44,7 @@ class HealthTests(unittest.TestCase):
 
     @patch("app.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
     def test_auto_execute_uses_bingx_vst_only_when_fully_configured(self, controls):
-        with patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
+        with patch("app.execution_alerts.status", return_value={}), patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
             response = app.app.test_client().get("/health")
         self.assertTrue(response.get_json()["auto_execute_trades"])
 

@@ -59,6 +59,10 @@ def init_db() -> None:
         "ALTER TABLE signal_candidates ADD COLUMN actual_funding_usdt REAL",
         "ALTER TABLE signal_candidates ADD COLUMN actual_net_pnl_usdt REAL",
         "ALTER TABLE signal_candidates ADD COLUMN reconciled_at TEXT",
+        "ALTER TABLE signal_candidates ADD COLUMN broker_close_order_id TEXT",
+        "ALTER TABLE signal_candidates ADD COLUMN broker_close_fill_price REAL",
+        "ALTER TABLE signal_candidates ADD COLUMN reconciliation_state TEXT NOT NULL DEFAULT 'NOT_REQUIRED'",
+        "ALTER TABLE signal_candidates ADD COLUMN reconciliation_note TEXT",
     ):
         try:
             storage._execute(migration)
@@ -145,7 +149,7 @@ def closed_paper_signals(limit: int = 10) -> list[dict]:
                                       quantity, broker_order_id, created_at, reconciled_at, gross_pnl_usdt,
                                       actual_fees_usdt, actual_funding_usdt, actual_net_pnl_usdt
                                FROM signal_candidates
-                               WHERE status IN ('WIN', 'LOSS', 'EXPIRED')
+                               WHERE status IN ('WIN', 'LOSS', 'TIME_EXIT')
                                ORDER BY outcome_time DESC LIMIT ?""", [safe_limit])
     rows = storage._rows_as_dicts(result)
     for row in rows:
@@ -158,11 +162,11 @@ def closed_paper_signals(limit: int = 10) -> list[dict]:
 def performance_summary() -> dict:
     """Return journal-level realized P&L and outcome counts for the button UI."""
     result = storage._execute("""SELECT direction, entry_price, outcome_price, quantity, status, outcome_time
-                               FROM signal_candidates WHERE status IN ('WIN', 'LOSS', 'EXPIRED')""")
+                               FROM signal_candidates WHERE status IN ('WIN', 'LOSS', 'TIME_EXIT')""")
     rows = storage._rows_as_dicts(result)
     today = datetime.now(timezone.utc).date().isoformat()
     pnl, today_pnl = 0.0, 0.0
-    counts = {"WIN": 0, "LOSS": 0, "EXPIRED": 0}
+    counts = {"WIN": 0, "LOSS": 0, "TIME_EXIT": 0}
     for row in rows:
         multiplier = 1 if row["direction"] == "BUY" else -1
         trade_pnl = ((float(row["outcome_price"]) - float(row["entry_price"])) *
@@ -173,7 +177,7 @@ def performance_summary() -> dict:
             today_pnl += trade_pnl
     decided = counts["WIN"] + counts["LOSS"]
     return {"closed_orders": len(rows), "wins": counts["WIN"], "losses": counts["LOSS"],
-            "expired": counts["EXPIRED"], "win_rate_pct": round(counts["WIN"] / decided * 100, 1) if decided else None,
+            "time_exits": counts["TIME_EXIT"], "win_rate_pct": round(counts["WIN"] / decided * 100, 1) if decided else None,
             "realized_pnl_usdt": pnl, "today_pnl_usdt": today_pnl}
 
 
@@ -185,9 +189,10 @@ def first_broker_order_time() -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
-def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: float) -> None:
+def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: float,
+                         broker_close_order: dict | None = None) -> None:
     """Close exactly one open paper position and account its realized, risk-sized P&L once."""
-    if status not in {CandidateStatus.WIN, CandidateStatus.LOSS, CandidateStatus.EXPIRED}:
+    if status not in {CandidateStatus.WIN, CandidateStatus.LOSS, CandidateStatus.TIME_EXIT}:
         raise ValueError("paper signal requires a terminal status")
     result = storage._execute("""SELECT direction, entry_price, quantity, expiry_time FROM signal_candidates
                                WHERE fingerprint = ? AND status = 'ACCEPTED_PAPER'""", [fingerprint])
@@ -197,9 +202,12 @@ def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: 
     signal, now = rows[0], datetime.now(timezone.utc)
     direction_multiplier = 1 if signal["direction"] == "BUY" else -1
     pnl = (float(exit_price) - float(signal["entry_price"])) * float(signal["quantity"]) * direction_multiplier
-    update = storage._execute("""UPDATE signal_candidates SET status = ?, outcome_price = ?, outcome_time = ?
+    update = storage._execute("""UPDATE signal_candidates SET status = ?, outcome_price = ?, outcome_time = ?,
+                               broker_close_order_id = ?, broker_close_fill_price = ?,
+                               reconciliation_state = CASE WHEN broker_order_id IS NOT NULL THEN 'PENDING' ELSE 'NOT_REQUIRED' END
                                WHERE fingerprint = ? AND status = 'ACCEPTED_PAPER'""",
-                              [status, exit_price, now.isoformat(), fingerprint])
+                              [status, exit_price, now.isoformat(), (broker_close_order or {}).get("order_id"),
+                               (broker_close_order or {}).get("fill_price"), fingerprint])
     if update.get("affected_row_count", 0) == 0:
         return
     day = now.date().isoformat()
@@ -237,6 +245,27 @@ def reconcile_broker_pnl(fingerprint: str, gross_pnl: float, fees: float, fundin
                       actual_funding_usdt = ?, actual_net_pnl_usdt = ?, reconciled_at = ? WHERE fingerprint = ?""",
                      [gross_pnl, fees, funding, gross_pnl - fees + funding,
                       datetime.now(timezone.utc).isoformat(), fingerprint])
+
+
+def closed_vst_orders_pending_reconciliation() -> list[dict]:
+    """Closed VST rows needing exchange order-ID reconciliation."""
+    result = storage._execute("""SELECT fingerprint, pair, broker_order_id, broker_close_order_id,
+        broker_fill_price, broker_close_fill_price, status, outcome_time FROM signal_candidates
+        WHERE broker_order_id IS NOT NULL AND status IN ('WIN', 'LOSS', 'TIME_EXIT')
+        AND reconciliation_state = 'PENDING'""")
+    return storage._rows_as_dicts(result)
+
+
+def mark_reconciliation(fingerprint: str, state: str, note: str | None = None, *, gross_pnl: float | None = None,
+                        fees: float | None = None, funding: float | None = None) -> None:
+    if state not in {"VERIFIED", "PENDING", "UNAVAILABLE"}:
+        raise ValueError("invalid reconciliation state")
+    net = gross_pnl - fees + funding if None not in (gross_pnl, fees, funding) else None
+    storage._execute("""UPDATE signal_candidates SET reconciliation_state = ?, reconciliation_note = ?,
+        gross_pnl_usdt = COALESCE(?, gross_pnl_usdt), actual_fees_usdt = COALESCE(?, actual_fees_usdt),
+        actual_funding_usdt = COALESCE(?, actual_funding_usdt), actual_net_pnl_usdt = COALESCE(?, actual_net_pnl_usdt),
+        reconciled_at = CASE WHEN ? = 'VERIFIED' THEN ? ELSE reconciled_at END WHERE fingerprint = ?""",
+        [state, note, gross_pnl, fees, funding, net, state, datetime.now(timezone.utc).isoformat(), fingerprint])
 
 
 def reconciliation_status() -> dict:

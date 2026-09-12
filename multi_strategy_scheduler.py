@@ -8,6 +8,7 @@ from typing import Callable
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import scalping_storage
+import execution_alerts
 from scalping_core import CandidateStatus
 from scalping_data import MarketDataProvider
 
@@ -52,23 +53,58 @@ def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
                             logger.warning("VST position absent for expired window %s; leaving journal open "
                                            "because a TP/SL or manual-close fill cannot be safely inferred",
                                            signal["fingerprint"])
+                            execution_alerts.report(f"missing-position:{signal['fingerprint']}",
+                                                    f"{signal['pair']} #{signal['fingerprint'][:10]} broker pozitsiyasi topilmadi; jurnal yopilmadi.",
+                                                    details={"fingerprint": signal["fingerprint"], "pair": signal["pair"]})
                             continue
-                        exit_price = float(broker.close_position(signal["pair"], signal["direction"],
-                                                                  float(signal["broker_quantity"]))["fill_price"])
-                    scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.TIME_EXIT, exit_price)
+                        close_order = broker.close_position(signal["pair"], signal["direction"],
+                                                            float(signal["broker_quantity"]))
+                        exit_price = float(close_order["fill_price"])
+                        scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.TIME_EXIT,
+                                                              exit_price, close_order)
+                    else:
+                        scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.TIME_EXIT, exit_price)
         except Exception as exc:
             logger.warning("paper resolver will retry %s: %s", signal["fingerprint"], exc)
+            execution_alerts.report(f"resolver-failure:{signal['fingerprint']}",
+                                    f"{signal['pair']} #{signal['fingerprint'][:10]} time-exit close qayta urinadi ({type(exc).__name__}).",
+                                    details={"fingerprint": signal["fingerprint"], "error": type(exc).__name__})
 
 
 def reconcile_closed_vst_orders() -> None:
-    """Do not attribute account-level BingX income to an individual AI order.
+    """Verify strategy orders with immutable order IDs, never account income.
 
-    BingX VST's income feed can be queried by symbol/time but does not provide a
-    reliable strategy order-ID relation. Account totals are shown separately in
-    Telegram; storing them per journal row would double-count or misattribute
-    manual and other-bot activity.
+    P&L, fee and funding are stored only when the broker order response itself
+    explicitly provides every value. VST income remains account-scoped and is
+    intentionally not assigned to an AI signal.
     """
-    logger.debug("BingX VST order-level reconciliation skipped: income feed is account-scoped")
+    import broker
+    for row in scalping_storage.closed_vst_orders_pending_reconciliation():
+        try:
+            entry = broker.get_order(row["pair"], row["broker_order_id"])
+            close = broker.get_order(row["pair"], row["broker_close_order_id"]) if row.get("broker_close_order_id") else None
+            if entry["status"] not in {"FILLED", "CLOSED"} or (close and close["status"] not in {"FILLED", "CLOSED"}):
+                scalping_storage.mark_reconciliation(row["fingerprint"], "PENDING", "broker order hali final FILLED emas")
+                continue
+            values = [entry.get("realized_pnl_usdt"), entry.get("commission_usdt")]
+            if close:
+                values.extend([close.get("realized_pnl_usdt"), close.get("commission_usdt")])
+            if any(value is None for value in values):
+                scalping_storage.mark_reconciliation(row["fingerprint"], "UNAVAILABLE",
+                                                     "order response order-level P&L/fee bermadi; income taqsimlanmadi")
+                execution_alerts.report(f"unreconciled-order:{row['fingerprint']}",
+                                        f"{row['pair']} #{row['fingerprint'][:10]} uchun order-level fee/P&L mavjud emas.",
+                                        details={"fingerprint": row["fingerprint"]})
+                continue
+            gross = float(entry["realized_pnl_usdt"]) + (float(close["realized_pnl_usdt"]) if close else 0.0)
+            fees = abs(float(entry["commission_usdt"])) + (abs(float(close["commission_usdt"])) if close else 0.0)
+            scalping_storage.mark_reconciliation(row["fingerprint"], "VERIFIED", "exchange order-ID bilan tasdiqlandi",
+                                                 gross_pnl=gross, fees=fees, funding=0.0)
+        except Exception as exc:
+            logger.warning("VST reconciliation will retry %s: %s", row["fingerprint"], exc)
+            execution_alerts.report(f"reconciliation-failure:{row['fingerprint']}",
+                                    f"{row['pair']} #{row['fingerprint'][:10]} reconciliation qayta urinadi ({type(exc).__name__}).",
+                                    details={"fingerprint": row["fingerprint"], "error": type(exc).__name__})
 
 
 def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: MarketDataProvider,

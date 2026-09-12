@@ -100,6 +100,42 @@ def close_position(symbol: str, direction: str, quantity: float) -> dict:
     return {"order_id": str(order["orderId"]), "fill_price": float(order["avgPrice"])}
 
 
+def get_order(symbol: str, order_id: str) -> dict:
+    """Fetch one VST order by its immutable exchange order ID.
+
+    The response is intentionally retained as broker evidence rather than used
+    to infer account-level income. BingX has changed field casing between API
+    revisions, so normalization is conservative and preserves absent values.
+    """
+    data = _signed_request("GET", "/openApi/swap/v2/trade/order",
+                           {"symbol": symbol, "orderId": str(order_id)})
+    value = data.get("data", {})
+    order = value.get("order", value) if isinstance(value, dict) else {}
+    if not isinstance(order, dict):
+        raise RuntimeError("BingX order query returned an invalid payload")
+
+    def number(*names: str) -> float | None:
+        for name in names:
+            try:
+                value = order.get(name)
+                if value is not None and value != "":
+                    return float(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    return {
+        "order_id": str(order.get("orderId", order_id)),
+        "status": str(order.get("status", "")).upper(),
+        "fill_price": number("avgPrice", "averagePrice", "price"),
+        # These remain None unless the order endpoint explicitly binds them to
+        # this order; account income is never guessed or allocated here.
+        "commission_usdt": number("commission", "fee"),
+        "realized_pnl_usdt": number("realizedProfit", "realizedPnl"),
+        "raw": order,
+    }
+
+
 def income_history(symbol: str, start_time_ms: int) -> list[dict]:
     """Documented V2 income endpoint; callers parse fields defensively."""
     data = _signed_request("GET", "/openApi/swap/v2/user/income",
