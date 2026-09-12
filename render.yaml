@@ -50,3 +50,5 @@ services:
         value: "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT"
       - key: MULTI_STRATEGY_SCAN_INTERVAL_SECONDS
         value: "300"
+      - key: VST_OPEN_SLA_MINUTES
+        value: "120"

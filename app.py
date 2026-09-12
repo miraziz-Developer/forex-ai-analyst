@@ -108,7 +108,12 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
         candidate = ai.to_candidate(pair, regime.regime, int(bars_5m[-1]["datetime"]), now)
         runtime_rejection = runtime_controls.trade_permitted(pair, ai.risk_usdt, ai.leverage, ai.cooldown_minutes)
         if runtime_rejection:
+            key = "kill-switch" if "kill switch" in runtime_rejection else f"risk-control:{pair}:{runtime_rejection}"
+            execution_alerts.report(key, f"{pair} yangi VST order bloklandi: {runtime_rejection}.",
+                                    severity="CRITICAL" if key == "kill-switch" else "WARNING",
+                                    details={"pair": pair, "reason": runtime_rejection})
             return [{"status": "SKIP", "reason": runtime_rejection}]
+        execution_alerts.resolve("kill-switch", note="runtime execution permission restored")
         if candidate.fingerprint in scalping_storage.existing_fingerprints():
             return [{"status": "SKIP", "reason": "duplicate AI candle decision"}]
         broker_order = execute_bingx_vst_order(candidate, ai)

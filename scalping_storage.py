@@ -142,6 +142,14 @@ def open_paper_signals() -> list[dict]:
     return storage._rows_as_dicts(result)
 
 
+def open_vst_orders() -> list[dict]:
+    """Open journal rows backed by immutable BingX VST entry-order IDs."""
+    result = storage._execute("""SELECT fingerprint, pair, direction, broker_order_id, broker_quantity,
+        broker_fill_price, entry_price, expiry_time, created_at FROM signal_candidates
+        WHERE status = 'ACCEPTED_PAPER' AND broker_order_id IS NOT NULL""")
+    return storage._rows_as_dicts(result)
+
+
 def closed_paper_signals(limit: int = 10) -> list[dict]:
     """Newest resolved VST/paper orders with their realized journal P&L."""
     safe_limit = min(max(int(limit), 1), 500)
