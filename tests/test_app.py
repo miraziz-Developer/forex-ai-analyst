@@ -8,7 +8,7 @@ for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TURSO_DATABASE_URL", "TUR
     os.environ.setdefault(key, "test")
 
 import app
-from risk_manager import RiskDecision
+from ai_trader import AITradeDecision
 from scalping_core import CandidateSignal, Direction, MarketRegime
 
 
@@ -48,15 +48,19 @@ class HealthTests(unittest.TestCase):
 
     @patch("app.demo_execution_enabled", return_value=False)
     def test_bingx_vst_order_is_not_attempted_when_execution_is_disabled(self, enabled):
-        self.assertIsNone(app.execute_bingx_vst_order(self._candidate(), RiskDecision(True, risk_usdt=.75, quantity=.375)))
+        decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.75, leverage=3,
+                                   direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
+        self.assertIsNone(app.execute_bingx_vst_order(self._candidate(), decision))
 
     @patch("broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 100.25})
     @patch("broker.round_quantity", return_value=.3)
     @patch("app.demo_execution_enabled", return_value=True)
     def test_bingx_vst_order_uses_signal_levels_and_rounded_quantity(self, enabled, rounded, place_order):
         candidate = self._candidate()
-        result = app.execute_bingx_vst_order(candidate, RiskDecision(True, risk_usdt=.75, quantity=.375))
-        place_order.assert_called_once_with("BTC-USDT", "BUY", .3, 103, 98)
+        decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.75, leverage=4,
+                                   direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
+        result = app.execute_bingx_vst_order(candidate, decision)
+        place_order.assert_called_once_with("BTC-USDT", "BUY", .3, 103, 98, leverage=4)
         self.assertEqual(result, {"order_id": "vst-1", "fill_price": 100.25, "quantity": .3})
 
     def test_signals_api_requires_dashboard_token_when_configured(self):

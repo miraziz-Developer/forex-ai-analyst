@@ -15,6 +15,8 @@ from scalping_data import (MarketDataProvider, bingx_swap_symbol, binance_future
                             fetch_bingx_swap_bars, fetch_binance_futures_bars, provider_from_environment)
 from scalping_indicators import candle_confirmation, support_resistance_zones
 from multi_strategy_backtest import BacktestCosts, simulate as multi_simulate
+from production_backtest import apply_account_limits, walk_forward_periods
+from quality_policy import QualityPolicy, quality_rejection_reason
 from strategies import support_resistance_rejection
 from multi_strategy_scheduler import resolve_open_paper_signals
 from strategy_coordinator import resolve_candidates
@@ -39,6 +41,17 @@ def candidate(score=80, direction=Direction.BUY, pair="BTC-USDT"):
 
 
 class MultiStrategyTests(unittest.TestCase):
+    def test_walk_forward_periods_are_equal_contiguous_and_validate_input(self):
+        start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        periods = walk_forward_periods(start, 90, 3)
+        self.assertEqual(periods, [
+            (start, datetime(2026, 7, 1, tzinfo=timezone.utc)),
+            (datetime(2026, 7, 1, tzinfo=timezone.utc), datetime(2026, 7, 31, tzinfo=timezone.utc)),
+            (datetime(2026, 7, 31, tzinfo=timezone.utc), datetime(2026, 8, 30, tzinfo=timezone.utc)),
+        ])
+        with self.assertRaises(ValueError):
+            walk_forward_periods(start, 90, 4)
+
     def test_binance_futures_provider_uses_public_ohlcv_endpoint(self):
         response = Mock()
         response.json.return_value = [[1000, "10", "11", "9", "10.5", "42"]]
@@ -151,6 +164,44 @@ class MultiStrategyTests(unittest.TestCase):
         config = RiskConfig(max_daily_trades=0, max_open_positions=0)
         self.assertTrue(assess_risk(candidate(), open_positions=99, daily_trades=99,
                                     daily_realized_pnl=0, config=config).accepted)
+
+    def test_risk_rejects_excessive_notional_and_fee_relative_to_stop_risk(self):
+        signal = candidate()
+        capped = RiskConfig(risk_usdt_per_trade=.5, max_position_notional_usdt=20)
+        self.assertFalse(assess_risk(signal, open_positions=0, daily_trades=0,
+                                     daily_realized_pnl=0, config=capped).accepted)
+        fee_capped = RiskConfig(risk_usdt_per_trade=.5, max_fee_to_risk_ratio=.04,
+                                estimated_fee_pct_round_trip=.10)
+        self.assertFalse(assess_risk(signal, open_positions=0, daily_trades=0,
+                                     daily_realized_pnl=0, config=fee_capped).accepted)
+
+    def test_quality_policy_blocks_pair_direction_tight_stop_and_conflicting_hourly_trend(self):
+        hourly_up = [bar(index, 100 + index, interval=3600000) for index in range(200)]
+        policy = QualityPolicy()
+        self.assertEqual(quality_rejection_reason(candidate(pair="XRP-USDT"), hourly_up, policy),
+                         "pair blocked by quality policy")
+        self.assertEqual(quality_rejection_reason(candidate(direction=Direction.SELL), hourly_up, policy),
+                         "sell direction blocked by quality policy")
+        tight = candidate()
+        object.__setattr__(tight, "features", {"atr_5m": 3.0})
+        self.assertEqual(quality_rejection_reason(tight, hourly_up, QualityPolicy(require_1h_alignment=False)),
+                         "stop distance below ATR quality minimum")
+        aligned = candidate()
+        object.__setattr__(aligned, "features", {"atr_5m": 1.0})
+        self.assertIsNone(quality_rejection_reason(aligned, hourly_up, policy))
+
+    def test_account_simulator_enforces_one_open_position_and_daily_loss_stop(self):
+        base = int(NOW.timestamp() * 1000)
+        def trade(minutes, exit_minutes, pnl):
+            return {"pair": "BTC-USDT", "strategy": "test", "direction": "BUY", "outcome": "LOSS",
+                    "time": base + minutes * 60000, "entry_time": base + minutes * 60000,
+                    "exit_time": base + exit_minutes * 60000, "net_pnl_usdt": pnl,
+                    "gross_pnl_usdt": pnl, "fees_usdt": 0, "held_bars": 1}
+        config = RiskConfig(max_open_positions=1, max_daily_trades=4, max_daily_loss_usdt=.5)
+        accepted, rejected = apply_account_limits([trade(0, 5, -.5), trade(1, 2, 1), trade(6, 7, 1)], config, 100)
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(rejected["maximum open positions reached"], 1)
+        self.assertEqual(rejected["daily loss limit reached"], 1)
 
     def test_trend_pullback_generates_valid_long(self):
         bars15 = [bar(index, 100 + index * .5, interval=900000, spread=.4) for index in range(260)]

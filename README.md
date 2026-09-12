@@ -1,28 +1,25 @@
-# Multi-Strategy Crypto Paper Bot
+# Context-Aware BingX VST AI Trader
 
 One `main` branch and one Render web service:
 
 ```text
 BingX public perpetual-swap closed OHLCV
-  → 15m regime + 5m strategy agents
-  → deterministic coordinator and risk manager
-  → Turso paper-signal/outcome ledger + Telegram notification
+  → 15m regime + positioning / liquidity context
+  → PDF knowledge excerpts + prior VST trade reviews
+  → structured AI decision (SKIP, WATCH, PROPOSE_TRADE)
+  → validated BingX VST order + Turso journal + Telegram notification
 ```
 
-By default this is paper-only. When `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET` are all configured, accepted signals also place a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
+By default auto-execution is off. When `OPENAI_API_KEY`, `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET` are all configured, a valid AI trade proposal places a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
 
-## Current strategies and controls
+## Contextual AI controls
 
-- `trend_pullback`: 15-minute trend regime with a confirmed 5-minute pullback/reclaim.
-- `support_resistance_rejection`: closed 5-minute rejection at an ATR-width confirmed pivot zone; it does not counter-trade a classified trend.
-- `breakout_retest`: a `BREAKOUT_READY` regime, volume-confirmed structure break, then a closed retest candle. It never enters on the initial breakout candle.
-- Regime classification is fail-closed: `TRENDING_UP`, `TRENDING_DOWN`, `RANGING`, `BREAKOUT_READY`, `HIGH_VOLATILITY`, or `UNCERTAIN`. High-volatility and uncertain regimes do not produce new entries.
-- Trend, momentum, volatility, volume, structure, and candle action are scored as separate groups; correlated trend indicators are not counted as independent confirmations.
+- The model receives closed 5m/15m/1h candles, regime features, funding/open-interest/order-book context, retrieved PDF excerpts and earlier outcome reviews.
+- It may select `SKIP`, `WATCH`, or `PROPOSE_TRADE`; for a proposal it dynamically chooses direction, entry, stop, target, risk, leverage and cooldown.
+- Model output is JSON-validated and invalid/API-unavailable output always becomes `SKIP` (no trade).
 - BingX perpetual-swap public REST klines; no BingX account or API key is required. This is market data only; VST order execution remains separately restricted to the demo endpoint.
-- Only fully closed, validated, deduplicated candles are used. The provider caches one pair/timeframe result until the next closed-candle boundary to avoid duplicate REST requests during a scan/resolution cycle.
-- A candidate must have valid directional levels, score at least 65, and R:R at least 1.3.
-- Same-candle duplicates are persisted and rejected.
-- Open-position and accepted-trade-count limits are disabled by default (`MAX_OPEN_POSITIONS=0`, `MAX_DAILY_TRADES=0`); every independently accepted signal is recorded. `$0.75` stop-risk per trade and the `$2.00` daily realized-loss protection remain by default.
+- Only fully closed candles are used. Same-candle fingerprints are persisted and rejected.
+- Technical safety remains: allowed-pair whitelist, 1–125x leverage validation, structurally valid trade levels, exchange-side TP/SL, `KILL_SWITCH`, idempotency and fail-closed broker/data errors. Create BingX keys with **no withdrawal permission**.
 - Outcome resolution is candle-based and conservative: when a candle touches both stop and target, it records `LOSS`.
 
 ## Setup
@@ -42,21 +39,53 @@ TURSO_DATABASE_URL=libsql://your-database.turso.io
 TURSO_AUTH_TOKEN=your-token
 ```
 
-The app creates and migrates its own `signal_candidates`, `signal_decisions`, `daily_risk_state`, and `market_snapshots` tables in that database. Existing legacy `signals` rows are not changed.
+The app creates and migrates its own signals, snapshots, AI reviews, knowledge documents and knowledge chunks in that database. Existing legacy `signals` rows are not changed.
 
-## Deterministic multi-strategy replay
+## Telegram PDF knowledge and webhook
 
-`multi_strategy_backtest.py` provides the reusable closed-bar replay engine for each agent. Its evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, enforces the central daily/open-position limits, expires stale trades, and resolves an OHLC candle touching both levels as `LOSS`.
+Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send a text-based PDF to the bot and it will extract/chunk the text into Turso; use `/knowledge` to list documents and `/knowledge_search <query>` to retrieve cited excerpts. Scanned PDFs need OCR before upload.
+
+Set `TELEGRAM_WEBHOOK_SECRET`, then register the deployed webhook once:
+
+```bash
+curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+  -d "url=https://YOUR-RENDER-SERVICE.onrender.com/telegram/webhook" \
+  -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
+  -d 'allowed_updates=["message","channel_post"]'
+```
+
+The endpoint verifies Telegram's `X-Telegram-Bot-Api-Secret-Token` header. PDF metadata and extracted text are persisted; binary PDFs are not written to Render's ephemeral filesystem.
+
+## Legacy deterministic replay (research-only)
+
+`multi_strategy_backtest.py` and `production_backtest.py` remain available for historical deterministic-strategy research. They are not the deployed contextual AI/VST decision path and their fixed research limits do not override an AI trade decision. Their evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, expires stale trades, and resolves an OHLC candle touching both levels as `LOSS`.
 
 Use `metrics(trades)` to report trade count, win rate, after-cost net P&L, expectancy, profit factor, maximum drawdown, and average holding time. Review results independently by `strategy`, `pair`, and `regime`; no strategy may be promoted beyond paper operation solely from an in-sample win rate.
+
+For independent chronological validation, split a fixed period into equal account resets rather than relying on its aggregate result:
+
+```bash
+python3 production_backtest.py --start 2026-06-01 --days 90 \
+  --pairs BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT \
+  --risk-usdt 0.5 --max-daily-loss-usdt 1.5 --max-daily-trades 4 \
+  --max-open-positions 1 --max-notional-usdt 75 --max-fee-to-risk-ratio 0.15 \
+  --fee-pct-round-trip 0.10 --slippage-pct-round-trip 0.02 \
+  --starting-equity-usdt 100 --min-score 75 --min-stop-atr-multiple 0.8 \
+  --blocked-pairs XRP-USDT --walk-forward-windows 3 \
+  --output production_walk_forward_90d.json
+```
+
+Each `walk_forward_windows` item is a separate `$100` replay with its own risk state. `promotion_eligible` is only a mechanical screen requiring every window to have positive after-cost P&L and profit factor above one; it is **not** permission to enable a pair or live trading. Require adequate independent sample size and stable paper/VST results before changing pair defaults.
 
 ## Configuration
 
 See [`.env.example`](.env.example). The production-safe defaults are:
 
 ```env
-# Effective VST execution also requires both BingX demo API credentials.
-AUTO_EXECUTE_TRADES=true
+# Effective VST execution also requires OpenAI and both BingX demo credentials.
+OPENAI_API_KEY=
+AUTO_EXECUTE_TRADES=false
+KILL_SWITCH=false
 MULTI_STRATEGY_PROVIDER=bingx
 MULTI_STRATEGY_PAIRS=BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT
 MULTI_STRATEGY_SCAN_INTERVAL_SECONDS=300
@@ -67,7 +96,8 @@ Do not set the scan interval below 300 seconds. The scheduler scans pairs serial
 ## HTTP endpoints
 
 - `GET /health` — service/provider/paper-only status; used by Render.
-- `GET /api/signals?limit=100` — recent paper candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
+- `GET /api/signals?limit=100` — recent AI candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
+- `POST /telegram/webhook` — authenticated Telegram command/PDF receiver.
 
 ## Render deployment
 
@@ -79,7 +109,7 @@ After deploy, verify:
 curl https://YOUR-RENDER-SERVICE.onrender.com/health
 ```
 
-Expected essentials: `"service":"multi-strategy-paper"`, `"paper_only":true`, `"auto_execute_trades":false`, and `"auto_execute_trades_configured":true`.
+Expected essentials before enabling demo orders: `"demo_only":true` and `"auto_execute_trades":false`. Upload a PDF and verify `/knowledge` before setting `AUTO_EXECUTE_TRADES=true`. Set `KILL_SWITCH=true` to prevent every new VST order; it does not force-close already-open exchange positions.
 
 ## Validation
 

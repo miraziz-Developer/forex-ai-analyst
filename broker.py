@@ -50,10 +50,12 @@ def set_leverage(symbol: str, position_side: str, leverage: int = DEFAULT_LEVERA
 
 
 def place_market_order(symbol: str, direction: str, quantity: float,
-                        take_profit_price: float, stop_loss_price: float) -> dict:
+                        take_profit_price: float, stop_loss_price: float, *, leverage: int = DEFAULT_LEVERAGE) -> dict:
     """direction: 'BUY' opens/adds to a LONG, 'SELL' opens/adds to a SHORT."""
     position_side = "LONG" if direction == "BUY" else "SHORT"
-    set_leverage(symbol, position_side)
+    if not 1 <= int(leverage) <= 125:
+        raise ValueError("BingX VST leverage must be 1..125")
+    set_leverage(symbol, position_side, int(leverage))
 
     take_profit = {"type": "TAKE_PROFIT_MARKET", "stopPrice": take_profit_price, "workingType": "MARK_PRICE"}
     stop_loss = {"type": "STOP_MARKET", "stopPrice": stop_loss_price, "workingType": "MARK_PRICE"}

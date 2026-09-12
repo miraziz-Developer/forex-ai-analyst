@@ -11,6 +11,8 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN
@@ -19,7 +21,13 @@ services:
         generateValue: true
       - key: AUTO_EXECUTE_TRADES
         # BingX VST/demo orders require this plus BINGX_API_KEY and BINGX_SECRET.
-        value: "true"
+        value: "false"
+      - key: KILL_SWITCH
+        value: "false"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AI_TRADER_MODEL
+        value: "gpt-4o-mini"
       - key: BINGX_API_KEY
         sync: false
       - key: BINGX_SECRET
@@ -32,15 +40,3 @@ services:
         value: "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT"
       - key: MULTI_STRATEGY_SCAN_INTERVAL_SECONDS
         value: "300"
-      - key: RISK_USDT_PER_TRADE
-        value: "0.75"
-      - key: MAX_DAILY_LOSS_USDT
-        value: "2.00"
-      - key: MAX_DAILY_TRADES
-        # Zero disables the accepted-signal count limit.
-        value: "0"
-      - key: MAX_OPEN_POSITIONS
-        # Zero allows every accepted signal to remain open independently.
-        value: "0"
-      - key: MIN_REWARD_RISK
-        value: "1.3"

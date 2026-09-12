@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
  candle_time INTEGER NOT NULL, regime TEXT NOT NULL, features_json TEXT NOT NULL,
  created_at TEXT NOT NULL, UNIQUE(pair, timeframe, candle_time)
 );"""
+_CREATE_AI_REVIEWS = """CREATE TABLE IF NOT EXISTS ai_trade_reviews (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, fingerprint TEXT NOT NULL UNIQUE, outcome TEXT NOT NULL,
+ realized_pnl_usdt REAL NOT NULL, review TEXT NOT NULL, created_at TEXT NOT NULL
+);"""
 
 
 def init_db() -> None:
@@ -41,6 +45,7 @@ def init_db() -> None:
     storage._execute(_CREATE_RISK)
     storage._execute(_CREATE_DECISIONS)
     storage._execute(_CREATE_SNAPSHOTS)
+    storage._execute(_CREATE_AI_REVIEWS)
     for migration in (
         "ALTER TABLE signal_candidates ADD COLUMN risk_usdt REAL",
         "ALTER TABLE signal_candidates ADD COLUMN quantity REAL",
@@ -150,6 +155,19 @@ def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: 
                        VALUES (?, 0, ?, ?) ON CONFLICT(trade_date) DO UPDATE SET
                        realized_pnl_usdt = realized_pnl_usdt + excluded.realized_pnl_usdt,
                        updated_at = excluded.updated_at""", [day, pnl, now.isoformat()])
+    review = ("Trade yakuni: " + str(status) + ". Keyingi qarorda aynan shu natijani yakka o‘zi qoida sifatida "
+              "qabul qilma; o‘xshash regime, yo‘nalish va setup namunalarini birgalikda bahola.")
+    storage._execute("""INSERT OR IGNORE INTO ai_trade_reviews
+                      (fingerprint, outcome, realized_pnl_usdt, review, created_at) VALUES (?, ?, ?, ?, ?)""",
+                     [fingerprint, status, pnl, review, now.isoformat()])
+
+
+def recent_ai_reviews(pair: str, limit: int = 8) -> list[dict]:
+    result = storage._execute("""SELECT c.pair, c.direction, c.regime, c.features_json, r.outcome,
+                                      r.realized_pnl_usdt, r.review, r.created_at
+                               FROM ai_trade_reviews r JOIN signal_candidates c ON c.fingerprint = r.fingerprint
+                               WHERE c.pair = ? ORDER BY r.id DESC LIMIT ?""", [pair.upper(), min(max(limit, 1), 20)])
+    return storage._rows_as_dicts(result)
 
 
 def recent_candidates(limit: int = 100) -> list[dict]:

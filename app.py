@@ -12,14 +12,15 @@ load_dotenv()
 
 from flask import Flask, abort, jsonify, request
 
+from ai_trader import AITradeDecision, decide
+from institutional_data import fetch_institutional_context
+import knowledge
 from market_regime import classify_market_regime
 from multi_strategy_scheduler import start_scheduler
 from notifier import send_telegram_message
-from risk_manager import assess_risk, config_from_environment
 from scalping_data import MarketDataProvider, provider_from_environment
 import scalping_storage
-from strategy_coordinator import resolve_candidates
-from strategies import breakout_retest, support_resistance_rejection, trend_pullback
+from telegram_bot import handle_update
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,78 +40,72 @@ def configured_pairs() -> tuple[str, ...]:
     return pairs
 
 
-def format_paper_signal(candidate, risk, broker_order: dict | None = None) -> str:
+def format_paper_signal(candidate, decision: AITradeDecision, quantity: float, broker_order: dict | None = None) -> str:
     execution_note = (f"BingX VST demo order ochildi: #{broker_order['order_id']}; "
                       f"fill: {broker_order['fill_price']:.6g}."
                       if broker_order else "Bu paper signal. BingX order ochilmaydi.")
-    return (f"📈 PAPER SIGNAL — {candidate.pair} {candidate.direction}\n\n"
-            f"Strategy: {candidate.strategy}\nRegime: {candidate.regime}\nQuality score: {candidate.score}/100\n\n"
+    return (f"🤖 AI VST SIGNAL — {candidate.pair} {candidate.direction}\n\n"
+            f"Regime: {candidate.regime}\nAI ishonchi: {decision.confidence}/100\n\n"
             f"Entry: {candidate.entry_price:.6g}\nStop: {candidate.stop_price:.6g}\n"
             f"Target: {candidate.target_price:.6g}\nR:R: {candidate.reward_risk:.2f}\n\nTasdiqlar:\n• " +
-            "\n• ".join(candidate.confirmations) + f"\n\nRisk: ${risk.risk_usdt:.2f}; quantity: {risk.quantity:.8g}\n"
+            "\n• ".join(candidate.confirmations) + f"\n\nAI risk: ${decision.risk_usdt:.2f}; leverage: {decision.leverage}x; quantity: {quantity:.8g}\n"
+            f"Cooldown: {decision.cooldown_minutes} daqiqa\nInvalidation: {decision.invalidation}\n"
             + execution_note)
 
 
 def demo_execution_enabled() -> bool:
     """Only enable the hardcoded BingX VST (virtual-money) execution client with both credentials."""
-    return (os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true" and
+    return (os.environ.get("KILL_SWITCH", "false").strip().lower() != "true" and
+            os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true" and
             bool(os.environ.get("BINGX_API_KEY", "").strip()) and bool(os.environ.get("BINGX_SECRET", "").strip()))
 
 
-def execute_bingx_vst_order(candidate, risk) -> dict | None:
+def execute_bingx_vst_order(candidate, decision: AITradeDecision) -> dict | None:
     if not demo_execution_enabled():
         return None
     import broker
-    quantity = broker.round_quantity(candidate.pair, risk.quantity)
+    distance = abs(candidate.entry_price - candidate.stop_price)
+    quantity = broker.round_quantity(candidate.pair, decision.risk_usdt / distance)
     if quantity <= 0:
-        raise ValueError(f"BingX VST quantity rounds to zero for {candidate.pair}; increase RISK_USDT_PER_TRADE")
+        raise ValueError(f"BingX VST quantity rounds to zero for {candidate.pair}; AI risk too small")
     order = broker.place_market_order(candidate.pair, str(candidate.direction), quantity,
-                                      candidate.target_price, candidate.stop_price)
+                                       candidate.target_price, candidate.stop_price, leverage=decision.leverage)
     return {**order, "quantity": quantity}
 
 
 def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
     bars_15m = provider.fetch_closed_bars(pair, "15m", 260, now)
-    bars_5m = provider.fetch_closed_bars(pair, "5m", 80, now)
+    bars_5m = provider.fetch_closed_bars(pair, "5m", 120, now)
+    bars_1h = provider.fetch_closed_bars(pair, "1h", 200, now)
     regime = classify_market_regime(bars_15m)
     if bars_15m:
         scalping_storage.log_market_snapshot(pair, "15m", int(bars_15m[-1]["datetime"]),
                                              regime.regime, regime.features)
-    candidates = [candidate for candidate in (
-        trend_pullback.evaluate(pair, bars_15m, bars_5m, regime, now),
-        support_resistance_rejection.evaluate(pair, bars_15m, bars_5m, regime, now),
-        breakout_retest.evaluate(pair, bars_15m, bars_5m, regime, now),
-    ) if candidate is not None]
-    if not candidates:
-        return []
-    decisions = resolve_candidates(candidates, scalping_storage.existing_fingerprints(), now)
-    results = []
-    for decision in decisions:
-        candidate = decision.candidate
-        if decision.accepted:
-            trades, pnl = scalping_storage.risk_state()
-            risk = assess_risk(candidate, open_positions=scalping_storage.open_paper_positions(), daily_trades=trades,
-                               daily_realized_pnl=pnl, config=config_from_environment())
-            if not risk.accepted:
-                from scalping_core import CandidateStatus, Decision
-                decision = Decision(candidate, CandidateStatus.BLOCKED_BY_RISK, risk.reason)
-            else:
-                try:
-                    broker_order = execute_bingx_vst_order(candidate, risk)
-                except Exception as exc:
-                    logger.exception("BingX VST order failed for %s", candidate.pair)
-                    from scalping_core import CandidateStatus, Decision
-                    decision = Decision(candidate, CandidateStatus.BLOCKED_BY_RISK, f"BingX VST order failed: {exc}")
-                else:
-                    scalping_storage.mark_accepted(decision, risk.risk_usdt, risk.quantity, broker_order)
-                    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-                        send_telegram_message(format_paper_signal(candidate, risk, broker_order),
-                                              TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-        if not decision.accepted:
-            scalping_storage.log_decision(decision)
-        results.append({"status": decision.status, "reason": decision.reason, "fingerprint": candidate.fingerprint})
-    return results
+    if not bars_5m or not bars_15m:
+        return [{"status": "SKIP", "reason": "yetarli yopilgan sham yo‘q"}]
+    snapshot = {"pair": pair.upper(), "time_utc": now.isoformat(), "regime": str(regime.regime),
+                "regime_features": regime.features, "institutional": fetch_institutional_context(pair.upper()),
+                "bars_5m": bars_5m[-80:], "bars_15m": bars_15m[-120:], "bars_1h": bars_1h[-120:]}
+    excerpts = knowledge.search(f"{pair} {regime.regime} trend volatility risk")
+    ai = decide(snapshot, excerpts, scalping_storage.recent_ai_reviews(pair))
+    if not ai.proposes_trade:
+        return [{"status": ai.action, "reason": ai.rationale}]
+    from scalping_core import CandidateStatus, Decision
+    try:
+        candidate = ai.to_candidate(pair, regime.regime, int(bars_5m[-1]["datetime"]), now)
+        if candidate.fingerprint in scalping_storage.existing_fingerprints():
+            return [{"status": "SKIP", "reason": "duplicate AI candle decision"}]
+        broker_order = execute_bingx_vst_order(candidate, ai)
+        quantity = float((broker_order or {}).get("quantity", ai.risk_usdt / abs(candidate.entry_price - candidate.stop_price)))
+        accepted = Decision(candidate, CandidateStatus.ACCEPTED_PAPER, "AI contextual decision")
+        scalping_storage.mark_accepted(accepted, ai.risk_usdt, quantity, broker_order)
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            send_telegram_message(format_paper_signal(candidate, ai, quantity, broker_order), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+        return [{"status": "ACCEPTED_PAPER", "fingerprint": candidate.fingerprint, "ai": ai.raw}]
+    except Exception as exc:
+        logger.exception("AI VST execution failed for %s", pair)
+        return [{"status": "SKIP", "reason": f"AI/VST execution failed: {type(exc).__name__}"}]
 
 
 def scan_configured_pairs(provider: MarketDataProvider) -> None:
@@ -144,8 +139,18 @@ def signals_api():
     return jsonify({"signals": scalping_storage.recent_candidates(request.args.get("limit", 100, type=int))})
 
 
+@app.route("/telegram/webhook", methods=["POST"])
+def telegram_webhook():
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    if secret and not secrets.compare_digest(request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""), secret):
+        abort(401)
+    handle_update(request.get_json(silent=True) or {})
+    return jsonify({"ok": True})
+
+
 if __name__ == "__main__":
     scalping_storage.init_db()
+    knowledge.init_db()
     provider = provider_from_environment()
     start_scheduler(scan=scan_configured_pairs, provider=provider,
                     interval_seconds=int(os.environ.get("MULTI_STRATEGY_SCAN_INTERVAL_SECONDS", "300")))
