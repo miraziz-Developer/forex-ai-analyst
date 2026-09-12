@@ -25,7 +25,8 @@ class AITraderTests(unittest.TestCase):
         self.assertEqual(candidate.features["ai_leverage"], 3)
 
     def test_missing_api_key_skips_without_network_call(self):
-        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "", "AZURE_OPENAI_API_KEY": "",
+                                     "AZURE_OPENAI_ENDPOINT": "", "AZURE_OPENAI_DEPLOYMENT": ""}, clear=False):
             result = decide({}, [], [])
         self.assertEqual(result.action, "SKIP")
 
@@ -36,6 +37,25 @@ class AITraderTests(unittest.TestCase):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "key"}, clear=False):
             result = decide({}, [], [])
         self.assertEqual(result.action, "SKIP")
+
+    @patch("openai.AzureOpenAI")
+    def test_azure_credentials_use_deployment_as_model(self, client_class):
+        message = Mock(content='{"action":"WATCH","rationale":"wait","invalidation":"none","confidence":40}')
+        client_class.return_value.chat.completions.create.return_value.choices = [Mock(message=message)]
+        azure_environment = {
+            "OPENAI_API_KEY": "",
+            "AZURE_OPENAI_API_KEY": "azure-key",
+            "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com",
+            "AZURE_OPENAI_DEPLOYMENT": "trader-deployment",
+            "AZURE_OPENAI_API_VERSION": "2024-10-21",
+        }
+        with patch.dict(os.environ, azure_environment, clear=False):
+            result = decide({}, [], [])
+        self.assertEqual(result.action, "WATCH")
+        client_class.assert_called_once_with(
+            api_key="azure-key", azure_endpoint="https://example.openai.azure.com", api_version="2024-10-21",
+        )
+        self.assertEqual(client_class.return_value.chat.completions.create.call_args.kwargs["model"], "trader-deployment")
 
 
 if __name__ == "__main__":

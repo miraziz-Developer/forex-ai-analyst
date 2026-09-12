@@ -107,14 +107,27 @@ def _parse(payload: dict[str, Any]) -> AITradeDecision:
 def decide(snapshot: dict[str, Any], knowledge: list[dict], reviews: list[dict]) -> AITradeDecision:
     """Ask the configured model for a decision; safely skip if it cannot answer."""
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return _skip("OPENAI_API_KEY configured emas; contextual AI trade ochilmadi")
+    azure_api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
+    azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
+    azure_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
+    if not api_key and not (azure_api_key and azure_endpoint and azure_deployment):
+        return _skip("OpenAI yoki Azure OpenAI credentials configured emas; contextual AI trade ochilmadi")
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        if azure_api_key and azure_endpoint and azure_deployment:
+            from openai import AzureOpenAI
+            client = AzureOpenAI(
+                api_key=azure_api_key,
+                azure_endpoint=azure_endpoint,
+                api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21"),
+            )
+            model = azure_deployment
+        else:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            model = os.environ.get("AI_TRADER_MODEL", "gpt-4o-mini")
         context = {"market_snapshot": snapshot, "knowledge_excerpts": knowledge, "prior_reviews": reviews}
         response = client.chat.completions.create(
-            model=os.environ.get("AI_TRADER_MODEL", "gpt-4o-mini"),
+            model=model,
             temperature=0.2, response_format={"type": "json_object"},
             messages=[{"role": "system", "content": SYSTEM_PROMPT},
                       {"role": "user", "content": json.dumps(context, ensure_ascii=False, default=str)}],

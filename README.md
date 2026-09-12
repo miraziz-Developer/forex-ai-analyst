@@ -10,7 +10,7 @@ BingX public perpetual-swap closed OHLCV
   → validated BingX VST order + Turso journal + Telegram notification
 ```
 
-By default auto-execution is off. When `OPENAI_API_KEY`, `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET` are all configured, a valid AI trade proposal places a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
+By default auto-execution is off. When either `OPENAI_API_KEY` or the complete Azure OpenAI configuration (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`) is present alongside `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET`, a valid AI trade proposal places a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
 
 ## Contextual AI controls
 
@@ -84,6 +84,11 @@ See [`.env.example`](.env.example). The production-safe defaults are:
 ```env
 # Effective VST execution also requires OpenAI and both BingX demo credentials.
 OPENAI_API_KEY=
+# Or use Azure OpenAI. Deployment is passed to the SDK as the model name.
+AZURE_OPENAI_API_KEY=
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=your-chat-deployment
+AZURE_OPENAI_API_VERSION=2024-10-21
 AUTO_EXECUTE_TRADES=false
 KILL_SWITCH=false
 MULTI_STRATEGY_PROVIDER=bingx
