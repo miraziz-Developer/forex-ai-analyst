@@ -43,7 +43,7 @@ The app creates and migrates its own signals, snapshots, AI reviews, knowledge d
 
 ## Telegram PDF knowledge and webhook
 
-Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send a text-based PDF to the bot and it will extract/chunk the text into Turso; use `/knowledge` to list documents and `/knowledge_search <query>` to retrieve cited excerpts. Scanned PDFs need OCR before upload.
+Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send `/start` once to open the button-based control panel: **Holat**, **So‘nggi signallar**, **Ochiq VST pozitsiyalar**, **Bilim bazasi**, **Bilimdan qidirish**, and **PDF yuklash**. Send a text-based PDF to the bot and it will extract/chunk the text into Turso. Scanned PDFs need OCR before upload. Legacy `/knowledge` and `/knowledge_search <query>` remain available for compatibility.
 
 Set `TELEGRAM_WEBHOOK_SECRET`, then register the deployed webhook once:
 
@@ -51,10 +51,10 @@ Set `TELEGRAM_WEBHOOK_SECRET`, then register the deployed webhook once:
 curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d "url=https://YOUR-RENDER-SERVICE.onrender.com/telegram/webhook" \
   -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
-  -d 'allowed_updates=["message","channel_post"]'
+  -d 'allowed_updates=["message","channel_post","callback_query"]'
 ```
 
-The endpoint verifies Telegram's `X-Telegram-Bot-Api-Secret-Token` header. PDF metadata and extracted text are persisted; binary PDFs are not written to Render's ephemeral filesystem.
+The endpoint verifies Telegram's `X-Telegram-Bot-Api-Secret-Token` header. `callback_query` is required for the button panel. PDF metadata and extracted text are persisted; binary PDFs are not written to Render's ephemeral filesystem.
 
 ## Legacy deterministic replay (research-only)
 
@@ -101,7 +101,7 @@ Do not set the scan interval below 300 seconds. The scheduler scans pairs serial
 
 - `GET /health` — service/provider/paper-only status; used by Render.
 - `GET /api/signals?limit=100` — recent AI candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
-- `POST /telegram/webhook` — authenticated Telegram command/PDF receiver.
+- `POST /telegram/webhook` — authenticated Telegram button/callback/PDF receiver.
 
 ## Render deployment
 

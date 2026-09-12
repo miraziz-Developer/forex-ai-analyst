@@ -26,6 +26,12 @@ services:
         value: "false"
       - key: OPENAI_API_KEY
         sync: false
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_DEPLOYMENT
+        sync: false
       - key: AI_TRADER_MODEL
         value: "gpt-4o-mini"
       - key: BINGX_API_KEY
