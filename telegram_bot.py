@@ -34,7 +34,11 @@ def configure_webhook(public_base_url: str | None = None) -> bool:
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
-    base_url = (public_base_url or os.environ.get("PUBLIC_BASE_URL", "")).strip().rstrip("/")
+    configured_url = public_base_url or os.environ.get("PUBLIC_BASE_URL", "")
+    # Render provides the public onrender.com hostname at runtime. This keeps
+    # button callbacks working even when PUBLIC_BASE_URL was not entered by hand.
+    render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
+    base_url = (configured_url or (f"https://{render_hostname}" if render_hostname else "")).strip().rstrip("/")
     parsed = urlparse(base_url)
     if not token or not secret or parsed.scheme != "https" or not parsed.netloc:
         return False

@@ -29,6 +29,14 @@ class TelegramBotTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_WEBHOOK_SECRET": "secret"}):
             self.assertFalse(telegram_bot.configure_webhook("http://bot.example.test"))
 
+    @patch("telegram_bot.requests.post")
+    def test_configure_webhook_uses_render_public_hostname_when_url_is_not_set(self, post):
+        post.return_value.raise_for_status.return_value = None
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_WEBHOOK_SECRET": "secret",
+                                     "PUBLIC_BASE_URL": "", "RENDER_EXTERNAL_HOSTNAME": "bot.onrender.com"}, clear=False):
+            self.assertTrue(telegram_bot.configure_webhook())
+        self.assertEqual(post.call_args_list[0].kwargs["json"]["url"], "https://bot.onrender.com/telegram/webhook")
+
     def test_unauthorized_chat_is_ignored(self):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}), patch("telegram_bot._reply") as reply:
             telegram_bot.handle_update({"message": {"chat": {"id": 7}, "text": "/help"}})
