@@ -20,7 +20,7 @@ class HealthTests(unittest.TestCase):
                                "5m", "15m", 1, 80, (), "test")
 
     def test_health_identifies_the_single_paper_only_service(self):
-        with patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": "binance_futures"}):
+        with patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": "bingx"}):
             response = app.app.test_client().get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {
@@ -28,7 +28,7 @@ class HealthTests(unittest.TestCase):
             "service": "multi-strategy-paper",
             "paper_only": True,
             "demo_only": True,
-            "provider": "binance_futures",
+            "provider": "bingx",
             "auto_execute_trades": False,
             "auto_execute_trades_configured": app.AUTO_EXECUTE_TRADES_CONFIGURED,
         })

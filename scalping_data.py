@@ -14,6 +14,7 @@ _BINANCE_FUTURES_KLINES_URLS = (
     "https://fapi2.binance.com/fapi/v1/klines",
     "https://fapi3.binance.com/fapi/v1/klines",
 )
+_BINGX_SWAP_KLINES_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
 
 
 def binance_futures_symbol(pair: str) -> str:
@@ -51,6 +52,41 @@ def fetch_binance_futures_bars(pair: str, timeframe: str, outputsize: int = 300)
         bars.append({"datetime": row[0], "open": row[1], "high": row[2], "low": row[3],
                      "close": row[4], "volume": row[5]})
     return bars
+
+
+def bingx_swap_symbol(pair: str) -> str:
+    """Validate the project's perpetual-pair convention accepted by BingX."""
+    symbol = pair.upper()
+    if not symbol.endswith("-USDT") or not symbol[:-5].isalnum():
+        raise ValueError(f"unsupported BingX swap pair: {pair}")
+    return symbol
+
+
+def fetch_bingx_swap_bars(pair: str, timeframe: str, outputsize: int = 300) -> list[dict]:
+    """Fetch public BingX perpetual-swap klines; no account or API key is used.
+
+    This intentionally uses BingX's production public quote endpoint. It does
+    not submit orders; trade execution remains restricted to the VST endpoint
+    in broker.py.
+    """
+    if timeframe not in _SECONDS:
+        raise ValueError(f"unsupported BingX swap timeframe: {timeframe}")
+    response = requests.get(
+        _BINGX_SWAP_KLINES_URL,
+        params={"symbol": bingx_swap_symbol(pair), "interval": timeframe,
+                "limit": max(1, min(int(outputsize), 1440))},
+        timeout=15,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("code") != 0 or not isinstance(payload.get("data"), list):
+        raise ValueError(f"unexpected BingX swap kline response: {payload.get('msg', '')}")
+    return [
+        {"datetime": row["time"], "open": row["open"], "high": row["high"],
+         "low": row["low"], "close": row["close"], "volume": row["volume"]}
+        for row in payload["data"]
+        if isinstance(row, dict)
+    ]
 
 
 def closed_bars(bars: list[dict], timeframe: str, now: datetime | None = None) -> list[dict]:
@@ -99,8 +135,10 @@ class MarketDataProvider:
 
 
 def provider_from_environment() -> MarketDataProvider:
-    """Use public Binance Futures by default; reject any explicitly unsupported provider."""
-    provider = os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "binance_futures"
+    """Use BingX public perpetual OHLCV by default; reject unsupported providers."""
+    provider = os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "bingx"
     if provider == "binance_futures":
         return MarketDataProvider(fetcher=fetch_binance_futures_bars)
-    raise ValueError("MULTI_STRATEGY_PROVIDER must be binance_futures")
+    if provider == "bingx":
+        return MarketDataProvider(fetcher=fetch_bingx_swap_bars)
+    raise ValueError("MULTI_STRATEGY_PROVIDER must be bingx or binance_futures")

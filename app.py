@@ -133,7 +133,7 @@ def _require_dashboard_access() -> None:
 def health():
     demo_execution = demo_execution_enabled()
     return jsonify(status="ok", service="multi-strategy-paper", paper_only=not demo_execution, demo_only=True,
-                   provider=os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "binance_futures",
+                   provider=os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "bingx",
                    auto_execute_trades=demo_execution,
                    auto_execute_trades_configured=AUTO_EXECUTE_TRADES_CONFIGURED), 200
 

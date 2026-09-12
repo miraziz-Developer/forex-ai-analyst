@@ -24,10 +24,10 @@ services:
         sync: false
       - key: BINGX_SECRET
         sync: false
-      # Public Binance Futures OHLCV only. No Binance account or API key is needed.
+      # Public BingX perpetual OHLCV only. No BingX account or API key is needed.
       # This is the one multi-strategy Render service; VST execution remains optional.
       - key: MULTI_STRATEGY_PROVIDER
-        value: "binance_futures"
+        value: "bingx"
       - key: MULTI_STRATEGY_PAIRS
         value: "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT"
       - key: MULTI_STRATEGY_SCAN_INTERVAL_SECONDS

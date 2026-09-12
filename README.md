@@ -3,7 +3,7 @@
 One `main` branch and one Render web service:
 
 ```text
-Binance Futures public closed OHLCV
+BingX public perpetual-swap closed OHLCV
   → 15m regime + 5m strategy agents
   → deterministic coordinator and risk manager
   → Turso paper-signal/outcome ledger + Telegram notification
@@ -18,7 +18,7 @@ By default this is paper-only. When `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`,
 - `breakout_retest`: a `BREAKOUT_READY` regime, volume-confirmed structure break, then a closed retest candle. It never enters on the initial breakout candle.
 - Regime classification is fail-closed: `TRENDING_UP`, `TRENDING_DOWN`, `RANGING`, `BREAKOUT_READY`, `HIGH_VOLATILITY`, or `UNCERTAIN`. High-volatility and uncertain regimes do not produce new entries.
 - Trend, momentum, volatility, volume, structure, and candle action are scored as separate groups; correlated trend indicators are not counted as independent confirmations.
-- Binance USD-M Futures public REST klines; no Binance account or API key is required.
+- BingX perpetual-swap public REST klines; no BingX account or API key is required. This is market data only; VST order execution remains separately restricted to the demo endpoint.
 - Only fully closed, validated, deduplicated candles are used. The provider caches one pair/timeframe result until the next closed-candle boundary to avoid duplicate REST requests during a scan/resolution cycle.
 - A candidate must have valid directional levels, score at least 65, and R:R at least 1.3.
 - Same-candle duplicates are persisted and rejected.
@@ -55,9 +55,9 @@ Use `metrics(trades)` to report trade count, win rate, after-cost net P&L, expec
 See [`.env.example`](.env.example). The production-safe defaults are:
 
 ```env
-# Demo compatibility only; effective execution remains false because this is paper-only.
+# Effective VST execution also requires both BingX demo API credentials.
 AUTO_EXECUTE_TRADES=true
-MULTI_STRATEGY_PROVIDER=binance_futures
+MULTI_STRATEGY_PROVIDER=bingx
 MULTI_STRATEGY_PAIRS=BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT
 MULTI_STRATEGY_SCAN_INTERVAL_SECONDS=300
 ```
