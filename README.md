@@ -1,301 +1,80 @@
-# Crypto AI Analyst Bot
+# Multi-Strategy Crypto Paper Bot
 
-A personal bot: it watches BTC-USDT, ETH-USDT, SOL-USDT, XRP-USDT, and
-BNB-USDT perpetual futures itself, 24/7, no exchange dashboard needed. Every
-`POLL_INTERVAL_MINUTES`, the AI does a full read on each pair — market
-structure, Smart Money Concepts (order blocks, FVGs, liquidity, BOS/CHoCH),
-institutional positioning (funding rate, open interest trend, order book
-imbalance), and an actual visual read of rendered charts — combined into one
-TRADE WATCH / SKIP verdict. The model performs the setup judgment using the
-daily/macro trend and institutional data as confirmation; code-level
-volatility, confidence, and reward/risk gates then reject unsafe candidates. It only
-messages you when its verdict is a genuine TRADE WATCH. Every signal is
-logged to a database and automatically checked against real price history
-(or the real broker outcome, if execution is on), so you get a measured win
-rate — and real USDT P&L — not a guess. **By default it's analysis/alerting
-only — it does not place orders unless you explicitly turn on
-`AUTO_EXECUTE_TRADES`, and even then only on a BingX demo (VST / virtual
-USDT) account. See section 5.**
+One `main` branch and one Render web service. The bot is deliberately **paper-only**:
 
-## What's included
-- `app.py` — Flask server (`/health`, `/stats`) and the shared analysis pipeline
-- `scheduler.py` — runs the AI check on a timer, resolves open signals, sends a daily digest
-- `market_data.py` — pulls OHLC bars from BingX's free public kline endpoint (no key needed, cached/rate-limit-aware)
-- `indicators.py` — ATR (Average True Range) for volatility-adjusted sanity bounds
-- `institutional_data.py` — funding rate, open interest trend, order book imbalance from BingX
-- `charting.py` — renders real candlestick+volume chart images (mplfinance) for the model to actually look at
-- `notifier.py` — sends messages to Telegram
-- `storage.py` — Turso (libSQL)-backed signal log (entry/target/stop, outcome, broker order id/qty, realized P&L)
-- `broker.py` — optional BingX demo execution (only used if `AUTO_EXECUTE_TRADES=true`)
-- `system_prompt.txt` — the analyst's full instructions (auto-loaded by app.py)
-- `backtest.py` — replays the same AI analyst against real historical data for a much faster (hours, not weeks) directional read — see section 9
-- `strategy_engine.py` — deterministic pivot S/R + trend-confirmation strategy
-- `strategy_backtest.py` — cost-aware rolling-month selection → untouched 90-day
-  deterministic research without paid LLM calls
-- `requirements.txt`, `.env.example`
+```text
+Binance Futures public closed OHLCV
+  → 15m regime + 5m strategy agents
+  → deterministic coordinator and risk manager
+  → Turso paper-signal/outcome ledger + Telegram notification
+```
 
-## Why crypto, not forex
-This started as a forex bot. Every forex-broker demo API path we tried for
-your region hit a real wall: XM has no API at all, OANDA routes your region
-to an MT5-only entity, Deriv's newer API had a broken self-serve
-app-registration flow, cTrader needs a 1-2 day manual approval. BingX's demo
-(VST) trading API is instant, free, and fully self-serve — so the whole
-pipeline (analysis + execution + tracking) runs on crypto perpetuals instead.
+It does not import or call the BingX execution client. If `AUTO_EXECUTE_TRADES=true`, startup fails before it can scan or place an order.
 
-## 1. Create your accounts (one-time)
+## Current strategy and controls
 
-### Azure AI Foundry (model API)
-Put your endpoint, deployment name, and API key in `.env` as
-`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_API_KEY`.
-Called via the OpenAI SDK's Responses API — `web_search_preview` tool for
-fundamentals, multi-part input (text + chart images) for the visual read.
+- `trend_pullback`: 15-minute trend regime with a confirmed 5-minute pullback/reclaim.
+- Binance USD-M Futures public REST klines; no Binance account or API key is required.
+- Only fully closed, validated, deduplicated candles are used.
+- A candidate must have valid directional levels, score at least 65, and R:R at least 1.3.
+- Same-candle duplicates are persisted and rejected.
+- Maximum one open paper position, three accepted paper trades per UTC day, `$0.75` stop-risk per trade, and `$2.00` daily realized-loss limit by default.
+- Outcome resolution is candle-based and conservative: when a candle touches both stop and target, it records `LOSS`.
 
-### Telegram bot
-1. In Telegram, message **@BotFather** → `/newbot` → follow the prompts → it gives you a token
-2. Put that token in `.env` as `TELEGRAM_BOT_TOKEN`
-3. Message your new bot anything (so it has a chat with you), then visit
-   `https://api.telegram.org/bot<your-token>/getUpdates` — find `"chat":{"id":...}`
-   and put that number in `.env` as `TELEGRAM_CHAT_ID`
+## Setup
 
-### Turso (free database — the signal track record)
-Render's own free tier has no persistent disk (wiped on every redeploy), so
-the signal log lives in a small external database instead:
-1. Sign up at [turso.tech](https://turso.tech) (free tier, no credit card)
-2. Create a database (dashboard → **Create Database**)
-3. On the database's page: click **Connect** for the `libsql://...` URL, and
-   **Create Token** for an auth token
-4. Put both in `.env` as `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`
-
-The table is created automatically on first run (`storage.init_db()`) via
-Turso's HTTP API — no native database driver needed.
-
-### BingX (demo execution — optional, see section 5)
-1. Sign up at [bingx.com](https://bingx.com), no KYC needed for demo trading
-2. **Account → API Management** → create a key with **Read** + **Perpetual
-   Futures Trading** permissions (leave **Withdraw** unchecked)
-3. Put the key/secret in `.env` as `BINGX_API_KEY` / `BINGX_SECRET`
-
-**Critical fact about BingX**: the same key/secret works on both the demo
-(VST) and real-money accounts — the only thing that separates them is which
-API domain a request goes to. `broker.py` hardcodes the demo domain
-(`open-api-vst.bingx.com`) with no config flag or env var that can change it
-to the live domain (`open-api.bingx.com`). Switching to real money would mean
-deliberately editing that source file, never a `.env` change.
-
-## 2. Local setup
 ```bash
-cd forex-ai-analyst
-python3 -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
 cp .env.example .env
-# fill in the keys/IDs above
-```
-Run it:
-```bash
-export $(cat .env | xargs)
-python app.py
-```
-This starts the Flask server, the AI-check scheduler, and the signal
-resolver. Test it:
-```bash
-curl http://localhost:5000/health
-curl http://localhost:5000/stats
+# Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.
+# Telegram credentials are optional but required for paper alerts.
+python3 -m pip install -r requirements.txt
+python3 app.py
 ```
 
-### Monitoring dashboard and Telegram commands
-
-Open `http://localhost:5000/dashboard` to see summary cards and a filterable
-order table containing OPEN/WIN/LOSS/EXPIRED state, entry/target/stop/outcome,
-execution state, estimated per-order P&L, timestamps, and the full AI analysis.
-The page refreshes every 30 seconds and is mobile-friendly.
-
-For a deployed private dashboard, set:
+Required Turso variables:
 
 ```env
-PUBLIC_BASE_URL=https://your-service.example.com
-DASHBOARD_TOKEN=use-a-long-random-secret
+TURSO_DATABASE_URL=libsql://your-database.turso.io
+TURSO_AUTH_TOKEN=your-token
 ```
 
-Then open `/dashboard?token=<DASHBOARD_TOKEN>`. The configured Telegram chat can
-also use these commands (messages from every other chat ID are ignored):
+The app creates its own `signal_candidates` and `daily_risk_state` tables in that database. Existing legacy `signals` rows are not changed.
 
-- `/status` — process mode, UTC time, and private dashboard link
-- `/stats` — all-time and 30-day WIN/LOSS/win-rate/P&L
-- `/open` — up to 10 current open signals
-- `/recent` — the 10 most recent resolved signals
-- `/help` — command list and dashboard link
+## Configuration
 
-The command listener uses Telegram long polling and starts together with
-`python app.py`; no webhook configuration is needed.
+See [`.env.example`](.env.example). The production-safe defaults are:
 
-## 3. Deploy (so it keeps running without your computer on)
-- **Render.com** (recommended) — free tier, connects to a GitHub repo
-- A small VPS (DigitalOcean, Linode, ~$5/mo) if you want more control
-
-Push this folder to a GitHub repo, connect it on Render, set all the `.env`
-variables in Render's dashboard (never commit your real `.env`). If
-`BINGX_API_KEY`/`BINGX_SECRET` aren't set, the bot just runs analysis-only.
-The repository's `render.yaml` pins the build command, `python app.py` start
-command, and `/health` check. The health response includes Render's deployed
-commit SHA and the active strategy/exit policy, so a successful response proves
-both the revision and the fail-closed `volatility_breakout` 2 ATR / 2.5R policy.
-
-**Auto-deploy caveat (learned the hard way):** Render's "Auto-Deploy: On
-Commit" setting can silently stop firing on GitHub push (happened here after
-the repo's visibility changed) with zero error shown anywhere — Render just
-keeps serving the last successful build forever. **Don't trust that a push
-redeployed just because `/health` still returns 200** — that only proves
-*some* build is running, not the *latest* one. Verify against something that
-actually changed (a new field in `/stats`, a log line, etc.), or better: grab
-the **Deploy Hook** URL (Settings → Deploy → Deploy Hook) and `curl` it after
-every push — it triggers a deploy directly, bypassing the GitHub webhook
-entirely, so it can't silently break the same way.
-
-Render's free tier also sleeps after 15 minutes idle — keep it awake with a
-free [UptimeRobot](https://uptimerobot.com) monitor pinging `/health` every
-5 minutes.
-
-## 4. What happens every cycle
-1. Every `POLL_INTERVAL_MINUTES`, for each pair in `WATCH_PAIRS`: check the
-   trading window (`.env`, defaults to no restriction — crypto trades 24/7)
-2. Fetch 1D/4H/1H/15min/5min bars from BingX, plus funding rate/open
-   interest trend/order book imbalance, plus render 1H/15min chart images
-3. Call the model with all of that; it works through macro trend → market
-   structure → chop check → SMC/price-action scan → key levels →
-   institutional positioning → **structural stop/target** (real order-block/
-   liquidity/S-R price levels, not a formula) → fundamentals, and states its
-   verdict, direction, and (if TRADE WATCH) the actual stop/target prices
-4. Only on a **new** TRADE WATCH for a pair that doesn't already have an open
-   signal (DB-backed check — survives restarts): place a BingX demo order if
-   `AUTO_EXECUTE_TRADES=true` using the model's own structural prices (an
-   ATR-based percentage is only a sanity bound, used as a fallback if the
-   model's numbers look wrong), send the verdict + execution status to
-   Telegram, log a row to the database
-5. Separately, every `RESOLVER_INTERVAL_MINUTES`: every open signal is
-   resolved — from the real BingX order outcome if one exists, otherwise
-   from price bars since it was logged; unresolved past `SIGNAL_EXPIRY_HOURS`
-   = EXPIRED (force-closing the real position first, if one exists)
-6. Once a day, a win-rate + realized-P&L digest goes to Telegram. A separate
-   immediate message is also sent whenever a signal closes, showing entry/exit
-   prices and estimated net P&L for executed demo orders.
-
-## 5. Execution details (BingX demo)
-With `AUTO_EXECUTE_TRADES=true`:
-- Leverage is set to `LEVERAGE` (default 3x) before each order
-- Position size is **risk-based**, not fixed: sized so that if the stop is
-  hit, the loss is at most `RISK_PCT_PER_TRADE`% (default 2%) of a *simulated*
-  equity — `STARTING_EQUITY_USDT` (default 100, the capital you'd actually
-  plan to deposit for real) plus our own tracked realized P&L. Deliberately
-  **not** BingX's demo wallet balance, which starts at an unrealistic
-  ~$99,932 — sizing off that would simulate a $100k account instead of the
-  small real one you're actually planning for. Tighter structural stops get a
-  bigger position, wider stops a smaller one, same $ risk either way — capped
-  at `MAX_MARGIN_PCT_OF_EQUITY` (20%) of equity used as margin (so at 3x
-  leverage, effectively a ~60%-of-equity notional ceiling), and falls back to
-  the flat `POSITION_SIZE_USDT` if the P&L lookup itself fails. That base
-  size is then further scaled down by two multipliers: confidence
-  (`YUQORI`/`ORTA` from the model's own self-assessment, 1.0x/0.7x; `PAST` and
-  unparseable confidence are rejected by default via `MIN_SIGNAL_CONFIDENCE`)
-  and correlation (fewer $ per trade the more same-direction positions are
-  already open across the 5 — mostly correlated — pairs, floor 0.3x)
-- No cap on concurrent open positions (demo money — removed deliberately);
-  the only per-pair limit is one open signal at a time (a pair won't
-  re-signal until its current one resolves)
-- Stop-loss/take-profit are the model's own structural price levels
-  (falls back to an ATR-based percentage only if those fail a sanity check),
-  attached to the order atomically at open — BingX's own engine executes
-  them, not this app polling
-- Every execution attempt (success or failure) is included in the Telegram message
-
-## 6. Checking the track record
-`GET /stats` returns open-signal count, win/loss/expired counts, win rate,
-and **realized_pnl_usdt** (real BingX demo P&L from executed trades only) —
-both all-time and last 30 days. The P&L figure is the more direct answer to
-"is this profitable" than win rate alone, since position sizing and
-stop/target distance now vary per trade.
-
-## 7. Tuning things later (no code changes needed)
-- **Change the analyst's behavior/wording**: edit `system_prompt.txt`, redeploy
-- **Change which pairs are watched**: edit `WATCH_PAIRS` in `.env` and add the pair's `QUANTITY_PRECISION` in `broker.py`
-- **Change check frequency**: `POLL_INTERVAL_MINUTES`, `RESOLVER_INTERVAL_MINUTES` — see the rate-limit comment in `.env.example` before lowering either or adding pairs
-- **Change trading window/days**: `TRADING_DAYS`, `TRADING_WINDOW_START/END` in `.env` (all UTC)
-- **Change the sanity-bound target/stop**: `ATR_MULTIPLIER`, `REWARD_RISK_RATIO`, or the `TARGET_PCT_STOP_PCT` fallback
-- **Change the minimum accepted confidence**: `MIN_SIGNAL_CONFIDENCE` (`ORTA` by default)
-- **Change how long a signal stays open**: `SIGNAL_EXPIRY_HOURS`
-- **Change position size / leverage**: `RISK_PCT_PER_TRADE` and `STARTING_EQUITY_USDT` (real sizing basis), `POSITION_SIZE_USDT` (fallback only), `LEVERAGE`
-
-## 8. Reliability notes
-- BingX, Azure OpenAI, or Turso API failures are caught, logged, and skip that step without crashing
-- BingX's kline endpoint is rate-limited (5 req/15min) — cached per timeframe's own bar period, with an automatic precise-wait retry if still hit
-- Signal dedup (don't double-signal an open pair) is DB-backed, not in-memory — survives restarts/redeploys
-- If a signal's direction/prices can't be parsed from the model's response, the Telegram
-  message still sends, but the row isn't logged (or falls back to the ATR-based calc)
-- If execution is enabled but the order fails, the signal is still logged (without a broker order id) and the Telegram message says so
-- All activity is logged to `bot.log` (and stdout) for daily review
-
-## 9. Backtesting
-```bash
-python backtest.py --pairs BTC-USDT,ETH-USDT --checkpoint-hours 3 \
-    --min-age-days 0 --max-age-days 15 --history-pages 2 --workers 8 \
-    --holdout-ratio 0.30 --min-train-trades 20
+```env
+AUTO_EXECUTE_TRADES=false
+MULTI_STRATEGY_PROVIDER=binance_futures
+MULTI_STRATEGY_PAIRS=BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT
+MULTI_STRATEGY_SCAN_INTERVAL_SECONDS=300
 ```
-Replays the exact same system prompt against real historical bars (no web
-search / institutional data / chart images at each historical point — those
-can't be reconstructed for the past), resolving each hypothetical signal
-against real forward price action. Useful for a much faster directional read
-than waiting on live `/stats`, and for finding real, generalizable patterns
-in what's winning vs. losing (pull `backtest_results.json` and look at the
-`analysis` text of the losses) — **not** for repeatedly re-tuning the prompt
-against the same window until a number looks good; that's overfitting to
-noise, and will likely make live performance worse, not better. Always
-sanity-check any prompt change against a *different* time window than the
-one that motivated it before trusting it.
 
-The report also performs a small-grid threshold analysis (`ORTA`/`YUQORI`
-confidence and 1.5/2.0/2.5 minimum R:R). It selects a policy using only the
-older train segment and evaluates it once on the newest holdout segment. The
-full audit is written to `backtest_policy_analysis.json`. If there are fewer
-than `--min-train-trades` qualifying observations, it deliberately makes no
-recommendation instead of optimizing noise.
+Do not set the scan interval below 300 seconds. The scheduler scans pairs serially and prevents overlapping runs.
 
-### Deterministic strategy research
+## HTTP endpoints
 
-Run the reproducible, no-LLM three-month strategy research separately:
+- `GET /health` — service/provider/paper-only status; used by Render.
+- `GET /api/signals?limit=100` — recent paper candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
+
+## Render deployment
+
+`render.yaml` defines the single `forex-ai-analyst` web service and starts `python app.py`. Configure the Turso credentials and optional Telegram credentials in Render. Deploy this repository’s `main` branch only.
+
+After deploy, verify:
 
 ```bash
-python3 strategy_backtest.py --mode three-month
+curl https://YOUR-RENDER-SERVICE.onrender.com/health
 ```
 
-It replays only the promoted `volatility_breakout` policy. Alternative strategy
-families, ensembles, and exit variants were removed after the completed comparison,
-so research and live execution cannot silently drift away from the validated
-configuration. Entries use the next 4H bar's open and same-bar target/stop
-collisions resolve as losses. Results deduct estimated
-0.10% round-trip taker fees, 0.04% slippage, and a conservative 0.01% funding
-drag per eight hours. Pre-holdout rolling months verify the fixed policy;
-the newest 90 days are then evaluated once. Promotion requires positive Net R,
-expectancy, and profit factor, at least ten holdout trades, and positive results
-on at least three of five pairs. Policy loading is fail-closed and rejects every
-parameter set except the exact promoted 2 ATR stop / fixed 2.5R target policy.
+Expected essentials: `"service":"multi-strategy-paper"`, `"paper_only":true`, and `"auto_execute_trades":false`.
 
-The 2026-06-11 through 2026-09-09 untouched holdout promoted the development-selected
-`volatility_breakout` policy: 25 trades, +6.469R, +0.259R expectancy, 1.505 profit
-factor, 10.275R max drawdown, and 5/5 positive pairs. The live pipeline now fails
-closed without a valid policy, requires the promoted closed-4H signal to agree with
-the AI direction, and uses the promoted 2 ATR stop and 2.5R target. This result is
-one historical sample, not a guarantee of future profitability.
+## Validation
 
-## Known limitations (be honest with yourself about these)
-- The model gets both raw OHLC numbers and rendered chart images, but it's
-  still an LLM's read of a chart, not a human trader's — treat pattern names
-  like "order block" as its structured interpretation, not ground truth
-- Outcome resolution (for signals without a broker order) uses 1-hour bar
-  highs/lows, not tick data — a bar that contains both the target and the
-  stop is resolved conservatively as a loss
-- Leverage amplifies both gains and losses — 3x default is conservative but not zero-risk, even on demo
-- Backtest win rates vary meaningfully by market regime (a strongly trending
-  window vs. a choppy one) — a single run is a data point, not a verdict
-- This is demo/virtual-money trading. None of this is investment advice or a
-  guarantee of anything — treat `/stats` as a forward-test log, not a promise
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q .
+python3 -m pip check
+git diff --check
+```

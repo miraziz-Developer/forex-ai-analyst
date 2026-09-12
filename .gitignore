@@ -10,3 +10,4 @@ strategy_walk_forward.json
 strategy_monthly_research.json
 strategy_three_month_research.json
 .strategy_cache/
+.multi_strategy_cache/

@@ -7,12 +7,6 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
-      - key: AZURE_OPENAI_API_KEY
-        sync: false
-      - key: AZURE_OPENAI_ENDPOINT
-        sync: false
-      - key: AZURE_OPENAI_DEPLOYMENT
-        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
@@ -25,11 +19,21 @@ services:
         generateValue: true
       - key: AUTO_EXECUTE_TRADES
         value: "false"
-      - key: ATR_MULTIPLIER
-        value: "2.0"
-      - key: REWARD_RISK_RATIO
-        value: "2.5"
-      - key: STARTING_EQUITY_USDT
-        value: "100"
-      - key: RISK_PCT_PER_TRADE
-        value: "2.0"
+      # Public Binance Futures OHLCV only. No Binance account or API key is needed.
+      # This is the one, paper-only multi-strategy Render service.
+      - key: MULTI_STRATEGY_PROVIDER
+        value: "binance_futures"
+      - key: MULTI_STRATEGY_PAIRS
+        value: "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT"
+      - key: MULTI_STRATEGY_SCAN_INTERVAL_SECONDS
+        value: "300"
+      - key: RISK_USDT_PER_TRADE
+        value: "0.75"
+      - key: MAX_DAILY_LOSS_USDT
+        value: "2.00"
+      - key: MAX_DAILY_TRADES
+        value: "3"
+      - key: MAX_OPEN_POSITIONS
+        value: "1"
+      - key: MIN_REWARD_RISK
+        value: "1.3"
