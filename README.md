@@ -21,6 +21,7 @@ By default auto-execution is off. When either `OPENAI_API_KEY` or the complete A
 - Only fully closed candles are used. Same-candle fingerprints are persisted and rejected.
 - Technical safety remains: allowed-pair whitelist, 1–125x leverage validation, structurally valid trade levels, exchange-side TP/SL, `KILL_SWITCH`, idempotency and fail-closed broker/data errors. Create BingX keys with **no withdrawal permission**.
 - Outcome resolution is candle-based and conservative: when a candle touches both stop and target, it records `LOSS`.
+- Telegram's **Foyda / zarar** button shows the local candle-based AI journal separately from BingX VST's API-reported account income. BingX income is account-scoped (manual/other-bot activity can be included), so it is never falsely attributed to an individual AI journal order.
 
 ## Setup
 

@@ -155,8 +155,23 @@ class TelegramBotTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
             telegram_bot.handle_update({"callback_query": {"id": "callback-4", "data": "performance",
                                         "message": {"chat": {"id": 42}}}})
-        self.assertIn("+12.5 USDT", reply.call_args.args[1])
-        self.assertIn("-1.25 USDT", reply.call_args.args[1])
+        self.assertIn("Journal P&L: +12.5 USDT", reply.call_args.args[1])
+        self.assertIn("Bugungi journal P&L: -1.25 USDT", reply.call_args.args[1])
+
+    @patch("broker.vst_income_summary", return_value={
+        "realized_pnl_usdt": 10.0, "fees_usdt": .5, "funding_usdt": -.2, "net_pnl_usdt": 9.3, "entries": 4,
+    })
+    @patch("telegram_bot.scalping_storage.first_broker_order_time", return_value=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    @patch("telegram_bot.scalping_storage.performance_summary", return_value={
+        "closed_orders": 1, "wins": 1, "losses": 0, "expired": 0, "win_rate_pct": 100.0,
+        "realized_pnl_usdt": 8.0, "today_pnl_usdt": 8.0,
+    })
+    def test_performance_separates_bingx_account_income_from_journal(self, summary, first_order, income):
+        with patch.dict(os.environ, {"BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}, clear=False):
+            text = telegram_bot._performance_text()
+        self.assertIn("Journal P&L: +8 USDT", text)
+        self.assertIn("BingX VST account income", text)
+        self.assertIn("Actual net: +9.3 USDT", text)
 
     @patch("telegram_bot._reply")
     @patch("telegram_bot.scalping_storage.closed_paper_signals", return_value=[{

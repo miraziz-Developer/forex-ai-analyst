@@ -177,6 +177,14 @@ def performance_summary() -> dict:
             "realized_pnl_usdt": pnl, "today_pnl_usdt": today_pnl}
 
 
+def first_broker_order_time() -> datetime | None:
+    """Return the first strategy-owned VST entry time for a bounded account query."""
+    rows = storage._rows_as_dicts(storage._execute("""SELECT min(created_at) AS created_at FROM signal_candidates
+                                                       WHERE broker_order_id IS NOT NULL"""))
+    value = rows[0].get("created_at") if rows else None
+    return datetime.fromisoformat(value) if value else None
+
+
 def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: float) -> None:
     """Close exactly one open paper position and account its realized, risk-sized P&L once."""
     if status not in {CandidateStatus.WIN, CandidateStatus.LOSS, CandidateStatus.EXPIRED}:
@@ -239,4 +247,4 @@ def reconciliation_status() -> dict:
     row = rows[0] if rows else {}
     return {"executed_closed": int(row.get("executed") or 0), "reconciled": int(row.get("reconciled") or 0),
             "actual_net_pnl_usdt": float(row.get("actual_net_pnl_usdt") or 0),
-            "policy": "Actual net P&L is shown only after BingX reports numeric income fields."}
+            "policy": "BingX income is account-scoped and is not attributed to individual AI orders; Telegram shows it separately."}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import timezone
 from urllib.parse import urlparse
 
 import requests
@@ -225,13 +226,29 @@ def _performance_text() -> str:
         return "💰 Foyda/zarar ma’lumoti vaqtincha olinmadi. Keyinroq 🔄 Panelni yangilash tugmasini bosing."
     pnl = float(summary["realized_pnl_usdt"])
     win_rate = summary["win_rate_pct"]
-    return ("💰 VST/paper foyda / zarar\n\n"
+    journal = ("💰 AI jurnal foyda / zarar (candle-based hisob)\n\n"
             f"Jami yopilgan order: {summary['closed_orders']}\n"
             f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⌛ EXPIRED: {summary['expired']}\n"
-            f"🎯 Win rate: {win_rate:.1f}%" if win_rate is not None else "💰 VST/paper foyda / zarar\n\n"
+            f"🎯 Win rate: {win_rate:.1f}%" if win_rate is not None else "💰 AI jurnal foyda / zarar (candle-based hisob)\n\n"
             f"Jami yopilgan order: {summary['closed_orders']}\n"
             f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⌛ EXPIRED: {summary['expired']}\n"
-            "🎯 Win rate: —") + f"\n💵 Jami P&L: {pnl:+.4g} USDT\nBugungi P&L: {float(summary['today_pnl_usdt']):+.4g} USDT"
+            "🎯 Win rate: —") + f"\n💵 Journal P&L: {pnl:+.4g} USDT\nBugungi journal P&L: {float(summary['today_pnl_usdt']):+.4g} USDT"
+    try:
+        import broker
+        started = scalping_storage.first_broker_order_time()
+        if not started:
+            return journal + "\n\n🔗 BingX VST: ushbu AI jurnalida exchange order hali yo‘q."
+        if not (os.environ.get("BINGX_API_KEY", "").strip() and os.environ.get("BINGX_SECRET", "").strip()):
+            return journal + "\n\n🔗 BingX VST actual P&L tekshiruvi uchun API credentials sozlanmagan."
+        income = broker.vst_income_summary(int(started.astimezone(timezone.utc).timestamp() * 1000))
+        return (journal + "\n\n🔗 BingX VST account income (API orqali tasdiqlangan)\n"
+                f"Realized P&L: {income['realized_pnl_usdt']:+.4g} USDT\n"
+                f"Komissiya: -{income['fees_usdt']:.4g} USDT | Funding: {income['funding_usdt']:+.4g} USDT\n"
+                f"Actual net: {income['net_pnl_usdt']:+.4g} USDT\n"
+                f"Income yozuvlari: {income['entries']}\n"
+                "Eslatma: bu BingX VST account jami; manual/boshqa orderlar ham bo‘lsa kiradi. Journal P&L bilan aralashtirilmaydi.")
+    except Exception as exc:
+        return journal + f"\n\n🔗 BingX VST actual P&L hozir tekshirilmadi: {type(exc).__name__}."
 
 
 def _closed_orders_text() -> str:

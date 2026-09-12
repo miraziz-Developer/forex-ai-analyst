@@ -106,3 +106,28 @@ def income_history(symbol: str, start_time_ms: int) -> list[dict]:
                            {"symbol": symbol, "startTime": str(start_time_ms), "limit": "100"})
     values = data.get("data", [])
     return values if isinstance(values, list) else values.get("list", [])
+
+
+def vst_income_summary(start_time_ms: int) -> dict:
+    """Return BingX-reported VST income totals for the configured account.
+
+    Income is account-scoped, not reliably attributable to an originating
+    strategy order ID, so it must remain separate from the local AI journal.
+    """
+    totals = {"realized_pnl_usdt": 0.0, "fees_usdt": 0.0, "funding_usdt": 0.0, "entries": 0}
+    for symbol in QUANTITY_PRECISION:
+        for item in income_history(symbol, start_time_ms):
+            kind = str(item.get("incomeType", item.get("type", ""))).upper()
+            try:
+                value = float(item.get("income", item.get("amount")))
+            except (TypeError, ValueError):
+                continue
+            totals["entries"] += 1
+            if "FUNDING" in kind:
+                totals["funding_usdt"] += value
+            elif "COMMISSION" in kind or "FEE" in kind:
+                totals["fees_usdt"] += abs(value)
+            elif "REALIZED" in kind or "PNL" in kind:
+                totals["realized_pnl_usdt"] += value
+    totals["net_pnl_usdt"] = totals["realized_pnl_usdt"] - totals["fees_usdt"] + totals["funding_usdt"]
+    return totals

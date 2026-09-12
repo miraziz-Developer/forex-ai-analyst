@@ -51,32 +51,14 @@ def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
 
 
 def reconcile_closed_vst_orders() -> None:
-    """Best effort: only persist numeric values actually returned by BingX VST."""
-    try:
-        import broker
-        for row in scalping_storage.closed_paper_signals(250):
-            if not row.get("broker_order_id") or row.get("reconciled_at"):
-                continue
-            started = int(datetime.fromisoformat(row["created_at"]).timestamp() * 1000)
-            gross = fees = funding = 0.0
-            has_numeric_income = False
-            for item in broker.income_history(row["pair"], started):
-                kind = str(item.get("incomeType", item.get("type", ""))).upper()
-                try:
-                    value = float(item.get("income", item.get("amount")))
-                except (TypeError, ValueError):
-                    continue
-                has_numeric_income = True
-                if "FUNDING" in kind:
-                    funding += value
-                elif "COMMISSION" in kind or "FEE" in kind:
-                    fees += abs(value)
-                elif "REALIZED" in kind or "PNL" in kind:
-                    gross += value
-            if has_numeric_income:
-                scalping_storage.reconcile_broker_pnl(row["fingerprint"], gross, fees, funding)
-    except Exception:
-        logger.exception("BingX VST reconciliation failed")
+    """Do not attribute account-level BingX income to an individual AI order.
+
+    BingX VST's income feed can be queried by symbol/time but does not provide a
+    reliable strategy order-ID relation. Account totals are shown separately in
+    Telegram; storing them per journal row would double-count or misattribute
+    manual and other-bot activity.
+    """
+    logger.debug("BingX VST order-level reconciliation skipped: income feed is account-scoped")
 
 
 def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: MarketDataProvider,
