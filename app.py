@@ -104,7 +104,7 @@ def _require_dashboard_access() -> None:
 @app.route("/health")
 def health():
     return jsonify(status="ok", service="multi-strategy-paper", paper_only=True,
-                   provider=os.environ.get("MULTI_STRATEGY_PROVIDER", ""),
+                   provider=os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "binance_futures",
                    auto_execute_trades=False,
                    auto_execute_trades_configured=AUTO_EXECUTE_TRADES_CONFIGURED), 200
 

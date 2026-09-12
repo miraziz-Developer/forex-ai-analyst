@@ -86,8 +86,8 @@ class MarketDataProvider:
 
 
 def provider_from_environment() -> MarketDataProvider:
-    """Choose an explicit provider so the multi-strategy service never silently uses BingX data."""
-    provider = os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower()
+    """Use public Binance Futures by default; reject any explicitly unsupported provider."""
+    provider = os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "binance_futures"
     if provider == "binance_futures":
         return MarketDataProvider(fetcher=fetch_binance_futures_bars)
     raise ValueError("MULTI_STRATEGY_PROVIDER must be binance_futures")

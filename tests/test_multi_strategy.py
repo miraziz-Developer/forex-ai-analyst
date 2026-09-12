@@ -9,7 +9,8 @@ os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 from market_regime import RegimeSnapshot, classify_market_regime
 from risk_manager import RiskConfig, assess_risk
 from scalping_core import CandidateSignal, CandidateStatus, Direction, MarketRegime
-from scalping_data import MarketDataProvider, binance_futures_symbol, closed_bars, fetch_binance_futures_bars
+from scalping_data import (MarketDataProvider, binance_futures_symbol, closed_bars, fetch_binance_futures_bars,
+                           provider_from_environment)
 from scalping_indicators import candle_confirmation, support_resistance_zones
 from multi_strategy_backtest import BacktestCosts, simulate as multi_simulate
 from strategies import support_resistance_rejection
@@ -45,6 +46,16 @@ class MultiStrategyTests(unittest.TestCase):
         self.assertEqual(request.call_args.kwargs["params"], {"symbol": "BTCUSDT", "interval": "5m", "limit": 2})
         self.assertEqual(result, [{"datetime": 1000, "open": "10", "high": "11", "low": "9", "close": "10.5", "volume": "42"}])
         self.assertEqual(binance_futures_symbol("ETH-USDT"), "ETHUSDT")
+
+    def test_provider_defaults_to_binance_when_render_value_is_blank(self):
+        with patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": ""}):
+            provider = provider_from_environment()
+        self.assertIs(provider.fetcher, fetch_binance_futures_bars)
+
+    def test_provider_rejects_an_explicitly_unsupported_value(self):
+        with patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": "bingx"}):
+            with self.assertRaisesRegex(ValueError, "must be binance_futures"):
+                provider_from_environment()
 
     def test_closed_bars_excludes_open_duplicate_and_invalid_ohlc(self):
         now_ms = int(NOW.timestamp() * 1000)
