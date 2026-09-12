@@ -41,7 +41,8 @@ class HealthTests(unittest.TestCase):
         self.assertTrue(response.get_json()["auto_execute_trades_configured"])
         self.assertFalse(response.get_json()["auto_execute_trades"])
 
-    def test_auto_execute_uses_bingx_vst_only_when_fully_configured(self):
+    @patch("app.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
+    def test_auto_execute_uses_bingx_vst_only_when_fully_configured(self, controls):
         with patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
             response = app.app.test_client().get("/health")
         self.assertTrue(response.get_json()["auto_execute_trades"])
@@ -52,16 +53,22 @@ class HealthTests(unittest.TestCase):
                                    direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
         self.assertIsNone(app.execute_bingx_vst_order(self._candidate(), decision))
 
+    @patch("app.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
     @patch("broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 100.25})
     @patch("broker.round_quantity", return_value=.3)
     @patch("app.demo_execution_enabled", return_value=True)
-    def test_bingx_vst_order_uses_signal_levels_and_rounded_quantity(self, enabled, rounded, place_order):
+    def test_bingx_vst_order_uses_signal_levels_and_rounded_quantity(self, enabled, rounded, place_order, controls):
         candidate = self._candidate()
         decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.75, leverage=4,
                                    direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
         result = app.execute_bingx_vst_order(candidate, decision)
         place_order.assert_called_once_with("BTC-USDT", "BUY", .3, 103, 98, leverage=4)
         self.assertEqual(result, {"order_id": "vst-1", "fill_price": 100.25, "quantity": .3})
+
+    @patch("app.runtime_controls.settings", return_value={"kill_switch": True, "demo_execution": True})
+    def test_runtime_kill_switch_prevents_vst_execution(self, controls):
+        with patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
+            self.assertFalse(app.demo_execution_enabled())
 
     def test_signals_api_requires_dashboard_token_when_configured(self):
         with patch.object(app, "DASHBOARD_TOKEN", "secret"):

@@ -1,5 +1,6 @@
 import os
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 os.environ.setdefault("TURSO_DATABASE_URL", "libsql://test.invalid")
@@ -41,6 +42,44 @@ class TelegramBotTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}), patch("telegram_bot._reply") as reply:
             telegram_bot.handle_update({"message": {"chat": {"id": 7}, "text": "/help"}})
         reply.assert_not_called()
+
+    @patch("telegram_bot.telegram_chat.answer", return_value="AI javob")
+    @patch("telegram_bot._reply")
+    def test_free_text_routes_to_read_only_ai_chat(self, reply, answer):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "Nega signal o'tkazib yuborildi?"}})
+        answer.assert_called_once_with("Nega signal o'tkazib yuborildi?")
+        self.assertEqual(reply.call_args.args[1], "AI javob")
+
+    @patch("telegram_bot.runtime_controls.create_pending", return_value=("ABC123", datetime.now(timezone.utc)))
+    @patch("telegram_bot._reply")
+    def test_control_request_requires_preview_confirmation(self, reply, pending):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "STOP"}})
+        pending.assert_called_once_with("42", {"kill_switch": True})
+        self.assertIn("TASDIQLAYMAN ABC123", reply.call_args.args[1])
+
+    @patch("telegram_bot.runtime_controls.confirm", return_value={"kill_switch": True})
+    @patch("telegram_bot._reply")
+    def test_confirmation_applies_persisted_preview(self, reply, confirm):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "TASDIQLAYMAN aBc123"}})
+        confirm.assert_called_once_with("42", "aBc123")
+        self.assertIn("qo‘llandi", reply.call_args.args[1])
+
+    @patch("telegram_bot.runtime_controls.confirm", return_value=None)
+    @patch("telegram_bot._reply")
+    def test_expired_confirmation_is_rejected(self, reply, confirm):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "TASDIQLAYMAN DEAD00"}})
+        self.assertIn("muddati tugagan", reply.call_args.args[1])
+
+    @patch("telegram_bot.telegram_chat.answer", return_value="Bu ruxsat etilmagan.")
+    @patch("telegram_bot._reply")
+    def test_live_trading_request_is_never_a_control(self, reply, answer):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "live tradingni yoq"}})
+        answer.assert_called_once()
 
     @patch("telegram_bot._reply")
     @patch("telegram_bot.knowledge.documents", return_value=[{"id": 3, "file_name": "risk.pdf", "page_count": 4}])

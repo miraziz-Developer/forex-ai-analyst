@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlparse
 
 import requests
 
 import knowledge
 import scalping_storage
+import runtime_controls
+import telegram_chat
 from notifier import send_telegram_message
 
 _AWAITING_KNOWLEDGE_SEARCH: set[str] = set()
@@ -18,6 +21,45 @@ _MENU = {"inline_keyboard": [
     [{"text": "📚 Bilim bazasi", "callback_data": "knowledge"}, {"text": "🔎 Bilimdan qidirish", "callback_data": "search"}],
     [{"text": "📤 PDF yuklash", "callback_data": "upload"}, {"text": "❓ Yordam", "callback_data": "help"}],
 ]}
+
+
+def _control_request(text: str) -> dict | None:
+    """Parse only small, explicit operational intents; never infer a risky value."""
+    normalized = " ".join(text.upper().replace("_", "-").split())
+    if normalized in {"STOP", "TO'XTAT", "TO‘XTAT", "KILL SWITCH", "KILL SWITCH YOQ"}:
+        return {"kill_switch": True}
+    if normalized in {"DAVOM ET", "START DEMO", "DEMO YOQ", "KILL SWITCH OCHIR"}:
+        return {"kill_switch": False, "demo_execution": True}
+    if normalized in {"DEMO OCHIR", "DEMO STOP"}:
+        return {"demo_execution": False}
+    match = re.fullmatch(r"(?:BLOCK|BLOK) ([A-Z0-9]+-USDT)", normalized)
+    if match:
+        current = runtime_controls.settings()["blocked_pairs"]
+        pair = match.group(1)
+        return {"blocked_pairs": sorted({str(item).upper() for item in current} | {pair})}
+    match = re.fullmatch(r"(?:UNBLOCK|BLOKDAN OCH) ([A-Z0-9]+-USDT)", normalized)
+    if match:
+        pair = match.group(1)
+        return {"blocked_pairs": [item for item in runtime_controls.settings()["blocked_pairs"] if str(item).upper() != pair]}
+    match = re.fullmatch(r"(?:MAX )?RISK\s+(\d+(?:\.\d+)?)", normalized)
+    if match and 0 < float(match.group(1)) <= 5:
+        return {"max_risk_usdt": float(match.group(1))}
+    match = re.fullmatch(r"(?:MAX )?LEVERAGE\s+(\d+)", normalized)
+    if match and 1 <= int(match.group(1)) <= 10:
+        return {"max_leverage": int(match.group(1))}
+    match = re.fullmatch(r"(?:MIN )?COOLDOWN\s+(\d+)", normalized)
+    if match and 5 <= int(match.group(1)) <= 1440:
+        return {"min_cooldown_minutes": int(match.group(1))}
+    return None
+
+
+def _preview_control(chat_id: str, updates: dict) -> str:
+    code, expires = runtime_controls.create_pending(chat_id, updates)
+    items = ", ".join(f"{key}={value}" for key, value in updates.items())
+    return (f"⚠️ Runtime o‘zgarishi preview: {items}\n"
+            "Bu faqat keyingi AI/VST qarorlarga ta’sir qiladi; live trading yoqilmaydi.\n"
+            f"Qo‘llash uchun 10 daqiqa ichida: TASDIQLAYMAN {code}\n"
+            f"Muddati: {expires.strftime('%H:%M UTC')}")
 
 
 def _allowed(chat_id: str) -> bool:
@@ -235,7 +277,7 @@ def _handle_callback(callback: dict) -> None:
     elif action == "upload":
         _reply(chat_id, "📤 Endi PDF faylni shu chatga yuboring. Text-based PDF avtomatik bilim bazasiga qo‘shiladi.", menu=True)
     elif action == "help":
-        _reply(chat_id, "Boshqaruv commandlarsiz ishlaydi: umumiy holat, foyda/zarar, ochiq/yopiq orderlar va signallarni tugmalardan ko‘ring. PDF yuklash yoki knowledge qidirish uchun mos tugmani bosing. Order ochish/yopish faqat serverdagi AI risk qoidalari va BingX VST orqali avtomatik boshqariladi.", menu=True)
+        _reply(chat_id, "Savolni oddiy yozing: signal, P&L, regime, learning, RSS yoki reconciliation haqida tushuntiraman. Runtime control misollari: STOP, START DEMO, BLOCK BTC-USDT, UNBLOCK BTC-USDT, RISK 0.5, LEVERAGE 3, COOLDOWN 15. Har biri preview va TASDIQLAYMAN kodi talab qiladi. Live trading, kod, credential va broker endpointi o‘zgarmaydi.", menu=True)
 
 
 def handle_update(update: dict) -> None:
@@ -287,4 +329,22 @@ def handle_update(update: dict) -> None:
         _AWAITING_KNOWLEDGE_SEARCH.discard(chat_id)
         _reply(chat_id, _search_text(text), menu=True)
         return
-    _menu(chat_id)
+    confirmation = re.fullmatch(r"TASDIQLAYMAN\s+([A-Fa-f0-9]{6})", text, flags=re.IGNORECASE)
+    if confirmation:
+        try:
+            applied = runtime_controls.confirm(chat_id, confirmation.group(1))
+        except Exception:
+            applied = None
+        if applied is None:
+            _reply(chat_id, "❌ Tasdiqlash kodi noto‘g‘ri yoki muddati tugagan. Yangi preview yuboring.", menu=True)
+        else:
+            _reply(chat_id, f"✅ Runtime control qo‘llandi va auditga yozildi: {applied}", menu=True)
+        return
+    try:
+        updates = _control_request(text)
+    except Exception:
+        updates = None
+    if updates is not None:
+        _reply(chat_id, _preview_control(chat_id, updates), menu=True)
+        return
+    _reply(chat_id, telegram_chat.answer(text), menu=True)

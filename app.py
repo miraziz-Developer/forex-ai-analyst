@@ -22,6 +22,7 @@ from multi_strategy_scheduler import start_scheduler
 from notifier import send_telegram_message
 from scalping_data import MarketDataProvider, provider_from_environment
 import scalping_storage
+import runtime_controls
 from telegram_bot import configure_webhook, handle_update
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -57,7 +58,13 @@ def format_paper_signal(candidate, decision: AITradeDecision, quantity: float, b
 
 def demo_execution_enabled() -> bool:
     """Only enable the hardcoded BingX VST (virtual-money) execution client with both credentials."""
-    return (os.environ.get("KILL_SWITCH", "false").strip().lower() != "true" and
+    try:
+        controls = runtime_controls.settings()
+    except Exception:
+        return False
+    runtime_execution = controls["demo_execution"]
+    return (not controls["kill_switch"] and runtime_execution is not False and
+            os.environ.get("KILL_SWITCH", "false").strip().lower() != "true" and
             os.environ.get("AUTO_EXECUTE_TRADES", "false").strip().lower() == "true" and
             bool(os.environ.get("BINGX_API_KEY", "").strip()) and bool(os.environ.get("BINGX_SECRET", "").strip()))
 
@@ -98,6 +105,9 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
     from scalping_core import CandidateStatus, Decision
     try:
         candidate = ai.to_candidate(pair, regime.regime, int(bars_5m[-1]["datetime"]), now)
+        runtime_rejection = runtime_controls.trade_permitted(pair, ai.risk_usdt, ai.leverage, ai.cooldown_minutes)
+        if runtime_rejection:
+            return [{"status": "SKIP", "reason": runtime_rejection}]
         if candidate.fingerprint in scalping_storage.existing_fingerprints():
             return [{"status": "SKIP", "reason": "duplicate AI candle decision"}]
         broker_order = execute_bingx_vst_order(candidate, ai)
@@ -161,6 +171,7 @@ def telegram_webhook():
 
 if __name__ == "__main__":
     scalping_storage.init_db()
+    runtime_controls.init_db()
     knowledge.init_db()
     if os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():
         if configure_webhook():

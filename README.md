@@ -45,6 +45,10 @@ The app creates and migrates its own signals, snapshots, AI reviews, knowledge d
 
 Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send `/start` once to open the button-based control panel: **Holat**, **So‘nggi signallar**, **Ochiq VST pozitsiyalar**, **Bilim bazasi**, **Bilimdan qidirish**, and **PDF yuklash**. Send a text-based PDF to the bot and it will extract/chunk the text into Turso. Scanned PDFs need OCR before upload. Legacy `/knowledge` and `/knowledge_search <query>` remain available for compatibility.
 
+Free text is also an Uzbek read-only AI chat: ask about signals, skipped trades, regime, P&L, learning, RSS/news, reconciliation, or current system state. The chat receives only a bounded operational snapshot and cannot place an order or write settings itself.
+
+Authorized users can request strictly allowlisted runtime controls with explicit text: `STOP`, `START DEMO`, `BLOCK BTC-USDT`, `UNBLOCK BTC-USDT`, `RISK 0.5`, `LEVERAGE 3`, or `COOLDOWN 15`. The bot always sends a preview and a random, single-use confirmation code; reply `TASDIQLAYMAN <code>` within 10 minutes to apply it. Every preview, rejection, and applied update is recorded in Turso. Controls apply only to subsequent AI/VST decisions. They cannot enable live-money trading, change code/model prompts, credentials, broker endpoints, or exceed enforced caps (risk ≤ 5 USDT, leverage ≤ 10x, cooldown ≥ 5 minutes).
+
 Set `PUBLIC_BASE_URL` to the deployed HTTPS URL and `TELEGRAM_WEBHOOK_SECRET`; the service registers its webhook, callback updates, and command menu automatically on startup. If automatic setup is unavailable, register it manually once:
 
 ```bash
