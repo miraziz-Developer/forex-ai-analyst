@@ -30,7 +30,7 @@ class CandidateStatus(StrEnum):
     ACCEPTED_PAPER = "ACCEPTED_PAPER"
     WIN = "WIN"
     LOSS = "LOSS"
-    EXPIRED = "EXPIRED"
+    TIME_EXIT = "TIME_EXIT"
 
 
 @dataclass(frozen=True)

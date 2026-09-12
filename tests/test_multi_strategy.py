@@ -228,6 +228,87 @@ class MultiStrategyTests(unittest.TestCase):
         resolve_open_paper_signals(provider)
         resolve.assert_called_once_with("one", CandidateStatus.LOSS, 98.0)
 
+    @patch("multi_strategy_scheduler.datetime")
+    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
+    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    def test_resolver_records_time_exit_at_last_closed_price_for_paper_signal(self, open_signals, resolve, clock):
+        clock.now.return_value = NOW
+        clock.fromisoformat.side_effect = datetime.fromisoformat
+        open_signals.return_value = [{"fingerprint": "time-exit", "pair": "BTC-USDT", "direction": "BUY",
+                                      "entry_price": 100, "stop_price": 98, "target_price": 103,
+                                      "candle_time": 1000,
+                                      "expiry_time": (NOW - timedelta(minutes=1)).isoformat()}]
+        provider = Mock()
+        provider.fetch_closed_bars.return_value = [{"datetime": 2000, "low": 99, "high": 102, "close": 101.5}]
+
+        resolve_open_paper_signals(provider)
+
+        resolve.assert_called_once_with("time-exit", CandidateStatus.TIME_EXIT, 101.5)
+
+    @patch("multi_strategy_scheduler.datetime")
+    @patch("multi_strategy_scheduler.broker", create=True)
+    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
+    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    def test_resolver_does_not_close_journal_when_vst_time_exit_fails(self, open_signals, resolve, broker_mock, clock):
+        clock.now.return_value = NOW
+        clock.fromisoformat.side_effect = datetime.fromisoformat
+        open_signals.return_value = [{"fingerprint": "retry", "pair": "BTC-USDT", "direction": "BUY",
+                                      "entry_price": 100, "stop_price": 98, "target_price": 103,
+                                      "candle_time": 1000, "broker_quantity": .1,
+                                      "expiry_time": (NOW - timedelta(minutes=1)).isoformat()}]
+        provider = Mock()
+        provider.fetch_closed_bars.return_value = [{"datetime": 2000, "low": 99, "high": 102, "close": 101.5}]
+
+        with patch.dict("sys.modules", {"broker": broker_mock}):
+            broker_mock.get_position.return_value = {"positionAmt": ".1"}
+            broker_mock.close_position.side_effect = RuntimeError("BingX unavailable")
+            resolve_open_paper_signals(provider)
+
+        resolve.assert_not_called()
+
+    @patch("multi_strategy_scheduler.datetime")
+    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
+    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    def test_resolver_records_vst_time_exit_only_after_confirmed_close_fill(self, open_signals, resolve, clock):
+        clock.now.return_value = NOW
+        clock.fromisoformat.side_effect = datetime.fromisoformat
+        open_signals.return_value = [{"fingerprint": "vst-time-exit", "pair": "BTC-USDT", "direction": "BUY",
+                                      "entry_price": 100, "stop_price": 98, "target_price": 103,
+                                      "candle_time": 1000, "broker_quantity": .1,
+                                      "expiry_time": (NOW - timedelta(minutes=1)).isoformat()}]
+        provider = Mock()
+        provider.fetch_closed_bars.return_value = [{"datetime": 2000, "low": 99, "high": 102, "close": 101.5}]
+        broker_mock = Mock()
+        broker_mock.get_position.return_value = {"positionAmt": ".1"}
+        broker_mock.close_position.return_value = {"order_id": "close-1", "fill_price": 101.25}
+
+        with patch.dict("sys.modules", {"broker": broker_mock}):
+            resolve_open_paper_signals(provider)
+
+        broker_mock.close_position.assert_called_once_with("BTC-USDT", "BUY", .1)
+        resolve.assert_called_once_with("vst-time-exit", CandidateStatus.TIME_EXIT, 101.25)
+
+    @patch("multi_strategy_scheduler.datetime")
+    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
+    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    def test_resolver_does_not_infer_vst_exit_when_position_is_already_absent(self, open_signals, resolve, clock):
+        clock.now.return_value = NOW
+        clock.fromisoformat.side_effect = datetime.fromisoformat
+        open_signals.return_value = [{"fingerprint": "absent", "pair": "BTC-USDT", "direction": "BUY",
+                                      "entry_price": 100, "stop_price": 98, "target_price": 103,
+                                      "candle_time": 1000, "broker_quantity": .1,
+                                      "expiry_time": (NOW - timedelta(minutes=1)).isoformat()}]
+        provider = Mock()
+        provider.fetch_closed_bars.return_value = [{"datetime": 2000, "low": 99, "high": 102, "close": 101.5}]
+        broker_mock = Mock()
+        broker_mock.get_position.return_value = None
+
+        with patch.dict("sys.modules", {"broker": broker_mock}):
+            resolve_open_paper_signals(provider)
+
+        broker_mock.close_position.assert_not_called()
+        resolve.assert_not_called()
+
     def test_multi_backtest_enters_next_open_and_resolves_ambiguous_bar_as_loss(self):
         bars = [bar(index, 100, interval=300000, spread=.2) for index in range(270)]
         bars[261].update(open=101, high=104, low=98, close=101)

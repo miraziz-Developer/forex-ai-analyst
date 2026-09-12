@@ -15,7 +15,13 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
-    """Resolve closed-bar paper positions conservatively: stop wins if one bar hits both levels."""
+    """Resolve positions on closed bars; stop wins if a bar hits both levels.
+
+    A position whose planned holding window ends is closed as TIME_EXIT, never
+    discarded as an expired signal. VST rows are journaled only after BingX
+    confirms the market-close fill; a failed API call leaves the row open for a
+    safe retry on the next scheduler run.
+    """
     now = datetime.now(timezone.utc)
     for signal in scalping_storage.open_paper_signals():
         try:
@@ -42,12 +48,16 @@ def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
                     if signal.get("broker_quantity"):
                         import broker
                         position_side = "LONG" if signal["direction"] == "BUY" else "SHORT"
-                        if broker.get_position(signal["pair"], position_side):
-                            exit_price = float(broker.close_position(signal["pair"], signal["direction"],
-                                                                     float(signal["broker_quantity"]))["fill_price"])
-                    scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.EXPIRED, exit_price)
-        except Exception:
-            logger.exception("paper resolver failed for %s", signal["fingerprint"])
+                        if not broker.get_position(signal["pair"], position_side):
+                            logger.warning("VST position absent for expired window %s; leaving journal open "
+                                           "because a TP/SL or manual-close fill cannot be safely inferred",
+                                           signal["fingerprint"])
+                            continue
+                        exit_price = float(broker.close_position(signal["pair"], signal["direction"],
+                                                                  float(signal["broker_quantity"]))["fill_price"])
+                    scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.TIME_EXIT, exit_price)
+        except Exception as exc:
+            logger.warning("paper resolver will retry %s: %s", signal["fingerprint"], exc)
 
 
 def reconcile_closed_vst_orders() -> None:

@@ -26,7 +26,7 @@ def format_stats(stats: dict) -> str:
         "Barcha vaqt:\n"
         f"✅ WIN: {all_time.get('WIN', 0)}\n"
         f"❌ LOSS: {all_time.get('LOSS', 0)}\n"
-        f"⌛ EXPIRED: {all_time.get('EXPIRED', 0)}\n"
+        f"⏱ TIME EXIT: {all_time.get('TIME_EXIT', 0)}\n"
         f"🎯 Win rate: {all_time.get('win_rate_pct') or 0}%\n"
         f"💵 Ijro qilingan P&L: {all_time.get('realized_pnl_usdt', 0):+.2f} USDT\n\n"
         "Oxirgi 30 kun:\n"
@@ -46,7 +46,7 @@ def format_signals(rows: list[dict], title: str) -> str:
     if not rows:
         return f"{title}\n\nMa'lumot yo'q."
     lines = [title, ""]
-    icons = {"OPEN": "🟡", "WIN": "✅", "LOSS": "❌", "EXPIRED": "⌛"}
+    icons = {"OPEN": "🟡", "WIN": "✅", "LOSS": "❌", "TIME_EXIT": "⏱"}
     for row in rows:
         status = row.get("status") or row.get("outcome") or "OPEN"
         pnl = row.get("estimated_pnl_usdt")
