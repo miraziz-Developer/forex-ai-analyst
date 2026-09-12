@@ -18,7 +18,8 @@ services:
       - key: DASHBOARD_TOKEN
         generateValue: true
       - key: AUTO_EXECUTE_TRADES
-        value: "false"
+        # Demo compatibility only: the service remains paper-only and sends no broker orders.
+        value: "true"
       # Public Binance Futures OHLCV only. No Binance account or API key is needed.
       # This is the one, paper-only multi-strategy Render service.
       - key: MULTI_STRATEGY_PROVIDER

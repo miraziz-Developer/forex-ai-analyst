@@ -20,7 +20,15 @@ class HealthTests(unittest.TestCase):
             "paper_only": True,
             "provider": "binance_futures",
             "auto_execute_trades": False,
+            "auto_execute_trades_configured": app.AUTO_EXECUTE_TRADES_CONFIGURED,
         })
+
+    def test_auto_execute_true_is_accepted_but_does_not_enable_order_execution(self):
+        with patch.object(app, "AUTO_EXECUTE_TRADES_CONFIGURED", True):
+            response = app.app.test_client().get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["auto_execute_trades_configured"])
+        self.assertFalse(response.get_json()["auto_execute_trades"])
 
     def test_signals_api_requires_dashboard_token_when_configured(self):
         with patch.object(app, "DASHBOARD_TOKEN", "secret"):

@@ -66,13 +66,23 @@ def closed_bars(bars: list[dict], timeframe: str, now: datetime | None = None) -
 @dataclass
 class MarketDataProvider:
     fetcher: callable
-    cache: dict[tuple[str, str], list[dict]] = field(default_factory=dict)
+    # key -> (current closed-candle boundary in ms, validated chronological bars)
+    cache: dict[tuple[str, str], tuple[int, list[dict]]] = field(default_factory=dict)
 
     def fetch_closed_bars(self, pair: str, timeframe: str, limit: int, now: datetime | None = None) -> list[dict]:
+        if timeframe not in _SECONDS:
+            raise ValueError(f"unsupported timeframe: {timeframe}")
+        instant = now or datetime.now(timezone.utc)
+        now_ms, interval_ms = int(instant.timestamp() * 1000), _SECONDS[timeframe] * 1000
+        closed_boundary = now_ms // interval_ms * interval_ms
+        key = (pair.upper(), timeframe)
+        cached = self.cache.get(key)
+        if cached and cached[0] == closed_boundary and len(cached[1]) >= limit:
+            return cached[1][-limit:]
         raw = self.fetcher(pair, timeframe, outputsize=limit + 1)
-        bars = closed_bars(raw, timeframe, now)
-        self.cache[(pair, timeframe)] = bars[-limit:]
-        return self.cache[(pair, timeframe)]
+        bars = closed_bars(raw, timeframe, instant)[-limit:]
+        self.cache[key] = (closed_boundary, bars)
+        return bars
 
 
 def provider_from_environment() -> MarketDataProvider:

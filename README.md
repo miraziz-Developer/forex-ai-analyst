@@ -9,13 +9,17 @@ Binance Futures public closed OHLCV
   → Turso paper-signal/outcome ledger + Telegram notification
 ```
 
-It does not import or call the BingX execution client. If `AUTO_EXECUTE_TRADES=true`, startup fails before it can scan or place an order.
+It does not import or call a broker execution client. `AUTO_EXECUTE_TRADES=true` is accepted for demo-environment compatibility, but this service remains paper-only and never places an order. The `/health` response reports the configured value separately from the effective execution mode (`false`).
 
-## Current strategy and controls
+## Current strategies and controls
 
 - `trend_pullback`: 15-minute trend regime with a confirmed 5-minute pullback/reclaim.
+- `support_resistance_rejection`: closed 5-minute rejection at an ATR-width confirmed pivot zone; it does not counter-trade a classified trend.
+- `breakout_retest`: a `BREAKOUT_READY` regime, volume-confirmed structure break, then a closed retest candle. It never enters on the initial breakout candle.
+- Regime classification is fail-closed: `TRENDING_UP`, `TRENDING_DOWN`, `RANGING`, `BREAKOUT_READY`, `HIGH_VOLATILITY`, or `UNCERTAIN`. High-volatility and uncertain regimes do not produce new entries.
+- Trend, momentum, volatility, volume, structure, and candle action are scored as separate groups; correlated trend indicators are not counted as independent confirmations.
 - Binance USD-M Futures public REST klines; no Binance account or API key is required.
-- Only fully closed, validated, deduplicated candles are used.
+- Only fully closed, validated, deduplicated candles are used. The provider caches one pair/timeframe result until the next closed-candle boundary to avoid duplicate REST requests during a scan/resolution cycle.
 - A candidate must have valid directional levels, score at least 65, and R:R at least 1.3.
 - Same-candle duplicates are persisted and rejected.
 - Maximum one open paper position, three accepted paper trades per UTC day, `$0.75` stop-risk per trade, and `$2.00` daily realized-loss limit by default.
@@ -38,14 +42,21 @@ TURSO_DATABASE_URL=libsql://your-database.turso.io
 TURSO_AUTH_TOKEN=your-token
 ```
 
-The app creates its own `signal_candidates` and `daily_risk_state` tables in that database. Existing legacy `signals` rows are not changed.
+The app creates and migrates its own `signal_candidates`, `signal_decisions`, `daily_risk_state`, and `market_snapshots` tables in that database. Existing legacy `signals` rows are not changed.
+
+## Deterministic multi-strategy replay
+
+`multi_strategy_backtest.py` provides the reusable closed-bar replay engine for each agent. Its evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, enforces the central daily/open-position limits, expires stale trades, and resolves an OHLC candle touching both levels as `LOSS`.
+
+Use `metrics(trades)` to report trade count, win rate, after-cost net P&L, expectancy, profit factor, maximum drawdown, and average holding time. Review results independently by `strategy`, `pair`, and `regime`; no strategy may be promoted beyond paper operation solely from an in-sample win rate.
 
 ## Configuration
 
 See [`.env.example`](.env.example). The production-safe defaults are:
 
 ```env
-AUTO_EXECUTE_TRADES=false
+# Demo compatibility only; effective execution remains false because this is paper-only.
+AUTO_EXECUTE_TRADES=true
 MULTI_STRATEGY_PROVIDER=binance_futures
 MULTI_STRATEGY_PAIRS=BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT
 MULTI_STRATEGY_SCAN_INTERVAL_SECONDS=300
@@ -68,7 +79,7 @@ After deploy, verify:
 curl https://YOUR-RENDER-SERVICE.onrender.com/health
 ```
 
-Expected essentials: `"service":"multi-strategy-paper"`, `"paper_only":true`, and `"auto_execute_trades":false`.
+Expected essentials: `"service":"multi-strategy-paper"`, `"paper_only":true`, `"auto_execute_trades":false`, and `"auto_execute_trades_configured":true`.
 
 ## Validation
 

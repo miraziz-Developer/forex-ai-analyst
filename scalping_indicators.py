@@ -138,3 +138,101 @@ def swing_bias(bars: list[dict], span: int = 2) -> str | None:
         if highs[-1] < highs[-2] and lows[-1] < lows[-2]:
             return "BEARISH"
     return None
+
+
+def supertrend_direction(bars: list[dict], period: int = 10, multiplier: float = 3.0) -> str | None:
+    """Return BUY/SELL from closed chronological bars, or None without enough history."""
+    if len(bars) < period + 2 or period < 1 or multiplier <= 0:
+        return None
+    direction, final_upper, final_lower = "BUY", None, None
+    for index in range(period, len(bars)):
+        window = bars[:index + 1]
+        volatility = atr(window, period)
+        if volatility is None:
+            continue
+        current, previous = window[-1], window[-2]
+        midpoint = (float(current["high"]) + float(current["low"])) / 2
+        basic_upper, basic_lower = midpoint + multiplier * volatility, midpoint - multiplier * volatility
+        if final_upper is None:
+            final_upper, final_lower = basic_upper, basic_lower
+            continue
+        final_upper = basic_upper if basic_upper < final_upper or float(previous["close"]) > final_upper else final_upper
+        final_lower = basic_lower if basic_lower > final_lower or float(previous["close"]) < final_lower else final_lower
+        if float(current["close"]) > final_upper:
+            direction = "BUY"
+        elif float(current["close"]) < final_lower:
+            direction = "SELL"
+    return direction
+
+
+def support_resistance_zones(bars: list[dict], *, span: int = 2, lookback: int = 50,
+                             tolerance_atr: float = 0.35) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Return confirmed support/resistance zones without using an unconfirmed final pivot."""
+    if span < 1 or lookback < span * 2 + 1 or len(bars) < span * 2 + 1:
+        return [], []
+    recent = bars[-lookback:]
+    volatility = atr(recent)
+    if volatility is None or volatility <= 0:
+        return [], []
+    supports, resistances = [], []
+    # A pivot needs `span` subsequent *closed* bars, so the last span bars are excluded.
+    for index in range(span, len(recent) - span):
+        window = recent[index - span:index + span + 1]
+        low, high = float(recent[index]["low"]), float(recent[index]["high"])
+        if low == min(float(item["low"]) for item in window):
+            supports.append(low)
+        if high == max(float(item["high"]) for item in window):
+            resistances.append(high)
+    width = volatility * tolerance_atr
+    return ([(level - width, level + width) for level in supports[-3:]],
+            [(level - width, level + width) for level in resistances[-3:]])
+
+
+def structure_event(bars: list[dict], span: int = 2) -> str | None:
+    """Classify the newest closed-bar break as bullish/bearish BOS or CHoCH.
+
+    This is deliberately conservative: it needs two confirmed swing highs and lows.
+    """
+    if len(bars) < span * 2 + 8:
+        return None
+    highs, lows = [], []
+    for index in range(span, len(bars) - span):
+        window = bars[index - span:index + span + 1]
+        if float(bars[index]["high"]) == max(float(item["high"]) for item in window):
+            highs.append(float(bars[index]["high"]))
+        if float(bars[index]["low"]) == min(float(item["low"]) for item in window):
+            lows.append(float(bars[index]["low"]))
+    if len(highs) < 2 or len(lows) < 2:
+        return None
+    prior_bias = "BULLISH" if highs[-1] > highs[-2] and lows[-1] > lows[-2] else \
+        "BEARISH" if highs[-1] < highs[-2] and lows[-1] < lows[-2] else None
+    close = float(bars[-1]["close"])
+    if close > highs[-1]:
+        return "BULLISH_BOS" if prior_bias == "BULLISH" else "BULLISH_CHOCH"
+    if close < lows[-1]:
+        return "BEARISH_BOS" if prior_bias == "BEARISH" else "BEARISH_CHOCH"
+    return None
+
+
+def candle_confirmation(bars: list[dict]) -> str | None:
+    """Classify the newest closed candle only when it has meaningful directional action."""
+    if len(bars) < 2:
+        return None
+    previous, current = bars[-2], bars[-1]
+    opening, close, high, low = (float(current[key]) for key in ("open", "close", "high", "low"))
+    prior_open, prior_close = float(previous["open"]), float(previous["close"])
+    body, candle_range = abs(close - opening), high - low
+    if candle_range <= 0 or body <= 0:
+        return None
+    lower_wick, upper_wick = min(opening, close) - low, high - max(opening, close)
+    if close > opening and opening <= prior_close and close >= prior_open and prior_close < prior_open:
+        return "BULLISH_ENGULFING"
+    if close < opening and opening >= prior_close and close <= prior_open and prior_close > prior_open:
+        return "BEARISH_ENGULFING"
+    if lower_wick >= body * 2 and close > opening and close >= low + candle_range * 0.6:
+        return "BULLISH_REJECTION"
+    if upper_wick >= body * 2 and close < opening and close <= low + candle_range * 0.4:
+        return "BEARISH_REJECTION"
+    if body / candle_range >= 0.65:
+        return "BULLISH_RECLAIM" if close > opening else "BEARISH_RECLAIM"
+    return None

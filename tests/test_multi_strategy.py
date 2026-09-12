@@ -9,7 +9,10 @@ os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 from market_regime import RegimeSnapshot, classify_market_regime
 from risk_manager import RiskConfig, assess_risk
 from scalping_core import CandidateSignal, CandidateStatus, Direction, MarketRegime
-from scalping_data import binance_futures_symbol, closed_bars, fetch_binance_futures_bars
+from scalping_data import MarketDataProvider, binance_futures_symbol, closed_bars, fetch_binance_futures_bars
+from scalping_indicators import candle_confirmation, support_resistance_zones
+from multi_strategy_backtest import BacktestCosts, simulate as multi_simulate
+from strategies import support_resistance_rejection
 from multi_strategy_scheduler import resolve_open_paper_signals
 from strategy_coordinator import resolve_candidates
 from strategies.trend_pullback import evaluate
@@ -54,6 +57,32 @@ class MultiStrategyTests(unittest.TestCase):
         result = closed_bars(raw, "5m", NOW)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["datetime"], now_ms - 600000)
+
+    def test_provider_reuses_closed_candle_cache_until_next_boundary(self):
+        fetcher = Mock(return_value=[bar(index, 100 + index) for index in range(20)])
+        provider = MarketDataProvider(fetcher)
+        provider.fetch_closed_bars("BTC-USDT", "5m", 10, NOW)
+        provider.fetch_closed_bars("BTC-USDT", "5m", 10, NOW + timedelta(minutes=4))
+        self.assertEqual(fetcher.call_count, 1)
+        provider.fetch_closed_bars("BTC-USDT", "5m", 10, NOW + timedelta(minutes=5))
+        self.assertEqual(fetcher.call_count, 2)
+
+    def test_candle_confirmation_and_confirmed_pivot_zones(self):
+        candles = [bar(index, 100, spread=1) for index in range(60)]
+        candles[55].update(open=100, high=101, low=90, close=99)
+        candles[-2].update(open=99, high=100, low=95, close=96)
+        candles[-1].update(open=95, high=102, low=94, close=101)
+        self.assertEqual(candle_confirmation(candles[-2:]), "BULLISH_ENGULFING")
+        supports, _ = support_resistance_zones(candles)
+        self.assertTrue(any(low <= 90 <= high for low, high in supports))
+
+    def test_sr_strategy_rejects_long_rejection_in_downtrend(self):
+        bars = [bar(index, 100, spread=1) for index in range(60)]
+        bars[-3].update(low=95, high=101, open=100, close=99)
+        bars[-2].update(low=94, high=100, open=99, close=96)
+        bars[-1].update(low=94, high=102, open=95, close=101, volume=250)
+        regime = RegimeSnapshot(MarketRegime.TRENDING_DOWN, {})
+        self.assertIsNone(support_resistance_rejection.evaluate("BTC-USDT", bars, bars, regime, NOW))
 
     def test_regime_fails_closed_on_insufficient_history(self):
         self.assertEqual(classify_market_regime([bar(index, 100 + index) for index in range(100)]).regime,
@@ -108,6 +137,20 @@ class MultiStrategyTests(unittest.TestCase):
         provider.fetch_closed_bars.return_value = [{"datetime": 2000, "low": 97, "high": 104, "close": 101}]
         resolve_open_paper_signals(provider)
         resolve.assert_called_once_with("one", CandidateStatus.LOSS, 98.0)
+
+    def test_multi_backtest_enters_next_open_and_resolves_ambiguous_bar_as_loss(self):
+        bars = [bar(index, 100, interval=300000, spread=.2) for index in range(270)]
+        bars[261].update(open=101, high=104, low=98, close=101)
+
+        def evaluator(closed, now):
+            return [CandidateSignal("test", "BTC-USDT", Direction.BUY, MarketRegime.TRENDING_UP,
+                                    100, 98, 103, now + timedelta(hours=1), "5m", "15m",
+                                    int(closed[-1]["datetime"]), 80, ("closed",), "invalid")]
+
+        trades = multi_simulate(bars, evaluator, warmup_bars=260, expiry_bars=2,
+                                costs=BacktestCosts(fee_pct_round_trip=0, slippage_pct_round_trip=0))
+        self.assertEqual(trades[0]["entry"], 101.0)
+        self.assertEqual(trades[0]["outcome"], "LOSS")
 
 
 if __name__ == "__main__":
