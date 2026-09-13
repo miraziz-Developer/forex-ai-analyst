@@ -108,7 +108,7 @@ Do not set the scan interval below 300 seconds. The scheduler scans pairs serial
 
 ## HTTP endpoints
 
-- `GET /health` — service/provider/VST-only status plus non-fatal execution-incident diagnostics; used by Render.
+- `GET /health` — service/provider/VST-only status plus non-fatal execution-incident diagnostics; used by Render. `vst_account` contains only safe account-query diagnostics (`available`, check time, failure category, HTTP status and BingX code/message), never credentials, signatures or balances.
 - `GET /api/signals?limit=100` — recent AI candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
 - `POST /telegram/webhook` — authenticated Telegram button/callback/PDF receiver.
 
@@ -123,6 +123,8 @@ curl https://YOUR-RENDER-SERVICE.onrender.com/health
 ```
 
 Expected essentials before enabling demo orders: `"demo_only":true` and `"auto_execute_trades":false`. Upload a PDF and verify `/knowledge` before setting `AUTO_EXECUTE_TRADES=true`. Set `KILL_SWITCH=true` to prevent every new VST order; it does not force-close already-open exchange positions.
+
+When demo execution is enabled, verify `vst_account.available` becomes `true`. If it is `false`, inspect its sanitized `category`, `http_status`, `bingx_code`, and `bingx_msg`: confirm the VST/demo key pair, Swap/Futures read/trade permissions, and any IP allowlist for Render. While this account query is unavailable, one account-level incident is reported and the scheduler deliberately skips all AI calls and new orders for that scan cycle.
 
 ## Live-money boundary
 

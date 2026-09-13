@@ -25,17 +25,63 @@ DEFAULT_LEVERAGE = int(os.environ.get("LEVERAGE", "3"))
 QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 3, "SOL-USDT": 2, "XRP-USDT": 0, "BNB-USDT": 2}
 
 
+class BingXApiError(RuntimeError):
+    """A safe account/API failure description which deliberately excludes secrets."""
+
+    def __init__(self, path: str, *, http_status: int | None = None, code=None,
+                 message: str | None = None, category: str = "unknown"):
+        self.diagnostic = {
+            "endpoint": path,
+            "http_status": http_status,
+            "bingx_code": code,
+            "bingx_msg": str(message or "").replace("\n", " ")[:240] or None,
+            "category": category,
+        }
+        super().__init__(f"BingX {category} failure on {path}")
+
+
+def _error_category(http_status: int | None, code, message: str | None) -> str:
+    text = str(message or "").lower()
+    if "signature" in text or "sign" in text:
+        return "signature"
+    if "timestamp" in text or "recvwindow" in text or "clock" in text:
+        return "clock"
+    if "ip" in text and ("white" in text or "restrict" in text or "forbid" in text):
+        return "ip_whitelist"
+    if "permission" in text or "authorize" in text or "forbidden" in text or http_status == 403:
+        return "permission"
+    if "api key" in text or "apikey" in text or "credential" in text or http_status == 401:
+        return "credentials"
+    if http_status is None:
+        return "transport"
+    return "api_response"
+
+
 def _signed_request(method: str, path: str, params: dict) -> dict:
     params = dict(params)
     params["timestamp"] = str(int(time.time() * 1000))
     query = "&".join(f"{k}={v}" for k, v in params.items())
     signature = hmac.new(BINGX_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
     url = f"{BASE_URL}{path}?{query}&signature={signature}"
-    response = requests.request(method, url, headers={"X-BX-APIKEY": BINGX_API_KEY}, timeout=15)
-    response.raise_for_status()
-    data = response.json()
+    try:
+        response = requests.request(method, url, headers={"X-BX-APIKEY": BINGX_API_KEY}, timeout=15)
+    except requests.RequestException as exc:
+        raise BingXApiError(path, message=type(exc).__name__, category="transport") from exc
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise BingXApiError(path, http_status=response.status_code, message="non-JSON response",
+                            category=_error_category(response.status_code, None, None)) from exc
+    if response.status_code >= 400:
+        message = data.get("msg") if isinstance(data, dict) else None
+        code = data.get("code") if isinstance(data, dict) else None
+        raise BingXApiError(path, http_status=response.status_code, code=code, message=message,
+                            category=_error_category(response.status_code, code, message))
+    if not isinstance(data, dict):
+        raise BingXApiError(path, http_status=response.status_code, message="invalid JSON payload", category="api_response")
     if data.get("code") != 0:
-        raise RuntimeError(f"BingX API error on {path}: {data.get('msg')} (code {data.get('code')})")
+        raise BingXApiError(path, http_status=response.status_code, code=data.get("code"), message=data.get("msg"),
+                            category=_error_category(response.status_code, data.get("code"), data.get("msg")))
     return data
 
 

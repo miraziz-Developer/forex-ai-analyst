@@ -1,5 +1,7 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import requests
 
 import broker
 
@@ -19,6 +21,31 @@ class BingXVstBalanceTests(unittest.TestCase):
     def test_vst_usdt_balance_rejects_missing_usdt_row(self, signed_request):
         with self.assertRaisesRegex(RuntimeError, "USDT"):
             broker.get_vst_usdt_balance()
+
+    @patch("broker.requests.request")
+    def test_signed_request_exposes_only_sanitized_bingx_failure_details(self, request):
+        response = Mock(status_code=401)
+        response.json.return_value = {"code": 100001, "msg": "API key invalid"}
+        request.return_value = response
+
+        with self.assertRaises(broker.BingXApiError) as raised:
+            broker._signed_request("GET", "/openApi/swap/v2/user/balance", {})
+
+        self.assertEqual(raised.exception.diagnostic, {
+            "endpoint": "/openApi/swap/v2/user/balance", "http_status": 401,
+            "bingx_code": 100001, "bingx_msg": "API key invalid", "category": "credentials",
+        })
+        self.assertNotIn("signature", raised.exception.diagnostic)
+        self.assertNotIn("api_key", raised.exception.diagnostic)
+        self.assertNotIn("secret", raised.exception.diagnostic)
+
+    @patch("broker.requests.request", side_effect=requests.Timeout("timeout"))
+    def test_signed_request_classifies_transport_failures_without_url_or_signature(self, request):
+        with self.assertRaises(broker.BingXApiError) as raised:
+            broker._signed_request("GET", "/openApi/swap/v2/user/balance", {})
+
+        self.assertEqual(raised.exception.diagnostic["category"], "transport")
+        self.assertNotIn("signature", str(raised.exception.diagnostic))
 
 
 if __name__ == "__main__":

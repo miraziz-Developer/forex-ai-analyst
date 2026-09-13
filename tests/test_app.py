@@ -32,6 +32,7 @@ class HealthTests(unittest.TestCase):
             "auto_execute_trades": False,
             "auto_execute_trades_configured": app.AUTO_EXECUTE_TRADES_CONFIGURED,
             "execution_alerts": {"open_incidents": 0, "last_incident_at": None},
+            "vst_account": {"available": None, "last_checked_at": None},
         })
 
     def test_auto_execute_requires_both_bingx_vst_credentials(self):
@@ -132,6 +133,39 @@ class HealthTests(unittest.TestCase):
                 "available": True, "open_strategy_positions": 1, "daily_strategy_pnl_usdt": -1.25,
                 "equity_usdt": 100.0, "available_usdt": 80.0, "unrealized_pnl_usdt": -0.5,
             })
+
+    @patch("app.execution_alerts.report")
+    @patch("app.scan_pair")
+    @patch("app._vst_account_context", return_value={"available": False, "category": "credentials",
+                                                       "http_status": 401, "bingx_code": 100001,
+                                                       "bingx_msg": "API key invalid"})
+    def test_configured_scan_stops_before_pair_or_ai_work_when_account_is_unavailable(self, context, scan_pair, report):
+        app.scan_configured_pairs(unittest.mock.Mock())
+
+        scan_pair.assert_not_called()
+        report.assert_called_once_with("vst-account-context-unavailable",
+                                       "BingX VST account holati olinmadi; AI scan va yangi orderlar fail-closed to‘xtatildi.",
+                                       details={"category": "credentials", "http_status": 401,
+                                                "bingx_code": 100001, "bingx_msg": "API key invalid"})
+
+    @patch("app.execution_alerts.resolve")
+    @patch("app._vst_account_context", return_value={"available": True, "equity_usdt": 100, "available_usdt": 80})
+    @patch("app.scan_pair")
+    def test_configured_scan_reuses_one_successful_account_snapshot_for_all_pairs(self, scan_pair, context, resolve):
+        provider = unittest.mock.Mock()
+        app.scan_configured_pairs(provider)
+
+        self.assertEqual(context.call_count, 1)
+        self.assertEqual(scan_pair.call_count, len(app.configured_pairs()))
+        for call in scan_pair.call_args_list:
+            self.assertIs(call.kwargs["account_state"], context.return_value)
+        resolve.assert_called_once_with("vst-account-context-unavailable", note="VST account context recovered")
+
+    @patch("app.execution_alerts.resolve")
+    def test_retired_static_risk_alerts_are_closed_for_each_configured_pair(self, resolve):
+        app.resolve_retired_static_risk_alerts()
+
+        self.assertEqual(resolve.call_count, len(app.configured_pairs()) * 3)
 
     def test_signals_api_requires_dashboard_token_when_configured(self):
         with patch.object(app, "DASHBOARD_TOKEN", "secret"):

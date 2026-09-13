@@ -35,6 +35,7 @@ AUTO_EXECUTE_TRADES_CONFIGURED = os.environ.get("AUTO_EXECUTE_TRADES", "false").
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
+_VST_ACCOUNT_DIAGNOSTIC: dict = {"available": None, "last_checked_at": None}
 
 
 def configured_pairs() -> tuple[str, ...]:
@@ -43,6 +44,18 @@ def configured_pairs() -> tuple[str, ...]:
     if not pairs:
         raise ValueError("MULTI_STRATEGY_PAIRS must contain at least one pair")
     return pairs
+
+
+def resolve_retired_static_risk_alerts() -> None:
+    """Close alerts emitted by versions with now-retired fixed execution caps."""
+    retired_reasons = (
+        "AI risk runtime yuqori limitidan katta",
+        "AI leverage runtime yuqori limitidan katta",
+        "AI cooldown runtime minimumidan kichik",
+    )
+    for pair in configured_pairs():
+        for reason in retired_reasons:
+            execution_alerts.resolve(f"risk-control:{pair}:{reason}", note="fixed runtime limit retired")
 
 
 def format_paper_signal(candidate, decision: AITradeDecision, quantity: float, broker_order: dict | None = None) -> str:
@@ -112,17 +125,35 @@ def _vst_account_context() -> dict:
     """Build a bounded, non-sensitive VST account snapshot for AI sizing context."""
     context = {"available": False, "open_strategy_positions": scalping_storage.open_paper_positions(),
                "daily_strategy_pnl_usdt": scalping_storage.risk_state()[1]}
+    checked_at = datetime.now(timezone.utc).isoformat()
     if not (os.environ.get("BINGX_API_KEY", "").strip() and os.environ.get("BINGX_SECRET", "").strip()):
-        return {**context, "reason": "BingX VST credentials are not configured"}
+        diagnostic = {"available": False, "last_checked_at": checked_at, "category": "credentials",
+                      "reason": "BingX VST credentials are not configured"}
+        _VST_ACCOUNT_DIAGNOSTIC.clear()
+        _VST_ACCOUNT_DIAGNOSTIC.update(diagnostic)
+        return {**context, **diagnostic}
     try:
         import broker
-        return {**context, "available": True, **broker.get_vst_usdt_balance()}
+        account = {**context, "available": True, **broker.get_vst_usdt_balance()}
+        _VST_ACCOUNT_DIAGNOSTIC.clear()
+        _VST_ACCOUNT_DIAGNOSTIC.update({"available": True, "last_checked_at": checked_at})
+        return account
     except Exception as exc:
-        logger.warning("BingX VST account context unavailable: %s", type(exc).__name__)
-        return {**context, "reason": f"VST account query unavailable: {type(exc).__name__}"}
+        diagnostic = getattr(exc, "diagnostic", {})
+        safe = {"available": False, "last_checked_at": checked_at,
+                "category": diagnostic.get("category", type(exc).__name__),
+                "http_status": diagnostic.get("http_status"), "bingx_code": diagnostic.get("bingx_code"),
+                "bingx_msg": diagnostic.get("bingx_msg"),
+                "reason": "VST account query unavailable"}
+        _VST_ACCOUNT_DIAGNOSTIC.clear()
+        _VST_ACCOUNT_DIAGNOSTIC.update(safe)
+        logger.warning("BingX VST account context unavailable: category=%s http_status=%s code=%s msg=%s",
+                       safe["category"], safe["http_status"], safe["bingx_code"], safe["bingx_msg"])
+        return {**context, **safe}
 
 
-def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None) -> list[dict]:
+def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None,
+              account_state: dict | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
     bars_15m = provider.fetch_closed_bars(pair, "15m", 260, now)
     bars_5m = provider.fetch_closed_bars(pair, "5m", 120, now)
@@ -133,15 +164,16 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
                                              regime.regime, regime.features)
     if not bars_5m or not bars_15m:
         return [{"status": "SKIP", "reason": "yetarli yopilgan sham yo‘q"}]
+    account_snapshot = account_state if account_state is not None else _vst_account_context()
     snapshot = {"pair": pair.upper(), "time_utc": now.isoformat(), "regime": str(regime.regime),
                 "regime_features": regime.features, "institutional": fetch_institutional_context(pair.upper()),
                 "market_intelligence": context_for_pair(pair, now),
                 "outcome_learning": learning_summary(scalping_storage.closed_paper_signals(500), pair),
-                 "account_state": _vst_account_context(),
+                "account_state": account_snapshot,
                 "bars_5m": bars_5m[-80:], "bars_15m": bars_15m[-120:], "bars_1h": bars_1h[-120:]}
     excerpts = knowledge.search(f"{pair} {regime.regime} trend volatility risk")
     controls = runtime_controls.settings()
-    account_state = snapshot["account_state"]
+    account_state = account_snapshot
     ai = decide(snapshot, excerpts, scalping_storage.recent_ai_reviews(pair), controls)
     if not ai.proposes_trade:
         return [{"status": ai.action, "reason": ai.rationale}]
@@ -176,9 +208,18 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
 
 
 def scan_configured_pairs(provider: MarketDataProvider) -> None:
+    account_state = _vst_account_context()
+    if not account_state["available"]:
+        details = {key: account_state.get(key) for key in ("category", "http_status", "bingx_code", "bingx_msg")}
+        execution_alerts.report("vst-account-context-unavailable",
+                                "BingX VST account holati olinmadi; AI scan va yangi orderlar fail-closed to‘xtatildi.",
+                                details=details)
+        logger.warning("Skipping configured-pair AI scan: VST account context is unavailable")
+        return
+    execution_alerts.resolve("vst-account-context-unavailable", note="VST account context recovered")
     for pair in configured_pairs():
         try:
-            scan_pair(pair, provider)
+            scan_pair(pair, provider, account_state=account_state)
         except Exception:
             logger.exception("multi-strategy scan failed for %s", pair)
 
@@ -202,7 +243,7 @@ def health():
                    provider=os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "bingx",
                    auto_execute_trades=demo_execution,
                    auto_execute_trades_configured=AUTO_EXECUTE_TRADES_CONFIGURED,
-                   execution_alerts=alerts), 200
+                    execution_alerts=alerts, vst_account=dict(_VST_ACCOUNT_DIAGNOSTIC)), 200
 
 
 @app.route("/api/signals")
@@ -230,6 +271,7 @@ def telegram_webhook():
 if __name__ == "__main__":
     scalping_storage.init_db()
     execution_alerts.init_db()
+    resolve_retired_static_risk_alerts()
     runtime_controls.init_db()
     knowledge.init_db()
     if os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():
