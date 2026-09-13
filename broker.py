@@ -44,6 +44,45 @@ def round_quantity(symbol: str, raw_quantity: float) -> float:
     return round(raw_quantity, precision)
 
 
+def get_vst_usdt_balance() -> dict:
+    """Return normalized USDT account values from the VST account only.
+
+    The exchange has returned the balance row both directly and nested under
+    ``data.balance`` across API revisions.  Do not return the raw payload: this
+    value is passed to the AI context and must never include account metadata.
+    """
+    data = _signed_request("GET", "/openApi/swap/v2/user/balance", {})
+    value = data.get("data", {})
+    rows = value.get("balance", value) if isinstance(value, dict) else value
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not isinstance(rows, list):
+        raise RuntimeError("BingX VST balance query returned an invalid payload")
+
+    row = next((item for item in rows if isinstance(item, dict) and
+                str(item.get("asset", item.get("currency", "USDT"))).upper() == "USDT"), None)
+    if row is None:
+        raise RuntimeError("BingX VST balance query did not return a USDT balance")
+
+    def number(*names: str) -> float | None:
+        for name in names:
+            try:
+                raw = row.get(name)
+                if raw is not None and raw != "":
+                    return float(raw)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    equity = number("equity", "balance", "totalBalance")
+    available = number("availableMargin", "availableBalance", "available")
+    unrealized = number("unrealizedProfit", "unrealizedPnl")
+    if equity is None or available is None:
+        raise RuntimeError("BingX VST balance query omitted equity or available margin")
+    return {"equity_usdt": equity, "available_usdt": available,
+            "unrealized_pnl_usdt": unrealized}
+
+
 def set_leverage(symbol: str, position_side: str, leverage: int = DEFAULT_LEVERAGE) -> None:
     _signed_request("POST", "/openApi/swap/v2/trade/leverage",
                      {"symbol": symbol, "side": position_side, "leverage": str(leverage)})

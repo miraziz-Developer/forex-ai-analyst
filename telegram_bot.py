@@ -42,15 +42,15 @@ def _control_request(text: str) -> dict | None:
     if match:
         pair = match.group(1)
         return {"blocked_pairs": [item for item in runtime_controls.settings()["blocked_pairs"] if str(item).upper() != pair]}
-    match = re.fullmatch(r"(?:MAX )?RISK\s+(\d+(?:\.\d+)?)", normalized)
-    if match and 0 < float(match.group(1)) <= 5:
-        return {"max_risk_usdt": float(match.group(1))}
-    match = re.fullmatch(r"(?:MAX )?LEVERAGE\s+(\d+)", normalized)
-    if match and 1 <= int(match.group(1)) <= 10:
-        return {"max_leverage": int(match.group(1))}
-    match = re.fullmatch(r"(?:MIN )?COOLDOWN\s+(\d+)", normalized)
-    if match and 5 <= int(match.group(1)) <= 1440:
-        return {"min_cooldown_minutes": int(match.group(1))}
+    match = re.fullmatch(r"RISK PCT\s+(\d+(?:\.\d+)?)", normalized)
+    if match and 0 < float(match.group(1)) <= 100:
+        return {"risk_per_trade_pct": float(match.group(1))}
+    match = re.fullmatch(r"DAILY LOSS PCT\s+(\d+(?:\.\d+)?)", normalized)
+    if match and 0 < float(match.group(1)) <= 100:
+        return {"max_daily_loss_pct": float(match.group(1))}
+    match = re.fullmatch(r"MARGIN PCT\s+(\d+(?:\.\d+)?)", normalized)
+    if match and 0 < float(match.group(1)) <= 100:
+        return {"max_margin_utilization_pct": float(match.group(1))}
     return None
 
 

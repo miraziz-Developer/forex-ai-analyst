@@ -14,8 +14,10 @@ By default auto-execution is off. When either `OPENAI_API_KEY` or the complete A
 
 ## Contextual AI controls
 
-- The model receives closed 5m/15m/1h candles, regime features, funding/open-interest/order-book context, retrieved PDF excerpts and earlier outcome reviews.
+- The model receives closed 5m/15m/1h candles, regime features, funding/open-interest/order-book context, retrieved PDF excerpts, earlier outcome reviews, and a bounded VST account snapshot (equity, available margin, unrealized PnL, strategy exposure and daily strategy PnL).
 - It may select `SKIP`, `WATCH`, or `PROPOSE_TRADE`; for a proposal it dynamically chooses direction, entry, stop, target, risk, leverage and cooldown.
+- Risk is balance-relative, rather than a fixed USDT cap: the accepted risk is capped by current VST equity × `risk_per_trade_pct`, remaining daily loss budget (`max_daily_loss_pct`), and available-margin utilization (`max_margin_utilization_pct`). There is no application-level leverage cap below BingX's 125x technical validation and no minimum cooldown; the AI selects both per trade.
+- A valid fresh VST balance snapshot is required before a proposal can be journaled or executed. If it cannot be fetched, the result is `SKIP`; the system never guesses account equity.
 - Model output is JSON-validated and invalid/API-unavailable output always becomes `SKIP` (no trade).
 - BingX perpetual-swap public REST klines; no BingX account or API key is required. This is market data only; VST order execution remains separately restricted to the demo endpoint.
 - Only fully closed candles are used. Same-candle fingerprints are persisted and rejected.

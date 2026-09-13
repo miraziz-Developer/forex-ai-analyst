@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import math
 import secrets
 
 import storage
@@ -28,9 +29,11 @@ DEFAULTS = {
     "kill_switch": False,
     "demo_execution": None,  # None defers to deployment environment.
     "blocked_pairs": [],
-    "max_risk_usdt": 5.0,
-    "max_leverage": 10,
-    "min_cooldown_minutes": 5,
+    # These are balance-relative VST safety envelopes, not fixed USDT or
+    # leverage limits.  The AI chooses its values within the live envelope.
+    "risk_per_trade_pct": 1.0,
+    "max_daily_loss_pct": 5.0,
+    "max_margin_utilization_pct": 25.0,
 }
 
 
@@ -94,17 +97,41 @@ def confirm(chat_id: str, code: str) -> dict | None:
     return apply(chat_id, updates)
 
 
+def balance_risk_limit(account_state: dict, controls: dict | None = None) -> float | None:
+    """Return remaining VST risk budget in USDT from current account equity.
+
+    Daily PnL is strategy-local until broker income can be safely attributed to
+    individual strategy orders.  A missing or malformed account snapshot never
+    produces a usable budget.
+    """
+    values = controls or settings()
+    try:
+        equity = float(account_state["equity_usdt"])
+        daily_pnl = float(account_state.get("daily_strategy_pnl_usdt", 0.0))
+        trade_pct = float(values["risk_per_trade_pct"])
+        daily_loss_pct = float(values["max_daily_loss_pct"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in (equity, daily_pnl, trade_pct, daily_loss_pct)):
+        return None
+    if equity <= 0 or not 0 < trade_pct <= 100 or not 0 < daily_loss_pct <= 100:
+        return None
+    daily_loss_budget = equity * daily_loss_pct / 100
+    remaining_daily_loss = daily_loss_budget + min(daily_pnl, 0.0)
+    return max(0.0, min(equity * trade_pct / 100, remaining_daily_loss))
+
+
 def trade_permitted(pair: str, risk_usdt: float, leverage: int, cooldown_minutes: int) -> str | None:
-    """Return a fail-closed rejection reason, or ``None`` when runtime caps allow it."""
+    """Return a rejection for immutable execution conditions only.
+
+    Trade sizing is account-relative and is normalized in ``app`` using live
+    VST equity/margin; fixed USDT, leverage and cooldown limits are retired.
+    """
     values = settings()
     if values["kill_switch"]:
         return "runtime kill switch faol"
     if pair.upper() in {str(item).upper() for item in values["blocked_pairs"]}:
         return f"{pair.upper()} runtime bloklangan"
-    if risk_usdt > float(values["max_risk_usdt"]):
-        return "AI risk runtime yuqori limitidan katta"
-    if leverage > int(values["max_leverage"]):
-        return "AI leverage runtime yuqori limitidan katta"
-    if cooldown_minutes < int(values["min_cooldown_minutes"]):
-        return "AI cooldown runtime minimumidan kichik"
+    if not 1 <= int(leverage) <= 125:
+        return "AI leverage BingX 1..125x oralig‘idan tashqarida"
     return None

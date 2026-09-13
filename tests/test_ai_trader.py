@@ -62,6 +62,16 @@ class AITraderTests(unittest.TestCase):
         self.assertEqual(_azure_openai_base_url("https://example.openai.azure.com/"),
                          "https://example.openai.azure.com/openai/v1/")
 
+    @patch("openai.OpenAI")
+    def test_balance_relative_execution_envelope_is_included_in_ai_context(self, client_class):
+        message = Mock(content='{"action":"WATCH","rationale":"wait","invalidation":"none","confidence":40}')
+        client_class.return_value.chat.completions.create.return_value.choices = [Mock(message=message)]
+        limits = {"risk_per_trade_pct": 1.0, "max_daily_loss_pct": 5.0, "max_margin_utilization_pct": 25.0}
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "key"}, clear=False):
+            decide({}, [], [], limits)
+        payload = client_class.return_value.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+        self.assertEqual(__import__("json").loads(payload)["execution_limits"], limits)
+
 
 if __name__ == "__main__":
     unittest.main()

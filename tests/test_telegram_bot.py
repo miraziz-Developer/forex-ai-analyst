@@ -103,6 +103,12 @@ class TelegramBotTests(unittest.TestCase):
             telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "live tradingni yoq"}})
         answer.assert_called_once()
 
+    def test_balance_relative_control_requests_require_explicit_percent_commands(self):
+        self.assertEqual(telegram_bot._control_request("RISK PCT 1.5"), {"risk_per_trade_pct": 1.5})
+        self.assertEqual(telegram_bot._control_request("DAILY LOSS PCT 5"), {"max_daily_loss_pct": 5.0})
+        self.assertEqual(telegram_bot._control_request("MARGIN PCT 25"), {"max_margin_utilization_pct": 25.0})
+        self.assertIsNone(telegram_bot._control_request("MAX RISK 50"))
+
     @patch("telegram_bot._reply")
     @patch("telegram_bot.knowledge.documents", return_value=[{"id": 3, "file_name": "risk.pdf", "page_count": 4}])
     def test_knowledge_button_lists_documents(self, documents, reply):

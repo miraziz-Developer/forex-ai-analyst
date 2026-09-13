@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -83,6 +84,44 @@ def execute_bingx_vst_order(candidate, decision: AITradeDecision) -> dict | None
     return {**order, "quantity": quantity}
 
 
+def _constrain_ai_decision(decision: AITradeDecision, controls: dict, account_state: dict) -> AITradeDecision:
+    """Constrain AI risk by current VST equity, daily loss budget and margin.
+
+    There is deliberately no fixed-USDT risk cap, leverage cap below BingX's
+    125x technical limit, or minimum cooldown.  The account's live available
+    margin and the AI-selected stop/leverage determine what it can support.
+    """
+    risk_limit = runtime_controls.balance_risk_limit(account_state, controls)
+    if risk_limit is None:
+        raise ValueError("VST balance state is unavailable for risk sizing")
+    try:
+        available = float(account_state["available_usdt"])
+        margin_pct = float(controls["max_margin_utilization_pct"])
+        distance = abs(float(decision.entry_price) - float(decision.stop_price))
+        entry = float(decision.entry_price)
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("VST available margin state is invalid") from None
+    if available <= 0 or not 0 < margin_pct <= 100 or distance <= 0 or entry <= 0:
+        raise ValueError("VST account cannot support a new risk-sized position")
+    # risk / stop_distance is quantity; quantity * entry / leverage is margin.
+    margin_supported_risk = available * margin_pct / 100 * decision.leverage * distance / entry
+    return replace(decision, risk_usdt=min(decision.risk_usdt, risk_limit, margin_supported_risk))
+
+
+def _vst_account_context() -> dict:
+    """Build a bounded, non-sensitive VST account snapshot for AI sizing context."""
+    context = {"available": False, "open_strategy_positions": scalping_storage.open_paper_positions(),
+               "daily_strategy_pnl_usdt": scalping_storage.risk_state()[1]}
+    if not (os.environ.get("BINGX_API_KEY", "").strip() and os.environ.get("BINGX_SECRET", "").strip()):
+        return {**context, "reason": "BingX VST credentials are not configured"}
+    try:
+        import broker
+        return {**context, "available": True, **broker.get_vst_usdt_balance()}
+    except Exception as exc:
+        logger.warning("BingX VST account context unavailable: %s", type(exc).__name__)
+        return {**context, "reason": f"VST account query unavailable: {type(exc).__name__}"}
+
+
 def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
     bars_15m = provider.fetch_closed_bars(pair, "15m", 260, now)
@@ -98,13 +137,21 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
                 "regime_features": regime.features, "institutional": fetch_institutional_context(pair.upper()),
                 "market_intelligence": context_for_pair(pair, now),
                 "outcome_learning": learning_summary(scalping_storage.closed_paper_signals(500), pair),
+                 "account_state": _vst_account_context(),
                 "bars_5m": bars_5m[-80:], "bars_15m": bars_15m[-120:], "bars_1h": bars_1h[-120:]}
     excerpts = knowledge.search(f"{pair} {regime.regime} trend volatility risk")
-    ai = decide(snapshot, excerpts, scalping_storage.recent_ai_reviews(pair))
+    controls = runtime_controls.settings()
+    account_state = snapshot["account_state"]
+    ai = decide(snapshot, excerpts, scalping_storage.recent_ai_reviews(pair), controls)
     if not ai.proposes_trade:
         return [{"status": ai.action, "reason": ai.rationale}]
     from scalping_core import CandidateStatus, Decision
     try:
+        # Journaled proposals and VST orders use identical balance-relative
+        # sizing, so no proposal is accepted without a fresh account snapshot.
+        if not account_state["available"]:
+            return [{"status": "SKIP", "reason": "VST balance state unavailable; order yuborilmadi"}]
+        ai = _constrain_ai_decision(ai, controls, account_state)
         candidate = ai.to_candidate(pair, regime.regime, int(bars_5m[-1]["datetime"]), now)
         runtime_rejection = runtime_controls.trade_permitted(pair, ai.risk_usdt, ai.leverage, ai.cooldown_minutes)
         if runtime_rejection:
