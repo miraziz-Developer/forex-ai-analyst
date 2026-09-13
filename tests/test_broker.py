@@ -17,10 +17,22 @@ class BingXVstBalanceTests(unittest.TestCase):
         })
         signed_request.assert_called_once_with("GET", "/openApi/swap/v2/user/balance", {})
 
-    @patch("broker._signed_request", return_value={"data": []})
-    def test_vst_usdt_balance_rejects_missing_usdt_row(self, signed_request):
-        with self.assertRaisesRegex(RuntimeError, "USDT"):
+    @patch("broker._signed_request", return_value={"code": 0, "data": []})
+    def test_vst_usdt_balance_classifies_missing_usdt_row_as_safe_schema_failure(self, signed_request):
+        with self.assertRaises(broker.BingXApiError) as raised:
             broker.get_vst_usdt_balance()
+        self.assertEqual(raised.exception.diagnostic, {
+            "endpoint": "/openApi/swap/v2/user/balance", "http_status": None,
+            "bingx_code": 0, "bingx_msg": "USDT balance row missing", "category": "account_schema",
+        })
+
+    @patch("broker._signed_request", return_value={"code": 0, "data": {"balance": {
+        "asset": "USDT", "balance": "100"}}})
+    def test_vst_usdt_balance_classifies_missing_sizing_fields_as_safe_schema_failure(self, signed_request):
+        with self.assertRaises(broker.BingXApiError) as raised:
+            broker.get_vst_usdt_balance()
+        self.assertEqual(raised.exception.diagnostic["category"], "account_schema")
+        self.assertEqual(raised.exception.diagnostic["bingx_msg"], "USDT equity or available margin missing")
 
     @patch("broker.requests.request")
     def test_signed_request_exposes_only_sanitized_bingx_failure_details(self, request):

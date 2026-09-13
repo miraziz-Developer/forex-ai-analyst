@@ -97,18 +97,20 @@ def get_vst_usdt_balance() -> dict:
     ``data.balance`` across API revisions.  Do not return the raw payload: this
     value is passed to the AI context and must never include account metadata.
     """
-    data = _signed_request("GET", "/openApi/swap/v2/user/balance", {})
+    path = "/openApi/swap/v2/user/balance"
+    data = _signed_request("GET", path, {})
     value = data.get("data", {})
     rows = value.get("balance", value) if isinstance(value, dict) else value
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list):
-        raise RuntimeError("BingX VST balance query returned an invalid payload")
+        raise BingXApiError(path, code=data.get("code"), message="balance payload is not a list or object",
+                            category="account_schema")
 
     row = next((item for item in rows if isinstance(item, dict) and
                 str(item.get("asset", item.get("currency", "USDT"))).upper() == "USDT"), None)
     if row is None:
-        raise RuntimeError("BingX VST balance query did not return a USDT balance")
+        raise BingXApiError(path, code=data.get("code"), message="USDT balance row missing", category="account_schema")
 
     def number(*names: str) -> float | None:
         for name in names:
@@ -124,7 +126,8 @@ def get_vst_usdt_balance() -> dict:
     available = number("availableMargin", "availableBalance", "available")
     unrealized = number("unrealizedProfit", "unrealizedPnl")
     if equity is None or available is None:
-        raise RuntimeError("BingX VST balance query omitted equity or available margin")
+        raise BingXApiError(path, code=data.get("code"), message="USDT equity or available margin missing",
+                            category="account_schema")
     return {"equity_usdt": equity, "available_usdt": available,
             "unrealized_pnl_usdt": unrealized}
 
