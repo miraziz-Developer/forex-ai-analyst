@@ -124,13 +124,22 @@ def get_vst_usdt_balance() -> dict:
         # object, never to an unlabelled item in a multi-asset response.
         return "USDT" if len(rows) == 1 else ""
 
+    def is_usdt_margin_row(item: dict) -> bool:
+        asset = asset_name(item)
+        if asset == "USDT":
+            return True
+        # The VST demo Swap endpoint currently labels its one USD-margined
+        # account row as VST.  Its equity/availableMargin are the actual demo
+        # margin values used by this same Swap order endpoint.  Do not apply
+        # this exception to a multi-asset response or to any other asset.
+        return asset == "VST" and len(rows) == 1
+
     schema = {
         "row_count": len(rows),
         "row_fields": sorted({str(key) for item in rows if isinstance(item, dict) for key in item})[:24],
         "asset_labels": sorted({asset_name(item) for item in rows if isinstance(item, dict) and asset_name(item)})[:12],
     }
-    row = next((item for item in rows if isinstance(item, dict) and
-                asset_name(item) == "USDT"), None)
+    row = next((item for item in rows if isinstance(item, dict) and is_usdt_margin_row(item)), None)
     if row is None:
         error = BingXApiError(path, code=data.get("code"), message="USDT balance row missing", category="account_schema")
         error.diagnostic["balance_schema"] = schema

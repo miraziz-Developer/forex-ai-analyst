@@ -33,6 +33,23 @@ class BingXVstBalanceTests(unittest.TestCase):
             "equity_usdt": 99.0, "available_usdt": 75.0, "unrealized_pnl_usdt": None,
         })
 
+    @patch("broker._signed_request", return_value={"data": {"balance": {
+        "asset": "VST", "equity": "500", "availableMargin": "425", "unrealizedProfit": "-3",
+    }}})
+    def test_vst_demo_swap_balance_uses_the_single_vst_margin_row(self, signed_request):
+        self.assertEqual(broker.get_vst_usdt_balance(), {
+            "equity_usdt": 500.0, "available_usdt": 425.0, "unrealized_pnl_usdt": -3.0,
+        })
+
+    @patch("broker._signed_request", return_value={"code": 0, "data": {"balance": [
+        {"asset": "VST", "equity": "500", "availableMargin": "425"},
+        {"asset": "BTC", "equity": "1", "availableMargin": "1"},
+    ]}})
+    def test_vst_label_is_not_accepted_from_a_multi_asset_balance_response(self, signed_request):
+        with self.assertRaises(broker.BingXApiError) as raised:
+            broker.get_vst_usdt_balance()
+        self.assertEqual(raised.exception.diagnostic["category"], "account_schema")
+
     @patch("broker._signed_request", return_value={"code": 0, "data": []})
     def test_vst_usdt_balance_classifies_missing_usdt_row_as_safe_schema_failure(self, signed_request):
         with self.assertRaises(broker.BingXApiError) as raised:
