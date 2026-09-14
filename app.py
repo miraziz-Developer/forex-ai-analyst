@@ -145,6 +145,8 @@ def _vst_account_context() -> dict:
                 "http_status": diagnostic.get("http_status"), "bingx_code": diagnostic.get("bingx_code"),
                 "bingx_msg": diagnostic.get("bingx_msg"),
                 "reason": "VST account query unavailable"}
+        if diagnostic.get("balance_schema"):
+            safe["balance_schema"] = diagnostic["balance_schema"]
         _VST_ACCOUNT_DIAGNOSTIC.clear()
         _VST_ACCOUNT_DIAGNOSTIC.update(safe)
         logger.warning("BingX VST account context unavailable: category=%s http_status=%s code=%s msg=%s",

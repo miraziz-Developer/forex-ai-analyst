@@ -134,6 +134,19 @@ class HealthTests(unittest.TestCase):
                 "equity_usdt": 100.0, "available_usdt": 80.0, "unrealized_pnl_usdt": -0.5,
             })
 
+    @patch("app.scalping_storage.risk_state", return_value=(0, 0.0))
+    @patch("app.scalping_storage.open_paper_positions", return_value=0)
+    @patch("broker.get_vst_usdt_balance")
+    def test_vst_account_context_exposes_safe_balance_schema_on_schema_failure(self, balance, positions, risk_state):
+        error = __import__("broker").BingXApiError("/openApi/swap/v2/user/balance", code=0,
+                                                    message="USDT balance row missing", category="account_schema")
+        error.diagnostic["balance_schema"] = {"row_count": 1, "row_fields": ["coin"], "asset_labels": ["VST"]}
+        balance.side_effect = error
+        with patch.dict(os.environ, {"BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
+            context = app._vst_account_context()
+        self.assertFalse(context["available"])
+        self.assertEqual(context["balance_schema"], error.diagnostic["balance_schema"])
+
     @patch("app.execution_alerts.report")
     @patch("app.scan_pair")
     @patch("app._vst_account_context", return_value={"available": False, "category": "credentials",

@@ -17,13 +17,30 @@ class BingXVstBalanceTests(unittest.TestCase):
         })
         signed_request.assert_called_once_with("GET", "/openApi/swap/v2/user/balance", {})
 
+    @patch("broker._signed_request")
+    def test_vst_usdt_balance_recognizes_universal_account_asset_aliases_and_usdt_mapping(self, signed_request):
+        signed_request.return_value = {"data": {"balance": {
+            "USDT": {"balance": "101.50", "availableMargin": "80.25", "unrealizedPnl": "-1.75"},
+        }}}
+        self.assertEqual(broker.get_vst_usdt_balance(), {
+            "equity_usdt": 101.5, "available_usdt": 80.25, "unrealized_pnl_usdt": -1.75,
+        })
+
+        signed_request.return_value = {"data": {"balance": [{
+            "coin": "USDT", "equity": "99", "available": "75",
+        }]}}
+        self.assertEqual(broker.get_vst_usdt_balance(), {
+            "equity_usdt": 99.0, "available_usdt": 75.0, "unrealized_pnl_usdt": None,
+        })
+
     @patch("broker._signed_request", return_value={"code": 0, "data": []})
     def test_vst_usdt_balance_classifies_missing_usdt_row_as_safe_schema_failure(self, signed_request):
         with self.assertRaises(broker.BingXApiError) as raised:
             broker.get_vst_usdt_balance()
-        self.assertEqual(raised.exception.diagnostic, {
-            "endpoint": "/openApi/swap/v2/user/balance", "http_status": None,
-            "bingx_code": 0, "bingx_msg": "USDT balance row missing", "category": "account_schema",
+        self.assertEqual(raised.exception.diagnostic["endpoint"], "/openApi/swap/v2/user/balance")
+        self.assertEqual(raised.exception.diagnostic["category"], "account_schema")
+        self.assertEqual(raised.exception.diagnostic["balance_schema"], {
+            "row_count": 0, "row_fields": [], "asset_labels": [],
         })
 
     @patch("broker._signed_request", return_value={"code": 0, "data": {"balance": {

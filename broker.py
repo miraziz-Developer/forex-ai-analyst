@@ -101,16 +101,40 @@ def get_vst_usdt_balance() -> dict:
     data = _signed_request("GET", path, {})
     value = data.get("data", {})
     rows = value.get("balance", value) if isinstance(value, dict) else value
+    if isinstance(rows, dict) and isinstance(rows.get("USDT"), dict):
+        # Some account APIs key balances by the asset instead of putting the
+        # asset name in every row.  Normalize that documented-style mapping
+        # without treating arbitrary unknown balances as USDT.
+        rows = [{**rows["USDT"], "asset": "USDT"}]
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list):
         raise BingXApiError(path, code=data.get("code"), message="balance payload is not a list or object",
                             category="account_schema")
 
+    asset_fields = ("asset", "currency", "coin", "currencyName", "assetName", "symbol")
+
+    def asset_name(item: dict) -> str:
+        for field in asset_fields:
+            value = item.get(field)
+            if value is not None and str(value).strip():
+                return str(value).strip().upper()
+        # Swap V2's single balance object can omit an asset label because the
+        # endpoint itself is USDT-margined.  This fallback applies only to one
+        # object, never to an unlabelled item in a multi-asset response.
+        return "USDT" if len(rows) == 1 else ""
+
+    schema = {
+        "row_count": len(rows),
+        "row_fields": sorted({str(key) for item in rows if isinstance(item, dict) for key in item})[:24],
+        "asset_labels": sorted({asset_name(item) for item in rows if isinstance(item, dict) and asset_name(item)})[:12],
+    }
     row = next((item for item in rows if isinstance(item, dict) and
-                str(item.get("asset", item.get("currency", "USDT"))).upper() == "USDT"), None)
+                asset_name(item) == "USDT"), None)
     if row is None:
-        raise BingXApiError(path, code=data.get("code"), message="USDT balance row missing", category="account_schema")
+        error = BingXApiError(path, code=data.get("code"), message="USDT balance row missing", category="account_schema")
+        error.diagnostic["balance_schema"] = schema
+        raise error
 
     def number(*names: str) -> float | None:
         for name in names:
@@ -126,8 +150,10 @@ def get_vst_usdt_balance() -> dict:
     available = number("availableMargin", "availableBalance", "available")
     unrealized = number("unrealizedProfit", "unrealizedPnl")
     if equity is None or available is None:
-        raise BingXApiError(path, code=data.get("code"), message="USDT equity or available margin missing",
-                            category="account_schema")
+        error = BingXApiError(path, code=data.get("code"), message="USDT equity or available margin missing",
+                              category="account_schema")
+        error.diagnostic["balance_schema"] = schema
+        raise error
     return {"equity_usdt": equity, "available_usdt": available,
             "unrealized_pnl_usdt": unrealized}
 
