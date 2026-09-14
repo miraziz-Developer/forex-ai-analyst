@@ -213,10 +213,11 @@ def scan_configured_pairs(provider: MarketDataProvider) -> None:
         details = {key: account_state.get(key) for key in ("category", "http_status", "bingx_code", "bingx_msg")}
         execution_alerts.report("vst-account-context-unavailable",
                                 "BingX VST account holati olinmadi; AI scan va yangi orderlar fail-closed to‘xtatildi.",
-                                details=details)
+                                details=details, remind_after_minutes=None)
         logger.warning("Skipping configured-pair AI scan: VST account context is unavailable")
         return
-    execution_alerts.resolve("vst-account-context-unavailable", note="VST account context recovered")
+    execution_alerts.resolve("vst-account-context-unavailable", note="BingX VST account holati tiklandi; AI scan qayta yoqildi.",
+                             notify=True)
     for pair in configured_pairs():
         try:
             scan_pair(pair, provider, account_state=account_state)

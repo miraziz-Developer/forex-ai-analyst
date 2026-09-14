@@ -33,11 +33,12 @@ def init_db() -> None:
 
 
 def report(incident_key: str, message: str, *, severity: str = "WARNING", details: dict | None = None,
-           remind_after_minutes: int = 60) -> bool:
+           remind_after_minutes: int | None = 60) -> bool:
     """Persist an incident and notify once per reminder window.
 
     Alert delivery failure does not hide the database incident and never changes
-    a trade state. `incident_key` must identify the unsafe condition precisely.
+    a trade state. Pass ``None`` to notify only on initial detection or reopening.
+    `incident_key` must identify the unsafe condition precisely.
     """
     try:
         now = datetime.now(timezone.utc)
@@ -45,7 +46,7 @@ def report(incident_key: str, message: str, *, severity: str = "WARNING", detail
             "SELECT notified_at, state FROM execution_incidents WHERE incident_key = ?", [incident_key]))
         reopened = bool(rows and rows[0].get("state") == "RESOLVED")
         notify = not rows or reopened
-        if rows and rows[0].get("notified_at") and not reopened:
+        if rows and rows[0].get("notified_at") and not reopened and remind_after_minutes is not None:
             try:
                 notify = datetime.fromisoformat(rows[0]["notified_at"]) <= now - timedelta(minutes=remind_after_minutes)
             except ValueError:
@@ -74,14 +75,22 @@ def report(incident_key: str, message: str, *, severity: str = "WARNING", detail
         return False
 
 
-def resolve(incident_key: str, *, note: str | None = None) -> bool:
+def resolve(incident_key: str, *, note: str | None = None, notify: bool = False) -> bool:
     """Close an incident when its independently observed unsafe condition clears."""
     try:
         now = datetime.now(timezone.utc).isoformat()
         result = storage._execute("""UPDATE execution_incidents SET state = 'RESOLVED', resolved_at = ?,
             details_json = ? WHERE incident_key = ? AND state = 'OPEN'""",
             [now, json.dumps({"resolution": note or "condition cleared"}, ensure_ascii=False, sort_keys=True), incident_key])
-        return result.get("affected_row_count", 0) > 0
+        resolved = result.get("affected_row_count", 0) > 0
+        if resolved and notify:
+            token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+            chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+            if token and chat_id:
+                send_telegram_message(f"✅ VST RECOVERED: {note or 'condition cleared'}", token, chat_id)
+            else:
+                logger.info("VST RECOVERED: %s", note or "condition cleared")
+        return resolved
     except Exception:
         logger.exception("Failed to resolve VST incident %s", incident_key)
         return False

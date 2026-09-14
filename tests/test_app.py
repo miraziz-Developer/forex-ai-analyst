@@ -146,7 +146,8 @@ class HealthTests(unittest.TestCase):
         report.assert_called_once_with("vst-account-context-unavailable",
                                        "BingX VST account holati olinmadi; AI scan va yangi orderlar fail-closed to‘xtatildi.",
                                        details={"category": "credentials", "http_status": 401,
-                                                "bingx_code": 100001, "bingx_msg": "API key invalid"})
+                                                "bingx_code": 100001, "bingx_msg": "API key invalid"},
+                                       remind_after_minutes=None)
 
     @patch("app.execution_alerts.resolve")
     @patch("app._vst_account_context", return_value={"available": True, "equity_usdt": 100, "available_usdt": 80})
@@ -159,7 +160,8 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(scan_pair.call_count, len(app.configured_pairs()))
         for call in scan_pair.call_args_list:
             self.assertIs(call.kwargs["account_state"], context.return_value)
-        resolve.assert_called_once_with("vst-account-context-unavailable", note="VST account context recovered")
+        resolve.assert_called_once_with("vst-account-context-unavailable",
+                                        note="BingX VST account holati tiklandi; AI scan qayta yoqildi.", notify=True)
 
     @patch("app.execution_alerts.resolve")
     def test_retired_static_risk_alerts_are_closed_for_each_configured_pair(self, resolve):
