@@ -36,6 +36,8 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
 _VST_ACCOUNT_DIAGNOSTIC: dict = {"available": None, "last_checked_at": None}
+_MIN_POST_FILL_REWARD_RISK = 1.3
+_MAX_POST_FILL_RISK_MULTIPLIER = 1.05
 
 
 def configured_pairs() -> tuple[str, ...]:
@@ -94,7 +96,36 @@ def execute_bingx_vst_order(candidate, decision: AITradeDecision) -> dict | None
         raise ValueError(f"BingX VST quantity rounds to zero for {candidate.pair}; AI risk too small")
     order = broker.place_market_order(candidate.pair, str(candidate.direction), quantity,
                                        candidate.target_price, candidate.stop_price, leverage=decision.leverage)
-    return {**order, "quantity": quantity}
+    fill = float(order["fill_price"])
+    if str(candidate.direction) == "BUY":
+        actual_risk_per_unit, actual_reward_per_unit = fill - candidate.stop_price, candidate.target_price - fill
+    else:
+        actual_risk_per_unit, actual_reward_per_unit = candidate.stop_price - fill, fill - candidate.target_price
+    actual_risk = quantity * actual_risk_per_unit
+    actual_reward_risk = actual_reward_per_unit / actual_risk_per_unit if actual_risk_per_unit > 0 else 0.0
+    accepted_risk = float(decision.risk_usdt)
+    unsafe_fill = (actual_risk_per_unit <= 0 or actual_reward_per_unit <= 0 or
+                   actual_reward_risk < _MIN_POST_FILL_REWARD_RISK or
+                   actual_risk > accepted_risk * _MAX_POST_FILL_RISK_MULTIPLIER)
+    result = {**order, "quantity": quantity}
+    if not unsafe_fill:
+        return result
+
+    position_side = "LONG" if str(candidate.direction) == "BUY" else "SHORT"
+    details = {"pair": candidate.pair, "order_id": str(order["order_id"]),
+               "fill_price": fill, "planned_risk_usdt": accepted_risk,
+               "actual_risk_usdt": actual_risk, "actual_reward_risk": actual_reward_risk}
+    position = broker.get_position(candidate.pair, position_side)
+    if not position:
+        execution_alerts.report(f"unsafe-fill-missing-position:{candidate.fingerprint}",
+                                f"{candidate.pair} unsafe market filldan keyin broker pozitsiyasi topilmadi; exit fill taxmin qilinmadi.",
+                                severity="CRITICAL", details=details)
+        return {**result, "unsafe_fill": True}
+    close_order = broker.close_position(candidate.pair, str(candidate.direction), quantity)
+    execution_alerts.report(f"unsafe-fill-closed:{candidate.fingerprint}",
+                            f"{candidate.pair} unsafe market fill sabab darhol yopildi (post-fill R:R {actual_reward_risk:.2f}).",
+                            severity="CRITICAL", details=details)
+    return {**result, "unsafe_fill": True, "close_order": close_order}
 
 
 def _constrain_ai_decision(decision: AITradeDecision, controls: dict, account_state: dict) -> AITradeDecision:
@@ -201,6 +232,13 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
         quantity = float((broker_order or {}).get("quantity", ai.risk_usdt / abs(candidate.entry_price - candidate.stop_price)))
         accepted = Decision(candidate, CandidateStatus.ACCEPTED_PAPER, "AI contextual decision")
         scalping_storage.mark_accepted(accepted, ai.risk_usdt, quantity, broker_order)
+        if broker_order and broker_order.get("unsafe_fill"):
+            close_order = broker_order.get("close_order")
+            if close_order:
+                scalping_storage.resolve_paper_signal(candidate.fingerprint, CandidateStatus.TIME_EXIT,
+                                                      float(close_order["fill_price"]), close_order)
+                return [{"status": "SKIP", "reason": "unsafe post-fill execution was immediately closed"}]
+            return [{"status": "SKIP", "reason": "unsafe post-fill execution requires broker reconciliation"}]
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             send_telegram_message(format_paper_signal(candidate, ai, quantity, broker_order), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
         return [{"status": "ACCEPTED_PAPER", "fingerprint": candidate.fingerprint, "ai": ai.raw}]

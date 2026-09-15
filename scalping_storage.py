@@ -61,6 +61,7 @@ def init_db() -> None:
         "ALTER TABLE signal_candidates ADD COLUMN reconciled_at TEXT",
         "ALTER TABLE signal_candidates ADD COLUMN broker_close_order_id TEXT",
         "ALTER TABLE signal_candidates ADD COLUMN broker_close_fill_price REAL",
+         "ALTER TABLE signal_candidates ADD COLUMN broker_close_reason TEXT",
         "ALTER TABLE signal_candidates ADD COLUMN reconciliation_state TEXT NOT NULL DEFAULT 'NOT_REQUIRED'",
         "ALTER TABLE signal_candidates ADD COLUMN reconciliation_note TEXT",
     ):
@@ -153,7 +154,7 @@ def open_vst_orders() -> list[dict]:
 def closed_paper_signals(limit: int = 10) -> list[dict]:
     """Newest resolved VST/paper orders with their realized journal P&L."""
     safe_limit = min(max(int(limit), 1), 500)
-    result = storage._execute("""SELECT fingerprint, pair, direction, regime, entry_price, outcome_price, outcome_time, status,
+    result = storage._execute("""SELECT fingerprint, pair, direction, regime, entry_price, broker_fill_price, outcome_price, outcome_time, status,
                                       quantity, broker_order_id, created_at, reconciled_at, gross_pnl_usdt,
                                       actual_fees_usdt, actual_funding_usdt, actual_net_pnl_usdt
                                FROM signal_candidates
@@ -162,14 +163,15 @@ def closed_paper_signals(limit: int = 10) -> list[dict]:
     rows = storage._rows_as_dicts(result)
     for row in rows:
         multiplier = 1 if row["direction"] == "BUY" else -1
-        row["realized_pnl_usdt"] = ((float(row["outcome_price"]) - float(row["entry_price"])) *
+        entry = float(row.get("broker_fill_price") or row["entry_price"])
+        row["realized_pnl_usdt"] = ((float(row["outcome_price"]) - entry) *
                                     float(row["quantity"]) * multiplier)
     return rows
 
 
 def performance_summary() -> dict:
     """Return journal-level realized P&L and outcome counts for the button UI."""
-    result = storage._execute("""SELECT direction, entry_price, outcome_price, quantity, status, outcome_time
+    result = storage._execute("""SELECT direction, entry_price, broker_fill_price, outcome_price, quantity, status, outcome_time
                                FROM signal_candidates WHERE status IN ('WIN', 'LOSS', 'TIME_EXIT')""")
     rows = storage._rows_as_dicts(result)
     today = datetime.now(timezone.utc).date().isoformat()
@@ -177,7 +179,8 @@ def performance_summary() -> dict:
     counts = {"WIN": 0, "LOSS": 0, "TIME_EXIT": 0}
     for row in rows:
         multiplier = 1 if row["direction"] == "BUY" else -1
-        trade_pnl = ((float(row["outcome_price"]) - float(row["entry_price"])) *
+        entry = float(row.get("broker_fill_price") or row["entry_price"])
+        trade_pnl = ((float(row["outcome_price"]) - entry) *
                      float(row["quantity"]) * multiplier)
         pnl += trade_pnl
         counts[row["status"]] += 1
@@ -198,24 +201,26 @@ def first_broker_order_time() -> datetime | None:
 
 
 def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: float,
-                         broker_close_order: dict | None = None) -> None:
+                          broker_close_order: dict | None = None, *, close_reason: str | None = None) -> None:
     """Close exactly one open paper position and account its realized, risk-sized P&L once."""
     if status not in {CandidateStatus.WIN, CandidateStatus.LOSS, CandidateStatus.TIME_EXIT}:
         raise ValueError("paper signal requires a terminal status")
-    result = storage._execute("""SELECT direction, entry_price, quantity, expiry_time FROM signal_candidates
+    result = storage._execute("""SELECT direction, entry_price, broker_fill_price, quantity, expiry_time FROM signal_candidates
                                WHERE fingerprint = ? AND status = 'ACCEPTED_PAPER'""", [fingerprint])
     rows = storage._rows_as_dicts(result)
     if not rows:
         return
     signal, now = rows[0], datetime.now(timezone.utc)
     direction_multiplier = 1 if signal["direction"] == "BUY" else -1
-    pnl = (float(exit_price) - float(signal["entry_price"])) * float(signal["quantity"]) * direction_multiplier
+    entry = float(signal.get("broker_fill_price") or signal["entry_price"])
+    pnl = (float(exit_price) - entry) * float(signal["quantity"]) * direction_multiplier
     update = storage._execute("""UPDATE signal_candidates SET status = ?, outcome_price = ?, outcome_time = ?,
                                broker_close_order_id = ?, broker_close_fill_price = ?,
+                                broker_close_reason = ?,
                                reconciliation_state = CASE WHEN broker_order_id IS NOT NULL THEN 'PENDING' ELSE 'NOT_REQUIRED' END
                                WHERE fingerprint = ? AND status = 'ACCEPTED_PAPER'""",
                               [status, exit_price, now.isoformat(), (broker_close_order or {}).get("order_id"),
-                               (broker_close_order or {}).get("fill_price"), fingerprint])
+                                (broker_close_order or {}).get("fill_price"), close_reason, fingerprint])
     if update.get("affected_row_count", 0) == 0:
         return
     day = now.date().isoformat()

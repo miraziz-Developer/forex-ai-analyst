@@ -56,7 +56,7 @@ class HealthTests(unittest.TestCase):
         self.assertIsNone(app.execute_bingx_vst_order(self._candidate(), decision))
 
     @patch("app.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
-    @patch("broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 100.25})
+    @patch("broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 100.15})
     @patch("broker.round_quantity", return_value=.3)
     @patch("app.demo_execution_enabled", return_value=True)
     def test_bingx_vst_order_uses_signal_levels_and_rounded_quantity(self, enabled, rounded, place_order, controls):
@@ -65,7 +65,23 @@ class HealthTests(unittest.TestCase):
                                    direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
         result = app.execute_bingx_vst_order(candidate, decision)
         place_order.assert_called_once_with("BTC-USDT", "BUY", .3, 103, 98, leverage=4)
-        self.assertEqual(result, {"order_id": "vst-1", "fill_price": 100.25, "quantity": .3})
+        self.assertEqual(result, {"order_id": "vst-1", "fill_price": 100.15, "quantity": .3})
+
+    @patch("app.execution_alerts.report")
+    @patch("broker.close_position", return_value={"order_id": "close-1", "fill_price": 103.05})
+    @patch("broker.get_position", return_value={"positionAmt": ".3"})
+    @patch("broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 102.5})
+    @patch("broker.round_quantity", return_value=.3)
+    @patch("app.demo_execution_enabled", return_value=True)
+    def test_unsafe_post_fill_is_immediately_closed(self, enabled, rounded, place_order, position, close, alert):
+        decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.6, leverage=4,
+                                   direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
+        result = app.execute_bingx_vst_order(self._candidate(), decision)
+        position.assert_called_once_with("BTC-USDT", "LONG")
+        close.assert_called_once_with("BTC-USDT", "BUY", .3)
+        self.assertTrue(result["unsafe_fill"])
+        self.assertEqual(result["close_order"], {"order_id": "close-1", "fill_price": 103.05})
+        alert.assert_called_once()
 
     @patch("app.runtime_controls.settings", return_value={"kill_switch": True, "demo_execution": True})
     def test_runtime_kill_switch_prevents_vst_execution(self, controls):

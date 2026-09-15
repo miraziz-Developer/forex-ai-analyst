@@ -16,11 +16,74 @@ from scalping_data import MarketDataProvider
 logger = logging.getLogger(__name__)
 
 
+def _broker_error_details(exc: Exception) -> dict:
+    """Expose only the broker client's pre-sanitized operational diagnostic."""
+    diagnostic = getattr(exc, "diagnostic", None)
+    if not isinstance(diagnostic, dict):
+        return {"error": type(exc).__name__}
+    return {
+        "error": type(exc).__name__,
+        **{key: diagnostic.get(key) for key in ("endpoint", "http_status", "bingx_code", "bingx_msg", "category")},
+    }
+
+
+def _broker_error_summary(exc: Exception) -> str:
+    """Render the allowlisted broker diagnostic for an operator-facing alert."""
+    details = _broker_error_details(exc)
+    if "category" not in details:
+        return details["error"]
+    parts = [f"category={details['category']}"]
+    if details.get("endpoint"):
+        parts.append(f"endpoint={details['endpoint']}")
+    if details.get("http_status") is not None:
+        parts.append(f"http_status={details['http_status']}")
+    if details.get("bingx_code") is not None:
+        parts.append(f"bingx_code={details['bingx_code']}")
+    if details.get("bingx_msg"):
+        parts.append(f"bingx_msg={details['bingx_msg']}")
+    return "; ".join(parts)
+
+
+def _auto_exit_from_history(row: dict, orders: list[dict]) -> dict | None:
+    """Return one unambiguous filled broker-side close for an open journal row."""
+    entry_side = str(row["direction"]).upper()
+    close_side = "SELL" if entry_side == "BUY" else "BUY"
+    position_side = "LONG" if entry_side == "BUY" else "SHORT"
+    expected_quantity = abs(float(row.get("broker_quantity") or 0))
+    opened_at_ms = int(datetime.fromisoformat(row["created_at"]).timestamp() * 1000)
+    matches = []
+    for order in orders:
+        quantity, fill = order.get("filled_quantity"), order.get("fill_price")
+        if (order.get("order_id") == str(row["broker_order_id"]) or order.get("symbol") != row["pair"].upper() or
+                order.get("status") not in {"FILLED", "CLOSED"} or order.get("side") != close_side or
+                order.get("position_side") != position_side or fill is None or float(fill) <= 0 or
+                order.get("created_at_ms") is None or float(order["created_at_ms"]) < opened_at_ms):
+            continue
+        if expected_quantity and (quantity is None or abs(float(quantity) - expected_quantity) > max(1e-8, expected_quantity * .01)):
+            continue
+        matches.append(order)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _auto_exit_status(row: dict, order: dict) -> CandidateStatus:
+    """Classify from actual broker fills; trigger type is stored only as reason."""
+    entry = row.get("broker_fill_price") or row.get("entry_price")
+    if entry is None:
+        return CandidateStatus.WIN
+    multiplier = 1 if row["direction"] == "BUY" else -1
+    pnl = (float(order["fill_price"]) - float(entry)) * multiplier
+    if pnl > 0:
+        return CandidateStatus.WIN
+    if pnl < 0:
+        return CandidateStatus.LOSS
+    return CandidateStatus.TIME_EXIT
+
+
 def recover_open_vst_orders() -> None:
     """Compare durable open VST journal rows to active broker positions.
 
-    Recovery only observes and alerts: it cannot manufacture a close fill, P&L,
-    or outcome for a position that BingX no longer reports.
+    Recovery closes a journal only after a single immutable, fully matched broker
+    close fill is present in history; absence or ambiguity remains fail-closed.
     """
     import broker
     now = datetime.now(timezone.utc)
@@ -34,8 +97,24 @@ def recover_open_vst_orders() -> None:
             side = "LONG" if row["direction"] == "BUY" else "SHORT"
             position = broker.get_position(row["pair"], side)
             if not position:
-                execution_alerts.report(key, f"{row['pair']} #{row['fingerprint'][:10]} broker pozitsiyasi topilmadi; jurnal ochiq qoldi.",
-                                        severity="CRITICAL", details={"fingerprint": row["fingerprint"], "pair": row["pair"]})
+                start_time_ms = int(datetime.fromisoformat(row["created_at"]).timestamp() * 1000)
+                close_order = _auto_exit_from_history(row, broker.order_history(row["pair"], start_time_ms=start_time_ms))
+                if close_order:
+                    status = _auto_exit_status(row, close_order)
+                    reason = str(close_order.get("type") or "BROKER_CLOSE")
+                    scalping_storage.resolve_paper_signal(row["fingerprint"], status, float(close_order["fill_price"]),
+                                                          close_order, close_reason=reason)
+                    execution_alerts.resolve(key, note="broker-side close fill matched immutable order history", notify=True)
+                    execution_alerts.resolve(f"missing-position:{row['fingerprint']}", note="broker-side close fill matched")
+                    continue
+                age_limited = start_time_ms < int((now - timedelta(days=7)).timestamp() * 1000)
+                message = f"{row['pair']} #{row['fingerprint'][:10]} broker pozitsiyasi topilmadi va close fill tarixi aniq mos kelmadi; jurnal ochiq qoldi."
+                if age_limited:
+                    message += " Jurnal 7 kundan eski: BingX history oynasi exit fillni qamramasligi mumkin; manual audit yoki saqlangan fill talab qilinadi."
+                execution_alerts.report(key, message, severity="CRITICAL", details={
+                    "fingerprint": row["fingerprint"], "pair": row["pair"],
+                    "history_window_limited": age_limited,
+                })
                 continue
             expected = abs(float(row.get("broker_quantity") or 0))
             actual = abs(float(position.get("positionAmt", 0)))
@@ -52,9 +131,11 @@ def recover_open_vst_orders() -> None:
             else:
                 execution_alerts.resolve(f"open-sla:{row['fingerprint']}", note="position remains within open SLA")
         except Exception as exc:
+            details = {"fingerprint": row["fingerprint"], **_broker_error_details(exc)}
             execution_alerts.report(f"recovery-failure:{row['fingerprint']}",
-                                    f"{row['pair']} #{row['fingerprint'][:10]} startup recovery qayta urinadi ({type(exc).__name__}).",
-                                    details={"fingerprint": row["fingerprint"], "error": type(exc).__name__})
+                                    f"{row['pair']} #{row['fingerprint'][:10]} startup recovery qayta urinadi "
+                                    f"({_broker_error_summary(exc)}).",
+                                    details=details)
 
 
 def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
@@ -147,9 +228,11 @@ def reconcile_closed_vst_orders() -> None:
             execution_alerts.resolve(f"reconciliation-failure:{row['fingerprint']}", note="reconciliation succeeded")
         except Exception as exc:
             logger.warning("VST reconciliation will retry %s: %s", row["fingerprint"], exc)
+            details = {"fingerprint": row["fingerprint"], **_broker_error_details(exc)}
             execution_alerts.report(f"reconciliation-failure:{row['fingerprint']}",
-                                    f"{row['pair']} #{row['fingerprint'][:10]} reconciliation qayta urinadi ({type(exc).__name__}).",
-                                    details={"fingerprint": row["fingerprint"], "error": type(exc).__name__})
+                                    f"{row['pair']} #{row['fingerprint'][:10]} reconciliation qayta urinadi "
+                                    f"({_broker_error_summary(exc)}).",
+                                    details=details)
 
 
 def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: MarketDataProvider,
