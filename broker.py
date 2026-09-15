@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime
 
 import requests
 
@@ -23,6 +24,7 @@ DEFAULT_LEVERAGE = int(os.environ.get("LEVERAGE", "3"))
 # BingX requires quantity rounded to each contract's precision; hardcoded for
 # our small fixed pair set rather than an extra API call per order.
 QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 3, "SOL-USDT": 2, "XRP-USDT": 0, "BNB-USDT": 2}
+_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 
 class BingXApiError(RuntimeError):
@@ -257,6 +259,147 @@ def get_order(symbol: str, order_id: str) -> dict:
         "realized_pnl_usdt": number("realizedProfit", "realizedPnl"),
         "raw": order,
     }
+
+
+def fill_history(symbol: str, *, start_time_ms: int, end_time_ms: int | None = None) -> list[dict]:
+    """Return immutable VST execution fills, keyed by their exchange order ID.
+
+    Unlike an account-income record, every returned fill is explicitly linked to
+    one broker ``orderId``.  It can therefore only enrich an order which was
+    independently matched by its symbol, side and position side.
+    """
+    end_time_ms = int(end_time_ms or time.time() * 1000)
+    data = _signed_request("GET", "/openApi/swap/v2/trade/allFillOrders", {
+        "symbol": symbol, "tradingUnit": "CONT", "startTs": str(int(start_time_ms)),
+        "endTs": str(end_time_ms),
+    })
+    values = data.get("data", [])
+    if isinstance(values, dict):
+        values = values.get("orders", values.get("list", []))
+    if not isinstance(values, list):
+        raise RuntimeError("BingX fill history returned an invalid payload")
+
+    def number(fill: dict, *names: str) -> float | None:
+        for name in names:
+            try:
+                raw = fill.get(name)
+                if raw is not None and raw != "":
+                    return float(raw)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def timestamp_ms(fill: dict) -> float | None:
+        value = number(fill, "filledTime", "filledTm", "time", "updateTime")
+        if value is not None:
+            return value
+        for name in ("filledTm", "filledTime"):
+            raw = fill.get(name)
+            if not isinstance(raw, str):
+                continue
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp() * 1000
+            except ValueError:
+                continue
+        return None
+
+    normalized = []
+    for fill in values:
+        if not isinstance(fill, dict) or fill.get("orderId") is None:
+            continue
+        normalized.append({
+            "order_id": str(fill["orderId"]),
+            "fill_price": number(fill, "price", "avgPrice"),
+            "filled_quantity": number(fill, "volume", "executedQty", "quantity"),
+            "filled_at_ms": timestamp_ms(fill),
+            "commission_usdt": number(fill, "commission", "fee"),
+            "raw": fill,
+        })
+    return normalized
+
+
+def order_history(symbol: str, *, start_time_ms: int, limit: int = 1000) -> list[dict]:
+    """Return normalized, immutable VST order-history evidence for one symbol.
+
+    BingX's V2 response has used both ``data.orders`` and ``data`` list shapes.
+    Missing order-level economic fields deliberately remain ``None``: they must
+    not be replaced with account-wide income values.
+    """
+    safe_limit = min(max(int(limit), 1), 1000)
+    end_time_ms = int(time.time() * 1000)
+    # BingX documents a seven-day maximum allOrders time range.  The recovery
+    # job is looking for a current close, so querying the recent valid window
+    # avoids an API rejection for a long-lived open journal without relaxing
+    # the later check against the row's original opened-at time.
+    query_start_ms = max(int(start_time_ms), end_time_ms - _HISTORY_WINDOW_MS)
+    data = _signed_request("GET", "/openApi/swap/v2/trade/allOrders", {
+        "symbol": symbol, "startTime": str(query_start_ms), "endTime": str(end_time_ms), "limit": str(safe_limit),
+    })
+    value = data.get("data", [])
+    if isinstance(value, dict):
+        values = value.get("orders", value.get("list", []))
+    else:
+        values = value
+    if not isinstance(values, list):
+        raise RuntimeError("BingX order history returned an invalid payload")
+
+    def number(order: dict, *names: str) -> float | None:
+        for name in names:
+            try:
+                raw = order.get(name)
+                if raw is not None and raw != "":
+                    return float(raw)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    normalized = []
+    for order in values:
+        if not isinstance(order, dict):
+            continue
+        order_id = order.get("orderId")
+        if order_id is None:
+            continue
+        normalized.append({
+            "order_id": str(order_id),
+            "symbol": str(order.get("symbol", symbol)).upper(),
+            "status": str(order.get("status", "")).upper(),
+            "side": str(order.get("side", "")).upper(),
+            "position_side": str(order.get("positionSide", "")).upper(),
+            "type": str(order.get("type", order.get("orderType", ""))).upper(),
+            "fill_price": number(order, "avgPrice", "averagePrice", "price"),
+            "filled_quantity": number(order, "executedQty", "cumQty", "dealQty", "quantity", "origQty"),
+            "created_at_ms": number(order, "time", "createTime", "createdTime", "updateTime"),
+            "commission_usdt": number(order, "commission", "fee"),
+            "realized_pnl_usdt": number(order, "realizedProfit", "realizedPnl"),
+            "raw": order,
+        })
+    # TP/SL trigger orders can expose their trigger price in ``allOrders`` but
+    # omit or delay their actual execution price.  Enrich only by the immutable
+    # order ID; never use a symbol/time-only fill as evidence for a journal row.
+    try:
+        fills_by_order: dict[str, list[dict]] = {}
+        for fill in fill_history(symbol, start_time_ms=query_start_ms, end_time_ms=end_time_ms):
+            fills_by_order.setdefault(fill["order_id"], []).append(fill)
+        for order in normalized:
+            fills = fills_by_order.get(order["order_id"], [])
+            priced = [fill for fill in fills if fill["fill_price"] is not None and fill["filled_quantity"] is not None]
+            quantity = sum(float(fill["filled_quantity"]) for fill in priced)
+            if quantity > 0:
+                order["fill_price"] = sum(float(fill["fill_price"]) * float(fill["filled_quantity"]) for fill in priced) / quantity
+                order["filled_quantity"] = quantity
+            timestamps = [float(fill["filled_at_ms"]) for fill in fills if fill["filled_at_ms"] is not None]
+            if timestamps:
+                order["created_at_ms"] = max(timestamps)
+            commissions = [float(fill["commission_usdt"]) for fill in fills if fill["commission_usdt"] is not None]
+            if commissions:
+                order["commission_usdt"] = sum(commissions)
+    except Exception as exc:
+        # The order endpoint remains authoritative for matching metadata.  A
+        # temporary fill-history failure must not invent an exit or turn a
+        # known order-history response into a false broker outage.
+        logger.warning("BingX VST fill-history enrichment unavailable for %s: %s", symbol, type(exc).__name__)
+    return normalized
 
 
 def income_history(symbol: str, start_time_ms: int) -> list[dict]:

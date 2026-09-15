@@ -8,6 +8,78 @@ import broker
 
 class BingXVstBalanceTests(unittest.TestCase):
     @patch("broker._signed_request")
+    def test_order_history_normalizes_filled_orders_without_inventing_economics(self, signed_request):
+        order = {
+            "orderId": "exit-1", "symbol": "BTC-USDT", "status": "FILLED", "side": "SELL",
+            "positionSide": "LONG", "type": "TAKE_PROFIT_MARKET", "avgPrice": "103.2",
+            "executedQty": ".3", "createTime": "1000",
+        }
+        signed_request.side_effect = [{"data": {"orders": [order]}}, {"data": []}]
+        self.assertEqual(broker.order_history("BTC-USDT", start_time_ms=500), [{
+            "order_id": "exit-1", "symbol": "BTC-USDT", "status": "FILLED", "side": "SELL",
+            "position_side": "LONG", "type": "TAKE_PROFIT_MARKET", "fill_price": 103.2,
+            "filled_quantity": .3, "created_at_ms": 1000.0, "commission_usdt": None,
+            "realized_pnl_usdt": None, "raw": order,
+        }])
+        self.assertEqual(signed_request.call_args_list, [
+            unittest.mock.call("GET", "/openApi/swap/v2/trade/allOrders",
+                               {"symbol": "BTC-USDT", "startTime": unittest.mock.ANY,
+                                "endTime": unittest.mock.ANY, "limit": "1000"}),
+            unittest.mock.call("GET", "/openApi/swap/v2/trade/allFillOrders",
+                               {"symbol": "BTC-USDT", "tradingUnit": "CONT", "startTs": unittest.mock.ANY,
+                                "endTs": unittest.mock.ANY}),
+        ])
+
+    @patch("broker.time.time", return_value=2_000_000)
+    @patch("broker._signed_request", side_effect=[{"data": []}, {"data": []}])
+    def test_order_history_limits_an_old_query_to_bingxs_documented_seven_day_window(self, signed_request, clock):
+        broker.order_history("BTC-USDT", start_time_ms=1)
+        self.assertEqual(signed_request.call_args_list, [
+            unittest.mock.call("GET", "/openApi/swap/v2/trade/allOrders", {
+                "symbol": "BTC-USDT", "startTime": str(2_000_000_000 - broker._HISTORY_WINDOW_MS),
+                "endTime": "2000000000", "limit": "1000",
+            }),
+            unittest.mock.call("GET", "/openApi/swap/v2/trade/allFillOrders", {
+                "symbol": "BTC-USDT", "tradingUnit": "CONT",
+                "startTs": str(2_000_000_000 - broker._HISTORY_WINDOW_MS), "endTs": "2000000000",
+            }),
+        ])
+
+    @patch("broker._signed_request")
+    def test_order_history_enriches_only_its_matching_order_id_with_execution_fills(self, signed_request):
+        signed_request.side_effect = [
+            {"data": {"orders": [{
+                "orderId": "exit-1", "symbol": "BTC-USDT", "status": "FILLED", "side": "SELL",
+                "positionSide": "LONG", "type": "TAKE_PROFIT_MARKET", "avgPrice": "0", "executedQty": "0",
+            }]}},
+            {"data": [
+                {"orderId": "exit-1", "price": "103", "volume": ".1", "commission": ".01",
+                 "filledTm": "2026-01-01T00:00:00.000Z"},
+                {"orderId": "exit-1", "price": "104", "volume": ".2", "commission": ".02",
+                 "filledTm": "2026-01-01T00:00:01.000Z"},
+                {"orderId": "other-order", "price": "999", "volume": "9", "commission": "9"},
+            ]},
+        ]
+        order = broker.order_history("BTC-USDT", start_time_ms=500)[0]
+        self.assertAlmostEqual(order["fill_price"], 103.66666666666667)
+        self.assertAlmostEqual(order["filled_quantity"], .3)
+        self.assertEqual(order["created_at_ms"], 1767225601000.0)
+        self.assertAlmostEqual(order["commission_usdt"], .03)
+
+    @patch("broker._signed_request")
+    def test_order_history_keeps_order_evidence_when_fill_history_is_unavailable(self, signed_request):
+        signed_request.side_effect = [
+            {"data": {"orders": [{
+                "orderId": "exit-1", "symbol": "BTC-USDT", "status": "FILLED", "side": "SELL",
+                "positionSide": "LONG", "type": "TAKE_PROFIT_MARKET", "avgPrice": "103.2", "executedQty": ".3",
+            }]}},
+            broker.BingXApiError("/openApi/swap/v2/trade/allFillOrders", category="transport"),
+        ]
+        order = broker.order_history("BTC-USDT", start_time_ms=500)[0]
+        self.assertEqual(order["fill_price"], 103.2)
+        self.assertEqual(order["filled_quantity"], .3)
+
+    @patch("broker._signed_request")
     def test_vst_usdt_balance_uses_signed_v2_balance_endpoint_and_normalizes_fields(self, signed_request):
         signed_request.return_value = {"data": {"balance": {
             "asset": "USDT", "balance": "101.50", "availableMargin": "80.25", "unrealizedProfit": "-1.75",
