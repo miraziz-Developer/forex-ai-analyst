@@ -2,14 +2,14 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
-import market_intelligence
+from forex_ai_analyst.trading.infrastructure import market_intelligence as market_intelligence
 
 
 class MarketIntelligenceTests(unittest.TestCase):
     def setUp(self):
         market_intelligence._cache = {"expires": 0.0, "items": [], "errors": []}
 
-    @patch("market_intelligence.requests.get")
+    @patch("forex_ai_analyst.trading.infrastructure.market_intelligence.requests.get")
     def test_allowlisted_rss_is_sanitized_and_relevant_context_has_source_url(self, get):
         get.return_value = Mock(content=b"""<rss><channel><item><title>Bitcoin ETF update</title>
         <link>https://example.test/item</link><description>&lt;b&gt;Market&lt;/b&gt; &amp; update</description>
@@ -20,7 +20,7 @@ class MarketIntelligenceTests(unittest.TestCase):
         self.assertEqual(context["items"][0]["summary"], "Market & update")
         self.assertIn("untrusted", context["source_policy"])
 
-    @patch("market_intelligence.requests.get", side_effect=market_intelligence.requests.RequestException())
+    @patch("forex_ai_analyst.trading.infrastructure.market_intelligence.requests.get", side_effect=market_intelligence.requests.RequestException())
     def test_feed_failure_is_nonfatal(self, get):
         items, errors = market_intelligence.latest_items()
         self.assertEqual(items, [])

@@ -5,7 +5,7 @@ from unittest.mock import patch
 os.environ.setdefault("TURSO_DATABASE_URL", "libsql://test.invalid")
 os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 
-import runtime_controls
+from forex_ai_analyst.operations import runtime_controls as runtime_controls
 
 
 class BalanceRelativeRiskTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class BalanceRelativeRiskTests(unittest.TestCase):
         self.assertIsNone(runtime_controls.balance_risk_limit(
             {"equity_usdt": 0, "daily_strategy_pnl_usdt": 0}, runtime_controls.DEFAULTS))
 
-    @patch("runtime_controls.settings", return_value={"kill_switch": False, "blocked_pairs": []})
+    @patch("forex_ai_analyst.operations.runtime_controls.settings", return_value={"kill_switch": False, "blocked_pairs": []})
     def test_trade_permission_has_no_fixed_risk_leverage_or_cooldown_cap(self, settings):
         self.assertIsNone(runtime_controls.trade_permitted("BTC-USDT", 999, 125, 0))
 

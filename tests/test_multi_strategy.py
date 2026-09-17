@@ -8,19 +8,19 @@ import requests
 os.environ.setdefault("TURSO_DATABASE_URL", "libsql://test.invalid")
 os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 
-from market_regime import RegimeSnapshot, classify_market_regime
-from risk_manager import RiskConfig, assess_risk
-from scalping_core import CandidateSignal, CandidateStatus, Direction, MarketRegime
-from scalping_data import (MarketDataProvider, bingx_swap_symbol, binance_futures_symbol, closed_bars,
+from forex_ai_analyst.trading.domain.regime import RegimeSnapshot, classify_market_regime
+from forex_ai_analyst.trading.domain.risk import RiskConfig, assess_risk
+from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateStatus, Direction, MarketRegime
+from forex_ai_analyst.trading.infrastructure.market_data import (MarketDataProvider, bingx_swap_symbol, binance_futures_symbol, closed_bars,
                             fetch_bingx_swap_bars, fetch_binance_futures_bars, provider_from_environment)
-from scalping_indicators import candle_confirmation, support_resistance_zones
-from multi_strategy_backtest import BacktestCosts, simulate as multi_simulate
-from production_backtest import apply_account_limits, walk_forward_periods
-from quality_policy import QualityPolicy, quality_rejection_reason
-from strategies import support_resistance_rejection
-from multi_strategy_scheduler import resolve_open_paper_signals
-from strategy_coordinator import resolve_candidates
-from strategies.trend_pullback import evaluate
+from forex_ai_analyst.trading.domain.indicators import candle_confirmation, support_resistance_zones
+from forex_ai_analyst.research.backtest import BacktestCosts, simulate as multi_simulate
+from forex_ai_analyst.research.production_backtest import apply_account_limits, walk_forward_periods
+from forex_ai_analyst.trading.domain.quality import QualityPolicy, quality_rejection_reason
+from forex_ai_analyst.trading.domain.strategies import support_resistance_rejection
+from forex_ai_analyst.trading.application.scheduler import resolve_open_paper_signals
+from forex_ai_analyst.trading.domain.candidate_service import resolve_candidates
+from forex_ai_analyst.trading.domain.strategies.trend_pullback import evaluate
 
 
 NOW = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
@@ -55,7 +55,7 @@ class MultiStrategyTests(unittest.TestCase):
     def test_binance_futures_provider_uses_public_ohlcv_endpoint(self):
         response = Mock()
         response.json.return_value = [[1000, "10", "11", "9", "10.5", "42"]]
-        with patch("scalping_data.requests.get", return_value=response) as request:
+        with patch("forex_ai_analyst.trading.infrastructure.market_data.requests.get", return_value=response) as request:
             result = fetch_binance_futures_bars("btc-usdt", "5m", 2)
         request.assert_called_once()
         self.assertEqual(request.call_args.kwargs["params"], {"symbol": "BTCUSDT", "interval": "5m", "limit": 2})
@@ -66,7 +66,7 @@ class MultiStrategyTests(unittest.TestCase):
         failed, success = Mock(), Mock()
         failed.raise_for_status.side_effect = requests.HTTPError("418 blocked")
         success.json.return_value = [[1000, "10", "11", "9", "10.5", "42"]]
-        with patch("scalping_data.requests.get", side_effect=[failed, success]) as request:
+        with patch("forex_ai_analyst.trading.infrastructure.market_data.requests.get", side_effect=[failed, success]) as request:
             result = fetch_binance_futures_bars("BTC-USDT", "5m", 2)
         self.assertEqual(request.call_count, 2)
         self.assertEqual(result[0]["close"], "10.5")
@@ -75,7 +75,7 @@ class MultiStrategyTests(unittest.TestCase):
         response = Mock()
         response.json.return_value = {"code": 0, "data": [{"time": 1000, "open": "10", "high": "11",
                                                                "low": "9", "close": "10.5", "volume": "42"}]}
-        with patch("scalping_data.requests.get", return_value=response) as request:
+        with patch("forex_ai_analyst.trading.infrastructure.market_data.requests.get", return_value=response) as request:
             result = fetch_bingx_swap_bars("btc-usdt", "5m", 2)
         request.assert_called_once()
         self.assertEqual(request.call_args.kwargs["params"], {"symbol": "BTC-USDT", "interval": "5m", "limit": 2})
@@ -216,8 +216,8 @@ class MultiStrategyTests(unittest.TestCase):
         self.assertGreaterEqual(result.score, 80)
         self.assertIsNone(result.validation_error(NOW))
 
-    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
-    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.resolve_paper_signal")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_paper_signals")
     def test_resolver_records_loss_when_one_candle_hits_stop_and_target(self, open_signals, resolve):
         open_signals.return_value = [{"fingerprint": "one", "pair": "BTC-USDT", "direction": "BUY",
                                       "entry_price": 100, "stop_price": 98, "target_price": 103,
@@ -228,9 +228,9 @@ class MultiStrategyTests(unittest.TestCase):
         resolve_open_paper_signals(provider)
         resolve.assert_called_once_with("one", CandidateStatus.LOSS, 98.0)
 
-    @patch("multi_strategy_scheduler.datetime")
-    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
-    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    @patch("forex_ai_analyst.trading.application.scheduler.datetime")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.resolve_paper_signal")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_paper_signals")
     def test_resolver_records_time_exit_at_last_closed_price_for_paper_signal(self, open_signals, resolve, clock):
         clock.now.return_value = NOW
         clock.fromisoformat.side_effect = datetime.fromisoformat
@@ -245,11 +245,10 @@ class MultiStrategyTests(unittest.TestCase):
 
         resolve.assert_called_once_with("time-exit", CandidateStatus.TIME_EXIT, 101.5)
 
-    @patch("multi_strategy_scheduler.datetime")
-    @patch("multi_strategy_scheduler.broker", create=True)
-    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
-    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
-    def test_resolver_does_not_close_journal_when_vst_time_exit_fails(self, open_signals, resolve, broker_mock, clock):
+    @patch("forex_ai_analyst.trading.application.scheduler.datetime")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.resolve_paper_signal")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_paper_signals")
+    def test_resolver_does_not_close_journal_when_vst_time_exit_fails(self, open_signals, resolve, clock):
         clock.now.return_value = NOW
         clock.fromisoformat.side_effect = datetime.fromisoformat
         open_signals.return_value = [{"fingerprint": "retry", "pair": "BTC-USDT", "direction": "BUY",
@@ -258,17 +257,18 @@ class MultiStrategyTests(unittest.TestCase):
                                       "expiry_time": (NOW - timedelta(minutes=1)).isoformat()}]
         provider = Mock()
         provider.fetch_closed_bars.return_value = [{"datetime": 2000, "low": 99, "high": 102, "close": 101.5}]
+        broker_mock = Mock()
 
-        with patch.dict("sys.modules", {"broker": broker_mock}):
+        with patch("forex_ai_analyst.trading.application.scheduler.broker", broker_mock):
             broker_mock.get_position.return_value = {"positionAmt": ".1"}
             broker_mock.close_position.side_effect = RuntimeError("BingX unavailable")
             resolve_open_paper_signals(provider)
 
         resolve.assert_not_called()
 
-    @patch("multi_strategy_scheduler.datetime")
-    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
-    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    @patch("forex_ai_analyst.trading.application.scheduler.datetime")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.resolve_paper_signal")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_paper_signals")
     def test_resolver_records_vst_time_exit_only_after_confirmed_close_fill(self, open_signals, resolve, clock):
         clock.now.return_value = NOW
         clock.fromisoformat.side_effect = datetime.fromisoformat
@@ -282,16 +282,16 @@ class MultiStrategyTests(unittest.TestCase):
         broker_mock.get_position.return_value = {"positionAmt": ".1"}
         broker_mock.close_position.return_value = {"order_id": "close-1", "fill_price": 101.25}
 
-        with patch.dict("sys.modules", {"broker": broker_mock}):
+        with patch("forex_ai_analyst.trading.application.scheduler.broker", broker_mock):
             resolve_open_paper_signals(provider)
 
         broker_mock.close_position.assert_called_once_with("BTC-USDT", "BUY", .1)
         resolve.assert_called_once_with("vst-time-exit", CandidateStatus.TIME_EXIT, 101.25,
                                         {"order_id": "close-1", "fill_price": 101.25})
 
-    @patch("multi_strategy_scheduler.datetime")
-    @patch("multi_strategy_scheduler.scalping_storage.resolve_paper_signal")
-    @patch("multi_strategy_scheduler.scalping_storage.open_paper_signals")
+    @patch("forex_ai_analyst.trading.application.scheduler.datetime")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.resolve_paper_signal")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_paper_signals")
     def test_resolver_does_not_infer_vst_exit_when_position_is_already_absent(self, open_signals, resolve, clock):
         clock.now.return_value = NOW
         clock.fromisoformat.side_effect = datetime.fromisoformat
@@ -304,7 +304,7 @@ class MultiStrategyTests(unittest.TestCase):
         broker_mock = Mock()
         broker_mock.get_position.return_value = None
 
-        with patch.dict("sys.modules", {"broker": broker_mock}):
+        with patch("forex_ai_analyst.trading.application.scheduler.broker", broker_mock):
             resolve_open_paper_signals(provider)
 
         broker_mock.close_position.assert_not_called()

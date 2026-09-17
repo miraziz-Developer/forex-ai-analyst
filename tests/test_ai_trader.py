@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 os.environ.setdefault("TURSO_DATABASE_URL", "libsql://test.invalid")
 os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 
-from ai_trader import AITradeDecision, decide
-from scalping_core import Direction, MarketRegime
+from forex_ai_analyst.trading.application.ai_trader import AITradeDecision, decide
+from forex_ai_analyst.trading.domain.models import Direction, MarketRegime
 
 
 class AITraderTests(unittest.TestCase):
@@ -58,7 +58,7 @@ class AITraderTests(unittest.TestCase):
         self.assertEqual(client_class.return_value.chat.completions.create.call_args.kwargs["model"], "trader-deployment")
 
     def test_azure_base_url_adds_openai_v1_for_resource_endpoint(self):
-        from ai_trader import _azure_openai_base_url
+        from forex_ai_analyst.trading.application.ai_trader import _azure_openai_base_url
         self.assertEqual(_azure_openai_base_url("https://example.openai.azure.com/"),
                          "https://example.openai.azure.com/openai/v1/")
 

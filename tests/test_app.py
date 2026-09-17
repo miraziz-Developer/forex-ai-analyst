@@ -7,9 +7,10 @@ from unittest.mock import patch
 for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
     os.environ.setdefault(key, "test")
 
-import app
-from ai_trader import AITradeDecision
-from scalping_core import CandidateSignal, Direction, MarketRegime
+from forex_ai_analyst.interfaces import http as app
+from forex_ai_analyst.trading.application.ai_trader import AITradeDecision
+from forex_ai_analyst.trading.domain.models import CandidateSignal, Direction, MarketRegime
+from forex_ai_analyst.trading.infrastructure.bingx_broker import BingXApiError
 
 
 class HealthTests(unittest.TestCase):
@@ -20,7 +21,12 @@ class HealthTests(unittest.TestCase):
                                "5m", "15m", 1, 80, (), "test")
 
     def test_health_identifies_the_single_paper_only_service(self):
-        with patch("app.execution_alerts.status", return_value={"open_incidents": 0, "last_incident_at": None}), patch.dict(os.environ, {"MULTI_STRATEGY_PROVIDER": "bingx"}):
+        with patch("forex_ai_analyst.interfaces.http.execution_alerts.status", return_value={"open_incidents": 0, "last_incident_at": None}), patch.dict(os.environ, {
+            "MULTI_STRATEGY_PROVIDER": "bingx", "AUTO_EXECUTE_TRADES": "false",
+            "BINGX_API_KEY": "", "BINGX_SECRET": "", "OPENAI_API_KEY": "",
+            "AZURE_OPENAI_API_KEY": "", "AZURE_OPENAI_ENDPOINT": "", "AZURE_OPENAI_DEPLOYMENT": "",
+        }), patch("forex_ai_analyst.interfaces.http.runtime_controls.settings",
+                  return_value={"kill_switch": False, "demo_execution": None}):
             response = app.app.test_client().get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {
@@ -30,35 +36,59 @@ class HealthTests(unittest.TestCase):
             "demo_only": True,
             "provider": "bingx",
             "auto_execute_trades": False,
-            "auto_execute_trades_configured": app.AUTO_EXECUTE_TRADES_CONFIGURED,
+            "auto_execute_trades_configured": False,
+            "trade_readiness": {
+                "ready": False,
+                "auto_execute_trades_configured": False,
+                "blockers": ["auto_execute_trades_disabled", "bingx_api_key_missing",
+                             "bingx_secret_missing", "ai_provider_missing"],
+                "mode": "bingx_vst_demo_only",
+            },
             "execution_alerts": {"open_incidents": 0, "last_incident_at": None},
             "vst_account": {"available": None, "last_checked_at": None},
         })
 
     def test_auto_execute_requires_both_bingx_vst_credentials(self):
-        with patch("app.execution_alerts.status", return_value={}), patch.object(app, "AUTO_EXECUTE_TRADES_CONFIGURED", True):
+        with patch("forex_ai_analyst.interfaces.http.execution_alerts.status", return_value={}):
             with patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "", "BINGX_SECRET": ""}):
                 response = app.app.test_client().get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.get_json()["auto_execute_trades_configured"])
         self.assertFalse(response.get_json()["auto_execute_trades"])
 
-    @patch("app.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
+    @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
     def test_auto_execute_uses_bingx_vst_only_when_fully_configured(self, controls):
-        with patch("app.execution_alerts.status", return_value={}), patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
+        with patch("forex_ai_analyst.interfaces.http.execution_alerts.status", return_value={}), patch.dict(os.environ, {
+            "AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "key", "BINGX_SECRET": "secret",
+            "OPENAI_API_KEY": "ai-key",
+        }):
             response = app.app.test_client().get("/health")
         self.assertTrue(response.get_json()["auto_execute_trades"])
 
-    @patch("app.demo_execution_enabled", return_value=False)
+    @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings",
+           return_value={"kill_switch": True, "demo_execution": True})
+    def test_trade_readiness_reports_runtime_and_ai_blockers_without_secrets(self, controls):
+        with patch.dict(os.environ, {
+            "AUTO_EXECUTE_TRADES": "true", "KILL_SWITCH": "false",
+            "BINGX_API_KEY": "private-key", "BINGX_SECRET": "private-secret",
+            "OPENAI_API_KEY": "", "AZURE_OPENAI_API_KEY": "",
+            "AZURE_OPENAI_ENDPOINT": "", "AZURE_OPENAI_DEPLOYMENT": "",
+        }, clear=False):
+            readiness = app.trade_readiness()
+        self.assertEqual(readiness["blockers"], ["ai_provider_missing", "runtime_kill_switch"])
+        self.assertNotIn("private-key", str(readiness))
+        self.assertNotIn("private-secret", str(readiness))
+
+    @patch("forex_ai_analyst.interfaces.http.demo_execution_enabled", return_value=False)
     def test_bingx_vst_order_is_not_attempted_when_execution_is_disabled(self, enabled):
         decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.75, leverage=3,
                                    direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
         self.assertIsNone(app.execute_bingx_vst_order(self._candidate(), decision))
 
-    @patch("app.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
-    @patch("broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 100.15})
-    @patch("broker.round_quantity", return_value=.3)
-    @patch("app.demo_execution_enabled", return_value=True)
+    @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 100.15})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.round_quantity", return_value=.3)
+    @patch("forex_ai_analyst.interfaces.http.demo_execution_enabled", return_value=True)
     def test_bingx_vst_order_uses_signal_levels_and_rounded_quantity(self, enabled, rounded, place_order, controls):
         candidate = self._candidate()
         decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.75, leverage=4,
@@ -67,12 +97,12 @@ class HealthTests(unittest.TestCase):
         place_order.assert_called_once_with("BTC-USDT", "BUY", .3, 103, 98, leverage=4)
         self.assertEqual(result, {"order_id": "vst-1", "fill_price": 100.15, "quantity": .3})
 
-    @patch("app.execution_alerts.report")
-    @patch("broker.close_position", return_value={"order_id": "close-1", "fill_price": 103.05})
-    @patch("broker.get_position", return_value={"positionAmt": ".3"})
-    @patch("broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 102.5})
-    @patch("broker.round_quantity", return_value=.3)
-    @patch("app.demo_execution_enabled", return_value=True)
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.report")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.close_position", return_value={"order_id": "close-1", "fill_price": 103.05})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.get_position", return_value={"positionAmt": ".3"})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.place_market_order", return_value={"order_id": "vst-1", "fill_price": 102.5})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.round_quantity", return_value=.3)
+    @patch("forex_ai_analyst.interfaces.http.demo_execution_enabled", return_value=True)
     def test_unsafe_post_fill_is_immediately_closed(self, enabled, rounded, place_order, position, close, alert):
         decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.6, leverage=4,
                                    direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
@@ -83,7 +113,7 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(result["close_order"], {"order_id": "close-1", "fill_price": 103.05})
         alert.assert_called_once()
 
-    @patch("app.runtime_controls.settings", return_value={"kill_switch": True, "demo_execution": True})
+    @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings", return_value={"kill_switch": True, "demo_execution": True})
     def test_runtime_kill_switch_prevents_vst_execution(self, controls):
         with patch.dict(os.environ, {"AUTO_EXECUTE_TRADES": "true", "BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
             self.assertFalse(app.demo_execution_enabled())
@@ -105,21 +135,21 @@ class HealthTests(unittest.TestCase):
         }, {"equity_usdt": 100.0, "available_usdt": 80.0, "daily_strategy_pnl_usdt": -5.0})
         self.assertEqual(constrained.risk_usdt, 0.0)
 
-    @patch("app.scalping_storage.mark_accepted")
-    @patch("app.execute_bingx_vst_order")
-    @patch("app.decide")
-    @patch("app.runtime_controls.settings", return_value={
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.mark_accepted")
+    @patch("forex_ai_analyst.interfaces.http.execute_bingx_vst_order")
+    @patch("forex_ai_analyst.interfaces.http.decide")
+    @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings", return_value={
         "risk_per_trade_pct": 1.0, "max_daily_loss_pct": 5.0, "max_margin_utilization_pct": 25.0,
     })
-    @patch("app.scalping_storage.recent_ai_reviews", return_value=[])
-    @patch("app.knowledge.search", return_value=[])
-    @patch("app._vst_account_context", return_value={"available": False})
-    @patch("app.scalping_storage.closed_paper_signals", return_value=[])
-    @patch("app.learning_summary", return_value={})
-    @patch("app.context_for_pair", return_value={})
-    @patch("app.fetch_institutional_context", return_value={})
-    @patch("app.scalping_storage.log_market_snapshot")
-    @patch("app.classify_market_regime")
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.recent_ai_reviews", return_value=[])
+    @patch("forex_ai_analyst.interfaces.http.knowledge.search", return_value=[])
+    @patch("forex_ai_analyst.interfaces.http._vst_account_context", return_value={"available": False})
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.closed_paper_signals", return_value=[])
+    @patch("forex_ai_analyst.interfaces.http.learning_summary", return_value={})
+    @patch("forex_ai_analyst.interfaces.http.context_for_pair", return_value={})
+    @patch("forex_ai_analyst.interfaces.http.fetch_institutional_context", return_value={})
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.log_market_snapshot")
+    @patch("forex_ai_analyst.interfaces.http.classify_market_regime")
     def test_scan_pair_skips_unavailable_vst_balance_without_journaling_or_execution(
             self, regime, log_snapshot, institutional, intelligence, learning, closed_signals, account_context,
             search, reviews, controls, decide, execute_order, mark_accepted):
@@ -139,9 +169,9 @@ class HealthTests(unittest.TestCase):
         mark_accepted.assert_not_called()
         execute_order.assert_not_called()
 
-    @patch("app.scalping_storage.risk_state", return_value=(2, -1.25))
-    @patch("app.scalping_storage.open_paper_positions", return_value=1)
-    @patch("broker.get_vst_usdt_balance", return_value={"equity_usdt": 100.0, "available_usdt": 80.0,
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.risk_state", return_value=(2, -1.25))
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.open_paper_positions", return_value=1)
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.get_vst_usdt_balance", return_value={"equity_usdt": 100.0, "available_usdt": 80.0,
                                                           "unrealized_pnl_usdt": -0.5})
     def test_vst_account_context_exposes_only_normalized_sizing_values(self, balance, positions, risk_state):
         with patch.dict(os.environ, {"BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
@@ -150,12 +180,12 @@ class HealthTests(unittest.TestCase):
                 "equity_usdt": 100.0, "available_usdt": 80.0, "unrealized_pnl_usdt": -0.5,
             })
 
-    @patch("app.scalping_storage.risk_state", return_value=(0, 0.0))
-    @patch("app.scalping_storage.open_paper_positions", return_value=0)
-    @patch("broker.get_vst_usdt_balance")
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.risk_state", return_value=(0, 0.0))
+    @patch("forex_ai_analyst.interfaces.http.scalping_storage.open_paper_positions", return_value=0)
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.get_vst_usdt_balance")
     def test_vst_account_context_exposes_safe_balance_schema_on_schema_failure(self, balance, positions, risk_state):
-        error = __import__("broker").BingXApiError("/openApi/swap/v2/user/balance", code=0,
-                                                    message="USDT balance row missing", category="account_schema")
+        error = BingXApiError("/openApi/swap/v2/user/balance", code=0,
+                              message="USDT balance row missing", category="account_schema")
         error.diagnostic["balance_schema"] = {"row_count": 1, "row_fields": ["coin"], "asset_labels": ["VST"]}
         balance.side_effect = error
         with patch.dict(os.environ, {"BINGX_API_KEY": "key", "BINGX_SECRET": "secret"}):
@@ -163,9 +193,9 @@ class HealthTests(unittest.TestCase):
         self.assertFalse(context["available"])
         self.assertEqual(context["balance_schema"], error.diagnostic["balance_schema"])
 
-    @patch("app.execution_alerts.report")
-    @patch("app.scan_pair")
-    @patch("app._vst_account_context", return_value={"available": False, "category": "credentials",
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.report")
+    @patch("forex_ai_analyst.interfaces.http.scan_pair")
+    @patch("forex_ai_analyst.interfaces.http._vst_account_context", return_value={"available": False, "category": "credentials",
                                                        "http_status": 401, "bingx_code": 100001,
                                                        "bingx_msg": "API key invalid"})
     def test_configured_scan_stops_before_pair_or_ai_work_when_account_is_unavailable(self, context, scan_pair, report):
@@ -178,9 +208,9 @@ class HealthTests(unittest.TestCase):
                                                 "bingx_code": 100001, "bingx_msg": "API key invalid"},
                                        remind_after_minutes=None)
 
-    @patch("app.execution_alerts.resolve")
-    @patch("app._vst_account_context", return_value={"available": True, "equity_usdt": 100, "available_usdt": 80})
-    @patch("app.scan_pair")
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.resolve")
+    @patch("forex_ai_analyst.interfaces.http._vst_account_context", return_value={"available": True, "equity_usdt": 100, "available_usdt": 80})
+    @patch("forex_ai_analyst.interfaces.http.scan_pair")
     def test_configured_scan_reuses_one_successful_account_snapshot_for_all_pairs(self, scan_pair, context, resolve):
         provider = unittest.mock.Mock()
         app.scan_configured_pairs(provider)
@@ -192,7 +222,7 @@ class HealthTests(unittest.TestCase):
         resolve.assert_called_once_with("vst-account-context-unavailable",
                                         note="BingX VST account holati tiklandi; AI scan qayta yoqildi.", notify=True)
 
-    @patch("app.execution_alerts.resolve")
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.resolve")
     def test_retired_static_risk_alerts_are_closed_for_each_configured_pair(self, resolve):
         app.resolve_retired_static_risk_alerts()
 
@@ -203,7 +233,7 @@ class HealthTests(unittest.TestCase):
             response = app.app.test_client().get("/api/signals")
         self.assertEqual(response.status_code, 401)
 
-    @patch("app.handle_update")
+    @patch("forex_ai_analyst.interfaces.http.handle_update")
     def test_telegram_webhook_dispatches_authorized_update(self, handle_update):
         with patch.dict(os.environ, {"TELEGRAM_WEBHOOK_SECRET": "secret"}):
             response = app.app.test_client().post(
@@ -213,7 +243,7 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         handle_update.assert_called_once_with({"message": {"text": "/start"}})
 
-    @patch("app.handle_update")
+    @patch("forex_ai_analyst.interfaces.http.handle_update")
     def test_telegram_webhook_rejects_wrong_secret(self, handle_update):
         with patch.dict(os.environ, {"TELEGRAM_WEBHOOK_SECRET": "secret"}):
             response = app.app.test_client().post("/telegram/webhook", json={}, headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"})

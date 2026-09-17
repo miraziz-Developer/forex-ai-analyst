@@ -33,7 +33,7 @@ By default auto-execution is off. When either `OPENAI_API_KEY` or the complete A
 cp .env.example .env
 # Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.
 # Telegram credentials are optional but required for paper alerts.
-python3 -m pip install -r requirements.txt
+python3 -m pip install .
 python3 app.py
 ```
 
@@ -67,14 +67,14 @@ The endpoint verifies Telegram's `X-Telegram-Bot-Api-Secret-Token` header. `call
 
 ## Legacy deterministic replay (research-only)
 
-`multi_strategy_backtest.py` and `production_backtest.py` remain available for historical deterministic-strategy research. They are not the deployed contextual AI/VST decision path and their fixed research limits do not override an AI trade decision. Their evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, records stale trades as `TIME_EXIT`, and resolves an OHLC candle touching both levels as `LOSS`.
+The `forex_ai_analyst.research.backtest` and `forex_ai_analyst.research.production_backtest` modules remain available for historical deterministic-strategy research. They are not the deployed contextual AI/VST decision path and their fixed research limits do not override an AI trade decision. Their evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, records stale trades as `TIME_EXIT`, and resolves an OHLC candle touching both levels as `LOSS`.
 
 Use `metrics(trades)` to report trade count, win rate, after-cost net P&L, expectancy, profit factor, maximum drawdown, and average holding time. Review results independently by `strategy`, `pair`, and `regime`; no strategy may be promoted beyond paper operation solely from an in-sample win rate.
 
 For independent chronological validation, split a fixed period into equal account resets rather than relying on its aggregate result:
 
 ```bash
-python3 production_backtest.py --start 2026-06-01 --days 90 \
+python3 -m forex_ai_analyst.research.production_backtest --start 2026-06-01 --days 90 \
   --pairs BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT \
   --risk-usdt 0.5 --max-daily-loss-usdt 1.5 --max-daily-trades 4 \
   --max-open-positions 1 --max-notional-usdt 75 --max-fee-to-risk-ratio 0.15 \
@@ -108,13 +108,13 @@ Do not set the scan interval below 300 seconds. The scheduler scans pairs serial
 
 ## HTTP endpoints
 
-- `GET /health` — service/provider/VST-only status plus non-fatal execution-incident diagnostics; used by Render. `vst_account` contains only safe account-query diagnostics (`available`, check time, failure category, HTTP status and BingX code/message), never credentials, signatures or balances.
+- `GET /health` — service/provider/VST-only status plus non-fatal execution-incident diagnostics; used by Render. `trade_readiness.blockers` reports safe configuration/runtime reasons that prevent new VST orders (for example disabled auto-execution, missing credentials/provider, or a kill switch). `vst_account` contains only safe account-query diagnostics (`available`, check time, failure category, HTTP status and BingX code/message), never credentials, signatures or balances.
 - `GET /api/signals?limit=100` — recent AI candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
 - `POST /telegram/webhook` — authenticated Telegram button/callback/PDF receiver.
 
 ## Render deployment
 
-`render.yaml` defines the single `forex-ai-analyst` web service and starts `python app.py`. Configure the Turso credentials and optional Telegram credentials in Render. Deploy this repository’s `main` branch only.
+`render.yaml` installs the package and defines the single `forex-ai-analyst` web service, started by the root `app.py` composition root. Configure the Turso credentials and optional Telegram credentials in Render. Deploy this repository’s `main` branch only.
 
 After deploy, verify:
 
@@ -134,7 +134,7 @@ This repository deliberately has **no live BingX endpoint, live credential varia
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q .
+python3 -m compileall -q src tests app.py
 python3 -m pip check
 git diff --check
 ```

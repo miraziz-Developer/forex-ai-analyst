@@ -3,11 +3,11 @@ from unittest.mock import Mock, patch
 
 import requests
 
-import broker
+from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
 
 
 class BingXVstBalanceTests(unittest.TestCase):
-    @patch("broker._signed_request")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_order_history_normalizes_filled_orders_without_inventing_economics(self, signed_request):
         order = {
             "orderId": "exit-1", "symbol": "BTC-USDT", "status": "FILLED", "side": "SELL",
@@ -30,8 +30,8 @@ class BingXVstBalanceTests(unittest.TestCase):
                                 "endTs": unittest.mock.ANY}),
         ])
 
-    @patch("broker.time.time", return_value=2_000_000)
-    @patch("broker._signed_request", side_effect=[{"data": []}, {"data": []}])
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.time.time", return_value=2_000_000)
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request", side_effect=[{"data": []}, {"data": []}])
     def test_order_history_limits_an_old_query_to_bingxs_documented_seven_day_window(self, signed_request, clock):
         broker.order_history("BTC-USDT", start_time_ms=1)
         self.assertEqual(signed_request.call_args_list, [
@@ -45,7 +45,7 @@ class BingXVstBalanceTests(unittest.TestCase):
             }),
         ])
 
-    @patch("broker._signed_request")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_order_history_enriches_only_its_matching_order_id_with_execution_fills(self, signed_request):
         signed_request.side_effect = [
             {"data": {"orders": [{
@@ -66,7 +66,7 @@ class BingXVstBalanceTests(unittest.TestCase):
         self.assertEqual(order["created_at_ms"], 1767225601000.0)
         self.assertAlmostEqual(order["commission_usdt"], .03)
 
-    @patch("broker._signed_request")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_order_history_keeps_order_evidence_when_fill_history_is_unavailable(self, signed_request):
         signed_request.side_effect = [
             {"data": {"orders": [{
@@ -79,7 +79,7 @@ class BingXVstBalanceTests(unittest.TestCase):
         self.assertEqual(order["fill_price"], 103.2)
         self.assertEqual(order["filled_quantity"], .3)
 
-    @patch("broker._signed_request")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_vst_usdt_balance_uses_signed_v2_balance_endpoint_and_normalizes_fields(self, signed_request):
         signed_request.return_value = {"data": {"balance": {
             "asset": "USDT", "balance": "101.50", "availableMargin": "80.25", "unrealizedProfit": "-1.75",
@@ -89,7 +89,7 @@ class BingXVstBalanceTests(unittest.TestCase):
         })
         signed_request.assert_called_once_with("GET", "/openApi/swap/v2/user/balance", {})
 
-    @patch("broker._signed_request")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_vst_usdt_balance_recognizes_universal_account_asset_aliases_and_usdt_mapping(self, signed_request):
         signed_request.return_value = {"data": {"balance": {
             "USDT": {"balance": "101.50", "availableMargin": "80.25", "unrealizedPnl": "-1.75"},
@@ -105,7 +105,7 @@ class BingXVstBalanceTests(unittest.TestCase):
             "equity_usdt": 99.0, "available_usdt": 75.0, "unrealized_pnl_usdt": None,
         })
 
-    @patch("broker._signed_request", return_value={"data": {"balance": {
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request", return_value={"data": {"balance": {
         "asset": "VST", "equity": "500", "availableMargin": "425", "unrealizedProfit": "-3",
     }}})
     def test_vst_demo_swap_balance_uses_the_single_vst_margin_row(self, signed_request):
@@ -113,7 +113,7 @@ class BingXVstBalanceTests(unittest.TestCase):
             "equity_usdt": 500.0, "available_usdt": 425.0, "unrealized_pnl_usdt": -3.0,
         })
 
-    @patch("broker._signed_request", return_value={"code": 0, "data": {"balance": [
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request", return_value={"code": 0, "data": {"balance": [
         {"asset": "VST", "equity": "500", "availableMargin": "425"},
         {"asset": "BTC", "equity": "1", "availableMargin": "1"},
     ]}})
@@ -122,7 +122,7 @@ class BingXVstBalanceTests(unittest.TestCase):
             broker.get_vst_usdt_balance()
         self.assertEqual(raised.exception.diagnostic["category"], "account_schema")
 
-    @patch("broker._signed_request", return_value={"code": 0, "data": []})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request", return_value={"code": 0, "data": []})
     def test_vst_usdt_balance_classifies_missing_usdt_row_as_safe_schema_failure(self, signed_request):
         with self.assertRaises(broker.BingXApiError) as raised:
             broker.get_vst_usdt_balance()
@@ -132,7 +132,7 @@ class BingXVstBalanceTests(unittest.TestCase):
             "row_count": 0, "row_fields": [], "asset_labels": [],
         })
 
-    @patch("broker._signed_request", return_value={"code": 0, "data": {"balance": {
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request", return_value={"code": 0, "data": {"balance": {
         "asset": "USDT", "balance": "100"}}})
     def test_vst_usdt_balance_classifies_missing_sizing_fields_as_safe_schema_failure(self, signed_request):
         with self.assertRaises(broker.BingXApiError) as raised:
@@ -140,7 +140,7 @@ class BingXVstBalanceTests(unittest.TestCase):
         self.assertEqual(raised.exception.diagnostic["category"], "account_schema")
         self.assertEqual(raised.exception.diagnostic["bingx_msg"], "USDT equity or available margin missing")
 
-    @patch("broker.requests.request")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.requests.request")
     def test_signed_request_exposes_only_sanitized_bingx_failure_details(self, request):
         response = Mock(status_code=401)
         response.json.return_value = {"code": 100001, "msg": "API key invalid"}
@@ -157,7 +157,7 @@ class BingXVstBalanceTests(unittest.TestCase):
         self.assertNotIn("api_key", raised.exception.diagnostic)
         self.assertNotIn("secret", raised.exception.diagnostic)
 
-    @patch("broker.requests.request", side_effect=requests.Timeout("timeout"))
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.requests.request", side_effect=requests.Timeout("timeout"))
     def test_signed_request_classifies_transport_failures_without_url_or_signature(self, request):
         with self.assertRaises(broker.BingXApiError) as raised:
             broker._signed_request("GET", "/openApi/swap/v2/user/balance", {})

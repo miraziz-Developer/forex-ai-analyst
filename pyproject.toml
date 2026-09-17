@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forex-ai-analyst"
+version = "0.1.0"
+description = "Context-aware BingX VST AI trading service"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "APScheduler==3.10.4",
+    "flask==3.0.3",
+    "openai>=1.50.0",
+    "pypdf==5.9.0",
+    "python-dotenv==1.0.1",
+    "requests==2.32.3",
+]
+
+[project.scripts]
+forex-production-backtest = "forex_ai_analyst.research.production_backtest:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.unittest]
+start-directory = "tests"

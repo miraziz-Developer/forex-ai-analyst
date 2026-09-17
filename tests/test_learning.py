@@ -1,6 +1,6 @@
 import unittest
 
-from learning import MIN_SAMPLE_SIZE, summarize
+from forex_ai_analyst.trading.application.learning import MIN_SAMPLE_SIZE, summarize
 
 
 class LearningTests(unittest.TestCase):

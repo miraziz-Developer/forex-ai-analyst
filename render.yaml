@@ -2,7 +2,7 @@ services:
   - type: web
     name: forex-ai-analyst
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install .
     startCommand: python app.py
     healthCheckPath: /health
     autoDeployTrigger: commit
@@ -25,7 +25,9 @@ services:
         generateValue: true
       - key: AUTO_EXECUTE_TRADES
         # BingX VST/demo orders require this plus BINGX_API_KEY and BINGX_SECRET.
-        value: "false"
+        # Configure explicitly in Render: "true" enables virtual-money orders;
+        # leaving it empty/false keeps fail-closed behavior.
+        sync: false
       - key: KILL_SWITCH
         value: "false"
       - key: OPENAI_API_KEY
