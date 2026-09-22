@@ -10,9 +10,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-BINGX_API_KEY = os.environ.get("BINGX_API_KEY", "")
-BINGX_SECRET = os.environ.get("BINGX_SECRET", "")
-
 # Hardcoded on purpose: this is the demo/VST (virtual money) domain. There is
 # deliberately no env var or code path to point this at open-api.bingx.com
 # (the real-money domain) — switching to live trading is a separate, manual
@@ -60,13 +57,18 @@ def _error_category(http_status: int | None, code, message: str | None) -> str:
 
 
 def _signed_request(method: str, path: str, params: dict) -> dict:
+    # Read live, not cached at import: readiness/status checks elsewhere (e.g.
+    # http.trade_readiness) also read these env vars fresh on every call, and a
+    # key added/rotated without a full process restart must take effect here too.
+    api_key = os.environ.get("BINGX_API_KEY", "")
+    secret = os.environ.get("BINGX_SECRET", "")
     params = dict(params)
     params["timestamp"] = str(int(time.time() * 1000))
     query = "&".join(f"{k}={v}" for k, v in params.items())
-    signature = hmac.new(BINGX_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
     url = f"{BASE_URL}{path}?{query}&signature={signature}"
     try:
-        response = requests.request(method, url, headers={"X-BX-APIKEY": BINGX_API_KEY}, timeout=15)
+        response = requests.request(method, url, headers={"X-BX-APIKEY": api_key}, timeout=15)
     except requests.RequestException as exc:
         raise BingXApiError(path, message=type(exc).__name__, category="transport") from exc
     try:

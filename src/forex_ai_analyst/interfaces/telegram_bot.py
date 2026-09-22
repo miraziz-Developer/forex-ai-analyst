@@ -35,13 +35,14 @@ def _control_request(text: str) -> dict | None:
         return {"demo_execution": False}
     match = re.fullmatch(r"(?:BLOCK|BLOK) ([A-Z0-9]+-USDT)", normalized)
     if match:
-        current = runtime_controls.settings()["blocked_pairs"]
-        pair = match.group(1)
-        return {"blocked_pairs": sorted({str(item).upper() for item in current} | {pair})}
+        # A delta, not a precomputed full list: two operators previewing
+        # concurrent BLOCK/UNBLOCK commands from the same stale snapshot must
+        # not be able to silently undo each other. runtime_controls.apply()
+        # resolves this against the live blocked_pairs value at confirm time.
+        return {"blocked_pairs": {"add": [match.group(1)]}}
     match = re.fullmatch(r"(?:UNBLOCK|BLOKDAN OCH) ([A-Z0-9]+-USDT)", normalized)
     if match:
-        pair = match.group(1)
-        return {"blocked_pairs": [item for item in runtime_controls.settings()["blocked_pairs"] if str(item).upper() != pair]}
+        return {"blocked_pairs": {"remove": [match.group(1)]}}
     match = re.fullmatch(r"RISK PCT\s+(\d+(?:\.\d+)?)", normalized)
     if match and 0 < float(match.group(1)) <= 100:
         return {"risk_per_trade_pct": float(match.group(1))}
@@ -54,9 +55,16 @@ def _control_request(text: str) -> dict | None:
     return None
 
 
+def _describe_control_value(key: str, value) -> str:
+    if key == "blocked_pairs" and isinstance(value, dict):
+        op, pairs = next(iter(value.items()))
+        return f"{key} {op} {','.join(pairs)}"
+    return f"{key}={value}"
+
+
 def _preview_control(chat_id: str, updates: dict) -> str:
     code, expires = runtime_controls.create_pending(chat_id, updates)
-    items = ", ".join(f"{key}={value}" for key, value in updates.items())
+    items = ", ".join(_describe_control_value(key, value) for key, value in updates.items())
     return (f"⚠️ Runtime o‘zgarishi preview: {items}\n"
             "Bu faqat keyingi AI/VST qarorlarga ta’sir qiladi; live trading yoqilmaydi.\n"
             f"Qo‘llash uchun 10 daqiqa ichida: TASDIQLAYMAN {code}\n"

@@ -1,4 +1,10 @@
-"""Central paper-risk limits; leverage never changes stop-loss risk."""
+"""Research/backtest-only paper-risk limits; leverage never changes stop-loss risk.
+
+Not used by the live contextual-AI scan path (see interfaces/http.py:scan_pair),
+which sizes risk from live VST account state via runtime_controls instead.
+RISK_USDT_PER_TRADE/MAX_DAILY_LOSS_USDT/MAX_DAILY_TRADES/MAX_OPEN_POSITIONS
+only take effect inside research/backtest.py and research/production_backtest.py.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

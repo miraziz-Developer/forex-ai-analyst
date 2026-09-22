@@ -12,13 +12,13 @@ from forex_ai_analyst.trading.domain.indicators import (atr, ema, macd_histogram
 def _bullish_reclaim(bar: dict, ema20: float) -> bool:
     body = abs(bar["close"] - bar["open"])
     lower_wick = min(bar["open"], bar["close"]) - bar["low"]
-    return bar["close"] > bar["open"] and bar["close"] > ema20 and (lower_wick >= body * 0.5 or body > 0)
+    return bar["close"] > bar["open"] and bar["close"] > ema20 and lower_wick >= body * 0.5
 
 
 def _bearish_reclaim(bar: dict, ema20: float) -> bool:
     body = abs(bar["close"] - bar["open"])
     upper_wick = bar["high"] - max(bar["open"], bar["close"])
-    return bar["close"] < bar["open"] and bar["close"] < ema20 and (upper_wick >= body * 0.5 or body > 0)
+    return bar["close"] < bar["open"] and bar["close"] < ema20 and upper_wick >= body * 0.5
 
 
 def evaluate(pair: str, bars_15m: list[dict], bars_5m: list[dict], regime: RegimeSnapshot,

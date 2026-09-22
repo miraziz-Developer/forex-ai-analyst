@@ -55,10 +55,27 @@ def settings() -> dict:
     return values
 
 
+def _resolve_blocked_pairs_delta(delta: dict) -> list[str]:
+    """Merge a {'add'|'remove': [pairs]} delta against the live blocked_pairs value.
+
+    Resolving against the current DB value here (not a value computed at
+    preview time, up to 10 minutes earlier) means two operators previewing
+    concurrent BLOCK/UNBLOCK commands from the same stale snapshot no longer
+    silently undo each other on confirm.
+    """
+    current = {str(item).upper() for item in settings()["blocked_pairs"]}
+    current |= {str(pair).upper() for pair in delta.get("add", [])}
+    current -= {str(pair).upper() for pair in delta.get("remove", [])}
+    return sorted(current)
+
+
 def apply(chat_id: str, updates: dict) -> dict:
     """Apply pre-validated updates and retain an immutable-enough audit trail."""
     now = datetime.now(timezone.utc).isoformat()
-    for key, value in updates.items():
+    resolved = dict(updates)
+    if isinstance(resolved.get("blocked_pairs"), dict):
+        resolved["blocked_pairs"] = _resolve_blocked_pairs_delta(resolved["blocked_pairs"])
+    for key, value in resolved.items():
         if key not in DEFAULTS:
             raise ValueError("unsupported runtime control")
         storage._execute("""INSERT INTO runtime_controls (key, value_json, updated_at, updated_by)
@@ -66,7 +83,7 @@ def apply(chat_id: str, updates: dict) -> dict:
                           updated_at = excluded.updated_at, updated_by = excluded.updated_by""",
                          [key, json.dumps(value), now, chat_id])
     storage._execute("INSERT INTO runtime_control_audit (chat_id, action, details_json, created_at) VALUES (?, ?, ?, ?)",
-                     [chat_id, "APPLIED", json.dumps(updates, ensure_ascii=False), now])
+                     [chat_id, "APPLIED", json.dumps(resolved, ensure_ascii=False), now])
     return settings()
 
 
@@ -89,8 +106,14 @@ def create_pending(chat_id: str, updates: dict) -> tuple[str, datetime]:
 def confirm(chat_id: str, code: str) -> dict | None:
     rows = storage._rows_as_dicts(storage._execute("SELECT updates_json, expires_at FROM runtime_control_pending WHERE code = ? AND chat_id = ?",
                                                     [code.upper(), chat_id]))
-    storage._execute("DELETE FROM runtime_control_pending WHERE code = ? AND chat_id = ?", [code.upper(), chat_id])
-    if not rows or datetime.fromisoformat(rows[0]["expires_at"]) <= datetime.now(timezone.utc):
+    deleted = storage._execute("DELETE FROM runtime_control_pending WHERE code = ? AND chat_id = ?", [code.upper(), chat_id])
+    # Telegram delivers webhooks at-least-once and retries on a slow/non-2xx
+    # response, so the same confirmation can arrive twice concurrently. Both
+    # requests can pass the SELECT above before either DELETE lands, but the
+    # DELETE itself only affects a row once: gate applying on THIS call being
+    # the one that actually removed it, so a retried duplicate is a no-op.
+    consumed_here = deleted.get("affected_row_count", 0) > 0
+    if not rows or not consumed_here or datetime.fromisoformat(rows[0]["expires_at"]) <= datetime.now(timezone.utc):
         audit(chat_id, "CONFIRMATION_REJECTED", {"code": code.upper()})
         return None
     updates = json.loads(rows[0]["updates_json"])

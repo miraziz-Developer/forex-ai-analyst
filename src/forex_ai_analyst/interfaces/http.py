@@ -253,6 +253,7 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
                                     details={"pair": pair, "reason": runtime_rejection})
             return [{"status": "SKIP", "reason": runtime_rejection}]
         execution_alerts.resolve("kill-switch", note="runtime execution permission restored")
+        execution_alerts.resolve_prefix(f"risk-control:{pair}:", note="runtime execution permission restored")
         if candidate.fingerprint in scalping_storage.existing_fingerprints():
             return [{"status": "SKIP", "reason": "duplicate AI candle decision"}]
         broker_order = execute_bingx_vst_order(candidate, ai)

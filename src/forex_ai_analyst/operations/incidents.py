@@ -96,6 +96,28 @@ def resolve(incident_key: str, *, note: str | None = None, notify: bool = False)
         return False
 
 
+def resolve_prefix(key_prefix: str, *, note: str | None = None) -> int:
+    """Close every OPEN incident whose key starts with ``key_prefix``.
+
+    For per-pair keys such as ``risk-control:{pair}:{reason}`` the exact
+    reason text can vary (e.g. leverage message includes the offending
+    leverage), so a single exact-key ``resolve()`` can permanently miss
+    reopening/closing it once the condition clears. Returns the number closed.
+    """
+    escaped = key_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        result = storage._execute(
+            """UPDATE execution_incidents SET state = 'RESOLVED', resolved_at = ?, details_json = ?
+               WHERE incident_key LIKE ? ESCAPE '\\' AND state = 'OPEN'""",
+            [now, json.dumps({"resolution": note or "condition cleared"}, ensure_ascii=False, sort_keys=True),
+             f"{escaped}%"])
+        return result.get("affected_row_count", 0)
+    except Exception:
+        logger.exception("Failed to resolve VST incidents with prefix %s", key_prefix)
+        return 0
+
+
 def status() -> dict:
     rows = storage._rows_as_dicts(storage._execute("""SELECT count(*) AS open_incidents,
         max(last_seen_at) AS last_incident_at FROM execution_incidents WHERE state = 'OPEN'"""))

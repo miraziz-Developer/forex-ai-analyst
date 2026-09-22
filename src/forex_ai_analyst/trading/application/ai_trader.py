@@ -62,7 +62,7 @@ class AITradeDecision:
         return CandidateSignal(
             strategy="contextual_ai", pair=pair.upper(), direction=self.direction, regime=regime,
             entry_price=self.entry_price, stop_price=self.stop_price, target_price=self.target_price,
-            expires_at=now + timedelta(minutes=max(5, self.cooldown_minutes or 60)),
+            expires_at=now + timedelta(minutes=max(5, self.cooldown_minutes)),
             signal_timeframe="5m", trend_timeframe="15m", candle_time_ms=candle_time_ms,
             score=self.confidence, confirmations=(self.rationale,), invalidation_reason=self.invalidation,
             features={"ai_action": self.action, "ai_risk_usdt": self.risk_usdt,

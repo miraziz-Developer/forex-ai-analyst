@@ -208,7 +208,8 @@ class MultiStrategyTests(unittest.TestCase):
         # Explicit higher-high/higher-low pivots and a final bullish 5m reclaim.
         bars5 = [bar(index, 100 + index * .1, spread=.2) for index in range(80)]
         bars5[-2].update(open=107.6, high=107.9, low=107.2, close=107.5)
-        bars5[-1].update(open=107.5, high=108.2, low=107.3, close=108.0, volume=150)
+        # A genuine rejection wick: lower_wick (0.5) >= 50% of body (0.5).
+        bars5[-1].update(open=107.5, high=108.2, low=107.0, close=108.0, volume=150)
         regime = RegimeSnapshot(MarketRegime.TRENDING_UP, {"adx": 25.0})
         result = evaluate("btc-usdt", bars15, bars5, regime, NOW)
         self.assertIsNotNone(result)

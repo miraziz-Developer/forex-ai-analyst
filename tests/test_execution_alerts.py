@@ -43,6 +43,19 @@ class ExecutionAlertTests(unittest.TestCase):
         self.assertTrue(execution_alerts.resolve("k", note="account recovered", notify=True))
         send.assert_called_once_with("✅ VST RECOVERED: account recovered", "token", "chat")
 
+    @patch("forex_ai_analyst.operations.incidents.storage._execute", return_value={"affected_row_count": 2})
+    def test_resolve_prefix_closes_every_open_incident_sharing_the_prefix(self, execute):
+        self.assertEqual(execution_alerts.resolve_prefix("risk-control:BTC-USDT:", note="permission restored"), 2)
+        sql, args = execute.call_args.args
+        self.assertIn("LIKE ? ESCAPE", sql)
+        self.assertIn("state = 'OPEN'", sql)
+        self.assertEqual(args[-1], "risk-control:BTC-USDT:%")
+
+    @patch("forex_ai_analyst.operations.incidents.storage._execute", return_value={"affected_row_count": 0})
+    def test_resolve_prefix_escapes_like_wildcards_in_the_prefix(self, execute):
+        execution_alerts.resolve_prefix("risk-control:BTC_USDT:")
+        self.assertEqual(execute.call_args.args[1][-1], "risk-control:BTC\\_USDT:%")
+
 
 if __name__ == "__main__":
     unittest.main()
