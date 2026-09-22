@@ -14,6 +14,8 @@ load_dotenv()
 from flask import Flask, abort, jsonify, request
 
 from forex_ai_analyst.trading.application.ai_trader import AITradeDecision, decide
+from forex_ai_analyst.trading.domain.indicators import higher_timeframe_bias
+from forex_ai_analyst.trading.domain.models import Direction, MarketRegime
 from forex_ai_analyst.trading.infrastructure.institutional_data import fetch_institutional_context
 from forex_ai_analyst.trading.application.learning import summarize as learning_summary
 from forex_ai_analyst.trading.infrastructure.market_intelligence import context_for_pair, status as intelligence_status
@@ -212,13 +214,38 @@ def _vst_account_context() -> dict:
         return {**context, **safe}
 
 
+_TREND_BIAS_FOR_DIRECTION = {Direction.BUY: "BULLISH", Direction.SELL: "BEARISH"}
+
+
+def mechanical_gate_rejection(direction: Direction, regime: MarketRegime,
+                              higher_tf_bias: dict[str, str | None]) -> str | None:
+    """Mechanical, code-level pre-trade filters the AI's own reasoning cannot
+    override. See RESEARCH_FINDINGS.md #1 (volatility regime) and #2
+    (multi-timeframe alignment): both are evidence-backed, not LLM judgment.
+
+    A bias of None ("not enough history to judge") never blocks a trade — only
+    a determined, contradicting bias does.
+    """
+    if regime in {MarketRegime.HIGH_VOLATILITY, MarketRegime.UNCERTAIN}:
+        return f"15m rejim {regime} - volatillik mexanik filtri"
+    expected = _TREND_BIAS_FOR_DIRECTION[direction]
+    against = sorted(label for label, bias in higher_tf_bias.items() if bias is not None and bias != expected)
+    if against:
+        return f"{'/'.join(against)} trend AI yo'nalishiga zid - multi-timeframe mexanik filtri"
+    return None
+
+
 def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None,
               account_state: dict | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
     bars_15m = provider.fetch_closed_bars(pair, "15m", 260, now)
     bars_5m = provider.fetch_closed_bars(pair, "5m", 120, now)
     bars_1h = provider.fetch_closed_bars(pair, "1h", 200, now)
+    bars_4h = provider.fetch_closed_bars(pair, "4h", 80, now)
+    bars_1d = provider.fetch_closed_bars(pair, "1d", 80, now)
     regime = classify_market_regime(bars_15m)
+    higher_tf_bias = {"1h": higher_timeframe_bias(bars_1h), "4h": higher_timeframe_bias(bars_4h),
+                      "1d": higher_timeframe_bias(bars_1d)}
     if bars_15m:
         scalping_storage.log_market_snapshot(pair, "15m", int(bars_15m[-1]["datetime"]),
                                              regime.regime, regime.features)
@@ -226,7 +253,8 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
         return [{"status": "SKIP", "reason": "yetarli yopilgan sham yo‘q"}]
     account_snapshot = account_state if account_state is not None else _vst_account_context()
     snapshot = {"pair": pair.upper(), "time_utc": now.isoformat(), "regime": str(regime.regime),
-                "regime_features": regime.features, "institutional": fetch_institutional_context(pair.upper()),
+                "regime_features": regime.features, "higher_timeframe_bias": higher_tf_bias,
+                "institutional": fetch_institutional_context(pair.upper()),
                 "market_intelligence": context_for_pair(pair, now),
                 "outcome_learning": learning_summary(scalping_storage.closed_paper_signals(500), pair),
                 "account_state": account_snapshot,
@@ -254,6 +282,13 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
             return [{"status": "SKIP", "reason": runtime_rejection}]
         execution_alerts.resolve("kill-switch", note="runtime execution permission restored")
         execution_alerts.resolve_prefix(f"risk-control:{pair}:", note="runtime execution permission restored")
+        gate_rejection = mechanical_gate_rejection(ai.direction, regime.regime, higher_tf_bias)
+        if gate_rejection:
+            key = f"mechanical-gate:{pair}:{gate_rejection}"
+            execution_alerts.report(key, f"{pair} yangi VST order rad etildi (mexanik filtr): {gate_rejection}.",
+                                    severity="WARNING", details={"pair": pair, "reason": gate_rejection})
+            return [{"status": "SKIP", "reason": gate_rejection}]
+        execution_alerts.resolve_prefix(f"mechanical-gate:{pair}:", note="mechanical gate conditions cleared")
         if candidate.fingerprint in scalping_storage.existing_fingerprints():
             return [{"status": "SKIP", "reason": "duplicate AI candle decision"}]
         broker_order = execute_bingx_vst_order(candidate, ai)
