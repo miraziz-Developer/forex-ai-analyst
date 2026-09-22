@@ -17,5 +17,8 @@ def send_telegram_message(text: str, bot_token: str, chat_id: str) -> bool:
         response.raise_for_status()
         return True
     except requests.RequestException as exc:
-        logger.error("Failed to send Telegram notification: %s", exc)
+        # Never log str(exc)/repr(exc) here: requests embeds the full request
+        # URL (which contains the bot token) in its exception message.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        logger.error("Failed to send Telegram notification (%s, status=%s)", type(exc).__name__, status)
         return False
