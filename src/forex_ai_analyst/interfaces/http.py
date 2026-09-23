@@ -222,15 +222,30 @@ def _vst_account_context() -> dict:
 _TREND_BIAS_FOR_DIRECTION = {Direction.BUY: "BULLISH", Direction.SELL: "BEARISH"}
 
 
+def _min_ai_confidence() -> int:
+    try:
+        return int(os.environ.get("AI_MIN_TRADE_CONFIDENCE", "50"))
+    except ValueError:
+        return 50
+
+
 def mechanical_gate_rejection(direction: Direction, regime: MarketRegime,
-                              higher_tf_bias: dict[str, str | None]) -> str | None:
+                              higher_tf_bias: dict[str, str | None], confidence: int) -> str | None:
     """Mechanical, code-level pre-trade filters the AI's own reasoning cannot
     override. See RESEARCH_FINDINGS.md #1 (volatility regime) and #2
     (multi-timeframe alignment): both are evidence-backed, not LLM judgment.
 
     A bias of None ("not enough history to judge") never blocks a trade — only
     a determined, contradicting bias does.
+
+    confidence is otherwise purely informational (never gated anywhere else):
+    without this floor, a PROPOSE_TRADE at confidence 1 executes identically
+    to one at confidence 99. The default (50, tunable via
+    AI_MIN_TRADE_CONFIDENCE) only blocks the AI's own stated coin-flip-or-worse
+    calls; it is not itself a claim about what confidence is "safe."
     """
+    if confidence < _min_ai_confidence():
+        return f"AI ishonchi {confidence}/100 minimal {_min_ai_confidence()} dan past - ishonch mexanik filtri"
     if regime in {MarketRegime.HIGH_VOLATILITY, MarketRegime.UNCERTAIN}:
         return f"15m rejim {regime} - volatillik mexanik filtri"
     expected = _TREND_BIAS_FOR_DIRECTION[direction]
@@ -287,7 +302,7 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
             return [{"status": "SKIP", "reason": runtime_rejection}]
         execution_alerts.resolve("kill-switch", note="runtime execution permission restored")
         execution_alerts.resolve_prefix(f"risk-control:{pair}:", note="runtime execution permission restored")
-        gate_rejection = mechanical_gate_rejection(ai.direction, regime.regime, higher_tf_bias)
+        gate_rejection = mechanical_gate_rejection(ai.direction, regime.regime, higher_tf_bias, ai.confidence)
         if gate_rejection:
             key = f"mechanical-gate:{pair}:{gate_rejection}"
             execution_alerts.report(key, f"{pair} yangi VST order rad etildi (mexanik filtr): {gate_rejection}.",

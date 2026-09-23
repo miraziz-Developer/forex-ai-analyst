@@ -16,20 +16,34 @@ from forex_ai_analyst.trading.infrastructure.bingx_broker import BingXApiError
 class MechanicalGateTests(unittest.TestCase):
     def test_high_volatility_and_uncertain_regimes_are_blocked_regardless_of_bias(self):
         no_bias = {"1h": None, "4h": None, "1d": None}
-        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.HIGH_VOLATILITY, no_bias))
-        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.UNCERTAIN, no_bias))
+        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.HIGH_VOLATILITY, no_bias, 80))
+        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.UNCERTAIN, no_bias, 80))
 
     def test_trending_regime_with_no_determined_bias_is_not_blocked(self):
         no_bias = {"1h": None, "4h": None, "1d": None}
-        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias))
+        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 80))
 
     def test_buy_against_a_determined_bearish_higher_timeframe_is_blocked(self):
         bias = {"1h": "BULLISH", "4h": "BEARISH", "1d": None}
-        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, bias))
+        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, bias, 80))
 
     def test_buy_aligned_with_every_determined_higher_timeframe_is_not_blocked(self):
         bias = {"1h": "BULLISH", "4h": "BULLISH", "1d": None}
-        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, bias))
+        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, bias, 80))
+
+    def test_confidence_below_the_default_floor_is_blocked_even_in_a_clean_trending_setup(self):
+        no_bias = {"1h": None, "4h": None, "1d": None}
+        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 49))
+
+    def test_confidence_at_the_default_floor_is_not_blocked(self):
+        no_bias = {"1h": None, "4h": None, "1d": None}
+        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 50))
+
+    @patch.dict(os.environ, {"AI_MIN_TRADE_CONFIDENCE": "70"})
+    def test_confidence_floor_is_configurable_via_environment(self):
+        no_bias = {"1h": None, "4h": None, "1d": None}
+        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 65))
+        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 75))
 
 
 class HealthTests(unittest.TestCase):
