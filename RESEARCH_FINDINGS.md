@@ -1,9 +1,16 @@
-# Research findings — candidate accuracy improvements (not yet implemented)
+# Research findings — candidate accuracy improvements
 
 Collected 2026-09-02, after 12 resolved trades at a 16.7% win rate (-$3.61).
 Each item below is evidence-backed rather than folklore, with the source and
-the honest caveat attached. **Nothing here is implemented yet** — the plan is
-to review the whole list, pick, then apply in one batch.
+the honest caveat attached.
+
+**Update 2026-09-23: items #1, #2, and #3 are implemented** as mechanical,
+code-level gates independent of the AI's own judgment — see
+`indicators.higher_timeframe_bias()` and `http.mechanical_gate_rejection()`.
+Item #4 (partial take-profit) was deliberately **not** implemented; see its
+own section below for why. None of this changes the sample-size caveat: 12
+trades is not enough to draw a reliable conclusion in either direction, and
+no filter guarantees profitability.
 
 Two items were already implemented on 2026-09-02 and are NOT in this list:
 volume confirmation (≥1.5x 20-bar average) and the CHoCH downgrade rule
