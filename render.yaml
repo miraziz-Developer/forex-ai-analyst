@@ -40,6 +40,10 @@ services:
         sync: false
       - key: AI_TRADER_MODEL
         value: "gpt-4o-mini"
+      - key: AI_MIN_TRADE_CONFIDENCE
+        # Mechanical floor: a PROPOSE_TRADE below this AI-stated confidence
+        # (0..100) is rejected before it reaches the exchange.
+        value: "70"
       - key: BINGX_API_KEY
         sync: false
       - key: BINGX_SECRET
