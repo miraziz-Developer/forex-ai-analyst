@@ -33,11 +33,11 @@ class MechanicalGateTests(unittest.TestCase):
 
     def test_confidence_below_the_default_floor_is_blocked_even_in_a_clean_trending_setup(self):
         no_bias = {"1h": None, "4h": None, "1d": None}
-        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 49))
+        self.assertIsNotNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 69))
 
     def test_confidence_at_the_default_floor_is_not_blocked(self):
         no_bias = {"1h": None, "4h": None, "1d": None}
-        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 50))
+        self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 70))
 
     @patch.dict(os.environ, {"AI_MIN_TRADE_CONFIDENCE": "70"})
     def test_confidence_floor_is_configurable_via_environment(self):

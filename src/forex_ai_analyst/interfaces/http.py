@@ -224,9 +224,9 @@ _TREND_BIAS_FOR_DIRECTION = {Direction.BUY: "BULLISH", Direction.SELL: "BEARISH"
 
 def _min_ai_confidence() -> int:
     try:
-        return int(os.environ.get("AI_MIN_TRADE_CONFIDENCE", "50"))
+        return int(os.environ.get("AI_MIN_TRADE_CONFIDENCE", "70"))
     except ValueError:
-        return 50
+        return 70
 
 
 def mechanical_gate_rejection(direction: Direction, regime: MarketRegime,
@@ -240,9 +240,10 @@ def mechanical_gate_rejection(direction: Direction, regime: MarketRegime,
 
     confidence is otherwise purely informational (never gated anywhere else):
     without this floor, a PROPOSE_TRADE at confidence 1 executes identically
-    to one at confidence 99. The default (50, tunable via
-    AI_MIN_TRADE_CONFIDENCE) only blocks the AI's own stated coin-flip-or-worse
-    calls; it is not itself a claim about what confidence is "safe."
+    to one at confidence 99. The default (70, tunable via
+    AI_MIN_TRADE_CONFIDENCE) is an operator choice to trade only the AI's
+    higher-conviction calls, not itself a scientific claim about what
+    confidence is "safe."
     """
     if confidence < _min_ai_confidence():
         return f"AI ishonchi {confidence}/100 minimal {_min_ai_confidence()} dan past - ishonch mexanik filtri"
