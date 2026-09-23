@@ -140,6 +140,44 @@ class BingXVstBalanceTests(unittest.TestCase):
         self.assertEqual(raised.exception.diagnostic["category"], "account_schema")
         self.assertEqual(raised.exception.diagnostic["bingx_msg"], "USDT equity or available margin missing")
 
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
+    def test_place_market_order_prefers_bingxs_executed_quantity_over_requested(self, signed_request):
+        signed_request.return_value = {"data": {"order": {
+            "orderId": "e1", "avgPrice": "100.5", "executedQty": "0.099",
+        }}}
+        order = broker.place_market_order("BTC-USDT", "BUY", 0.1, 103, 98)
+        self.assertEqual(order["filled_quantity"], 0.099)
+
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
+    def test_place_market_order_leaves_filled_quantity_none_when_bingx_omits_it(self, signed_request):
+        signed_request.return_value = {"data": {"order": {"orderId": "e1", "avgPrice": "100.5"}}}
+        order = broker.place_market_order("BTC-USDT", "BUY", 0.1, 103, 98)
+        self.assertIsNone(order["filled_quantity"])
+
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.fill_history")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
+    def test_get_order_enriches_missing_commission_from_fill_history(self, signed_request, fills):
+        signed_request.return_value = {"data": {"order": {
+            "orderId": "e1", "status": "FILLED", "avgPrice": "100", "time": "1700000000000",
+        }}}
+        fills.return_value = [
+            {"order_id": "e1", "commission_usdt": .01},
+            {"order_id": "e1", "commission_usdt": .02},
+            {"order_id": "other", "commission_usdt": 9.0},
+        ]
+        order = broker.get_order("BTC-USDT", "e1")
+        self.assertAlmostEqual(order["commission_usdt"], .03)
+        self.assertIsNone(order["realized_pnl_usdt"])  # never guessed from fills
+
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.fill_history", side_effect=broker.BingXApiError("x"))
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
+    def test_get_order_leaves_commission_none_when_fill_history_is_unavailable(self, signed_request, fills):
+        signed_request.return_value = {"data": {"order": {
+            "orderId": "e1", "status": "FILLED", "avgPrice": "100", "time": "1700000000000",
+        }}}
+        order = broker.get_order("BTC-USDT", "e1")
+        self.assertIsNone(order["commission_usdt"])
+
     @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.requests.request")
     def test_signed_request_exposes_only_sanitized_bingx_failure_details(self, request):
         response = Mock(status_code=401)

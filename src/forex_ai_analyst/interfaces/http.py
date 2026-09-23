@@ -125,18 +125,23 @@ def execute_bingx_vst_order(candidate, decision: AITradeDecision) -> dict | None
         raise ValueError(f"BingX VST quantity rounds to zero for {candidate.pair}; AI risk too small")
     order = broker.place_market_order(candidate.pair, str(candidate.direction), quantity,
                                        candidate.target_price, candidate.stop_price, leverage=decision.leverage)
+    # BingX's own executed quantity, when reported, can differ from what was
+    # requested (precision rounding on BingX's side); trusting the requested
+    # amount instead is what causes a later broker-vs-journal quantity
+    # mismatch alert in scheduler.recover_open_vst_orders.
+    filled_quantity = order.get("filled_quantity") or quantity
     fill = float(order["fill_price"])
     if str(candidate.direction) == "BUY":
         actual_risk_per_unit, actual_reward_per_unit = fill - candidate.stop_price, candidate.target_price - fill
     else:
         actual_risk_per_unit, actual_reward_per_unit = candidate.stop_price - fill, fill - candidate.target_price
-    actual_risk = quantity * actual_risk_per_unit
+    actual_risk = filled_quantity * actual_risk_per_unit
     actual_reward_risk = actual_reward_per_unit / actual_risk_per_unit if actual_risk_per_unit > 0 else 0.0
     accepted_risk = float(decision.risk_usdt)
     unsafe_fill = (actual_risk_per_unit <= 0 or actual_reward_per_unit <= 0 or
                    actual_reward_risk < _MIN_POST_FILL_REWARD_RISK or
                    actual_risk > accepted_risk * _MAX_POST_FILL_RISK_MULTIPLIER)
-    result = {**order, "quantity": quantity}
+    result = {**order, "quantity": filled_quantity}
     if not unsafe_fill:
         return result
 
@@ -150,7 +155,7 @@ def execute_bingx_vst_order(candidate, decision: AITradeDecision) -> dict | None
                                 f"{candidate.pair} unsafe market filldan keyin broker pozitsiyasi topilmadi; exit fill taxmin qilinmadi.",
                                 severity="CRITICAL", details=details)
         return {**result, "unsafe_fill": True}
-    close_order = broker.close_position(candidate.pair, str(candidate.direction), quantity)
+    close_order = broker.close_position(candidate.pair, str(candidate.direction), filled_quantity)
     execution_alerts.report(f"unsafe-fill-closed:{candidate.fingerprint}",
                             f"{candidate.pair} unsafe market fill sabab darhol yopildi (post-fill R:R {actual_reward_risk:.2f}).",
                             severity="CRITICAL", details=details)
