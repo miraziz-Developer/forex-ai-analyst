@@ -116,6 +116,18 @@ class HealthTests(unittest.TestCase):
         place_order.assert_called_once_with("BTC-USDT", "BUY", .3, 103, 98, leverage=4)
         self.assertEqual(result, {"order_id": "vst-1", "fill_price": 100.15, "quantity": .3})
 
+    @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings", return_value={"kill_switch": False, "demo_execution": None})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.place_market_order",
+          return_value={"order_id": "vst-1", "fill_price": 100.15, "filled_quantity": .298})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.round_quantity", return_value=.3)
+    @patch("forex_ai_analyst.interfaces.http.demo_execution_enabled", return_value=True)
+    def test_bingx_vst_order_journals_bingxs_actual_filled_quantity_not_the_requested_one(
+            self, enabled, rounded, place_order, controls):
+        decision = AITradeDecision("PROPOSE_TRADE", "test", "test", 80, risk_usdt=.75, leverage=4,
+                                   direction=Direction.BUY, entry_price=100, stop_price=98, target_price=103)
+        result = app.execute_bingx_vst_order(self._candidate(), decision)
+        self.assertEqual(result["quantity"], .298)
+
     @patch("forex_ai_analyst.interfaces.http.execution_alerts.report")
     @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.close_position", return_value={"order_id": "close-1", "fill_price": 103.05})
     @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.get_position", return_value={"positionAmt": ".3"})

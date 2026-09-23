@@ -176,6 +176,25 @@ def set_leverage(symbol: str, position_side: str, leverage: int = DEFAULT_LEVERA
                      {"symbol": symbol, "side": position_side, "leverage": str(leverage)})
 
 
+def _executed_quantity(order: dict) -> float | None:
+    """BingX's own executed-quantity field, when present.
+
+    It can differ from the requested quantity (precision rounding on BingX's
+    side, or a partial fill), so callers must prefer this over the requested
+    amount when journaling what the broker actually holds - trusting the
+    requested amount instead is exactly what causes a later
+    'broker quantity smaller than journal quantity' recovery alert.
+    """
+    for name in ("executedQty", "cumQty", "dealQty", "origQty"):
+        try:
+            raw = order.get(name)
+            if raw is not None and raw != "":
+                return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def place_market_order(symbol: str, direction: str, quantity: float,
                         take_profit_price: float, stop_loss_price: float, *, leverage: int = DEFAULT_LEVERAGE) -> dict:
     """direction: 'BUY' opens/adds to a LONG, 'SELL' opens/adds to a SHORT."""
@@ -197,7 +216,8 @@ def place_market_order(symbol: str, direction: str, quantity: float,
         "stopLoss": json.dumps(stop_loss),
     })
     order = data["data"]["order"]
-    return {"order_id": str(order["orderId"]), "fill_price": float(order["avgPrice"])}
+    return {"order_id": str(order["orderId"]), "fill_price": float(order["avgPrice"]),
+            "filled_quantity": _executed_quantity(order)}
 
 
 def get_position(symbol: str, position_side: str) -> dict | None:
@@ -224,7 +244,8 @@ def close_position(symbol: str, direction: str, quantity: float) -> dict:
         "quantity": str(quantity),
     })
     order = data["data"]["order"]
-    return {"order_id": str(order["orderId"]), "fill_price": float(order["avgPrice"])}
+    return {"order_id": str(order["orderId"]), "fill_price": float(order["avgPrice"]),
+            "filled_quantity": _executed_quantity(order)}
 
 
 def get_order(symbol: str, order_id: str) -> dict:
@@ -251,16 +272,31 @@ def get_order(symbol: str, order_id: str) -> dict:
                 continue
         return None
 
-    return {
+    result = {
         "order_id": str(order.get("orderId", order_id)),
         "status": str(order.get("status", "")).upper(),
         "fill_price": number("avgPrice", "averagePrice", "price"),
-        # These remain None unless the order endpoint explicitly binds them to
-        # this order; account income is never guessed or allocated here.
+        # realized_pnl_usdt remains None unless the order endpoint explicitly
+        # binds it to this order; account income is never guessed or
+        # allocated here. commission_usdt is best-effort enriched below from
+        # allFillOrders, which this single-order query often omits it from.
         "commission_usdt": number("commission", "fee"),
         "realized_pnl_usdt": number("realizedProfit", "realizedPnl"),
         "raw": order,
     }
+    if result["commission_usdt"] is None:
+        created_at_ms = number("time", "createTime", "createdTime", "updateTime")
+        if created_at_ms is not None:
+            try:
+                fills = [fill for fill in fill_history(symbol, start_time_ms=int(created_at_ms) - 60_000)
+                        if fill["order_id"] == result["order_id"] and fill["commission_usdt"] is not None]
+            except Exception as exc:
+                logger.warning("BingX order-level fill enrichment unavailable for %s/%s: %s",
+                               symbol, result["order_id"], type(exc).__name__)
+                fills = []
+            if fills:
+                result["commission_usdt"] = sum(fill["commission_usdt"] for fill in fills)
+    return result
 
 
 def fill_history(symbol: str, *, start_time_ms: int, end_time_ms: int | None = None) -> list[dict]:
