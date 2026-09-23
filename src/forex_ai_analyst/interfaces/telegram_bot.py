@@ -310,7 +310,7 @@ def _handle_callback(callback: dict) -> None:
     elif action == "upload":
         _reply(chat_id, "📤 Endi PDF faylni shu chatga yuboring. Text-based PDF avtomatik bilim bazasiga qo‘shiladi.", menu=True)
     elif action == "help":
-        _reply(chat_id, "Savolni oddiy yozing: signal, P&L, regime, learning, RSS yoki reconciliation haqida tushuntiraman. Runtime control misollari: STOP, START DEMO, BLOCK BTC-USDT, UNBLOCK BTC-USDT, RISK 0.5, LEVERAGE 3, COOLDOWN 15. Har biri preview va TASDIQLAYMAN kodi talab qiladi. Live trading, kod, credential va broker endpointi o‘zgarmaydi.", menu=True)
+        _reply(chat_id, "Savolni oddiy yozing: signal, P&L, regime, learning, RSS yoki reconciliation haqida tushuntiraman. Runtime control misollari: STOP, START DEMO, BLOCK BTC-USDT, UNBLOCK BTC-USDT, RISK PCT 1.5, DAILY LOSS PCT 5, MARGIN PCT 25. Har biri preview va TASDIQLAYMAN kodi talab qiladi. Live trading, kod, credential va broker endpointi o‘zgarmaydi.", menu=True)
 
 
 def handle_update(update: dict) -> None:
