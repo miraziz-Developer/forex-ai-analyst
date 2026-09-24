@@ -46,6 +46,38 @@ class MechanicalGateTests(unittest.TestCase):
         self.assertIsNone(app.mechanical_gate_rejection(Direction.BUY, MarketRegime.TRENDING_UP, no_bias, 75))
 
 
+class PositionAndPreflightGateTests(unittest.TestCase):
+    NOW = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+
+    def test_existing_open_position_on_the_same_pair_is_blocked(self):
+        self.assertIsNotNone(app.position_gate_rejection("BTC-USDT", [{"pair": "BTC-USDT"}], [], self.NOW))
+
+    def test_other_pairs_open_do_not_block_until_the_concurrent_cap(self):
+        opens = [{"pair": "ETH-USDT"}, {"pair": "SOL-USDT"}]
+        self.assertIsNone(app.position_gate_rejection("BTC-USDT", opens, [], self.NOW))
+        opens.append({"pair": "XRP-USDT"})
+        self.assertIsNotNone(app.position_gate_rejection("BTC-USDT", opens, [], self.NOW))
+
+    @patch.dict(os.environ, {"MAX_CONCURRENT_POSITIONS": "5"})
+    def test_concurrent_cap_is_configurable(self):
+        opens = [{"pair": p} for p in ("ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT")]
+        self.assertIsNone(app.position_gate_rejection("BTC-USDT", opens, [], self.NOW))
+
+    def test_recently_closed_pair_is_in_cooldown_then_allowed(self):
+        recent = {"pair": "BTC-USDT", "outcome_time": (self.NOW - timedelta(minutes=10)).isoformat()}
+        old = {"pair": "BTC-USDT", "outcome_time": (self.NOW - timedelta(minutes=90)).isoformat()}
+        self.assertIsNotNone(app.position_gate_rejection("BTC-USDT", [], [recent], self.NOW))
+        self.assertIsNone(app.position_gate_rejection("BTC-USDT", [], [old], self.NOW))
+
+    def test_preflight_blocks_when_rr_at_current_price_is_below_minimum(self):
+        self.assertIsNone(app.preflight_rejection(Direction.SELL, 85900, 86080, 85250))
+        self.assertIsNotNone(app.preflight_rejection(Direction.SELL, 85400, 86080, 85250))
+
+    def test_preflight_blocks_when_price_is_already_past_stop_or_target(self):
+        self.assertIsNotNone(app.preflight_rejection(Direction.BUY, 97, 98, 103))
+        self.assertIsNotNone(app.preflight_rejection(Direction.BUY, 104, 98, 103))
+
+
 class HealthTests(unittest.TestCase):
     @staticmethod
     def _candidate():
