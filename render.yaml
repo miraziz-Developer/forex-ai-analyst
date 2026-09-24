@@ -44,6 +44,10 @@ services:
         # Mechanical floor: a PROPOSE_TRADE below this AI-stated confidence
         # (0..100) is rejected before it reaches the exchange.
         value: "70"
+      - key: MAX_CONCURRENT_POSITIONS
+        value: "3"
+      - key: TRADE_COOLDOWN_MINUTES
+        value: "60"
       - key: BINGX_API_KEY
         sync: false
       - key: BINGX_SECRET

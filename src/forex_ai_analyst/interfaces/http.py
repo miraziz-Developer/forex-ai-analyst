@@ -5,7 +5,7 @@ import logging
 import os
 import secrets
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -256,6 +256,63 @@ def mechanical_gate_rejection(direction: Direction, regime: MarketRegime,
     return None
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def position_gate_rejection(pair: str, open_signals: list[dict], closed_signals: list[dict],
+                            now: datetime) -> str | None:
+    """Stop the bot from stacking near-identical trades.
+
+    Without this, the AI could open a new order on the same pair on every 5m
+    candle (fingerprints are per candle) - the source of hundreds of
+    time-exited, low-quality trades. Limits are env-tunable:
+    MAX_CONCURRENT_POSITIONS (default 3) and TRADE_COOLDOWN_MINUTES (default 60,
+    per pair, measured from the last close).
+    """
+    pair = pair.upper()
+    if any(str(item.get("pair", "")).upper() == pair for item in open_signals):
+        return f"{pair} bo'yicha pozitsiya allaqachon ochiq - pozitsiya filtri"
+    max_open = _env_int("MAX_CONCURRENT_POSITIONS", 3)
+    if len(open_signals) >= max_open:
+        return f"ochiq pozitsiyalar limiti to'lgan ({len(open_signals)}/{max_open}) - pozitsiya filtri"
+    cooldown = timedelta(minutes=_env_int("TRADE_COOLDOWN_MINUTES", 60))
+    for item in closed_signals:
+        if str(item.get("pair", "")).upper() != pair or not item.get("outcome_time"):
+            continue
+        try:
+            closed_at = datetime.fromisoformat(str(item["outcome_time"]))
+        except ValueError:
+            continue
+        if closed_at.tzinfo is None:
+            closed_at = closed_at.replace(tzinfo=timezone.utc)
+        if now - closed_at < cooldown:
+            return f"{pair} yaqinda yopilgan (cooldown {int(cooldown.total_seconds() // 60)} daqiqa) - pozitsiya filtri"
+    return None
+
+
+def preflight_rejection(direction: Direction, last_price: float, stop: float, target: float) -> str | None:
+    """Reject before ordering if the trade is already unsafe at the current price.
+
+    The exchange fills a MARKET order near the latest price, not at the AI's
+    stated entry. Checking R:R at that price up front avoids opening a
+    position that the post-fill safety check would close immediately, paying
+    fees both ways for nothing.
+    """
+    if direction is Direction.BUY:
+        risk, reward = last_price - stop, target - last_price
+    else:
+        risk, reward = stop - last_price, last_price - target
+    if risk <= 0 or reward <= 0:
+        return "joriy narx stop/target chegarasidan o'tib ketgan - preflight filtri"
+    if reward / risk < _MIN_POST_FILL_REWARD_RISK:
+        return f"joriy narxda R:R {reward / risk:.2f} < {_MIN_POST_FILL_REWARD_RISK} - preflight filtri"
+    return None
+
+
 def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None,
               account_state: dict | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
@@ -303,13 +360,15 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
             return [{"status": "SKIP", "reason": runtime_rejection}]
         execution_alerts.resolve("kill-switch", note="runtime execution permission restored")
         execution_alerts.resolve_prefix(f"risk-control:{pair}:", note="runtime execution permission restored")
-        gate_rejection = mechanical_gate_rejection(ai.direction, regime.regime, higher_tf_bias, ai.confidence)
+        gate_rejection = (mechanical_gate_rejection(ai.direction, regime.regime, higher_tf_bias, ai.confidence)
+                          or preflight_rejection(ai.direction, float(bars_5m[-1]["close"]),
+                                                 ai.stop_price, ai.target_price)
+                          or position_gate_rejection(pair, scalping_storage.open_paper_signals(),
+                                                     scalping_storage.closed_paper_signals(50), now))
         if gate_rejection:
-            key = f"mechanical-gate:{pair}:{gate_rejection}"
-            execution_alerts.report(key, f"{pair} yangi VST order rad etildi (mexanik filtr): {gate_rejection}.",
-                                    severity="WARNING", details={"pair": pair, "reason": gate_rejection})
+            # Routine filtering, not an incident: log only, never alert Telegram.
+            logger.info("%s proposal rejected by mechanical gate: %s", pair, gate_rejection)
             return [{"status": "SKIP", "reason": gate_rejection}]
-        execution_alerts.resolve_prefix(f"mechanical-gate:{pair}:", note="mechanical gate conditions cleared")
         if candidate.fingerprint in scalping_storage.existing_fingerprints():
             return [{"status": "SKIP", "reason": "duplicate AI candle decision"}]
         broker_order = execute_bingx_vst_order(candidate, ai)
