@@ -232,7 +232,7 @@ def _min_ai_confidence() -> int:
 def mechanical_gate_rejection(direction: Direction, regime: MarketRegime,
                               higher_tf_bias: dict[str, str | None], confidence: int) -> str | None:
     """Mechanical, code-level pre-trade filters the AI's own reasoning cannot
-    override. See RESEARCH_FINDINGS.md #1 (volatility regime) and #2
+    override. See docs/RESEARCH_FINDINGS.md #1 (volatility regime) and #2
     (multi-timeframe alignment): both are evidence-backed, not LLM judgment.
 
     A bias of None ("not enough history to judge") never blocks a trade — only
