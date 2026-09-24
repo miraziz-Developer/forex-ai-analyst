@@ -1,0 +1,35 @@
+services:
+  app:
+    build: .
+    container_name: forex-ai-analyst
+    env_file: .env
+    environment:
+      PORT: "5000"
+    restart: unless-stopped
+    # Published only on localhost; the public entrypoint is Caddy (HTTPS)
+    # when DOMAIN is set, or you reach it through your own reverse proxy.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-5000}:5000"
+
+  # Automatic HTTPS (Let's Encrypt) so the Telegram webhook works. Started by
+  # deploy.sh only when DOMAIN is set in .env.
+  caddy:
+    image: caddy:2-alpine
+    container_name: forex-ai-analyst-https
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
