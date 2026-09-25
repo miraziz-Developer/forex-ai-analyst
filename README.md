@@ -10,7 +10,9 @@ BingX public perpetual-swap closed OHLCV
   → validated BingX VST order + Turso journal + Telegram notification
 ```
 
-By default auto-execution is off. When either `OPENAI_API_KEY` or the complete Azure OpenAI configuration (`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`) is present alongside `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET`, a valid AI trade proposal places a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
+The AI brain is **Claude Opus 5 on Azure AI Foundry** (`AZURE_ANTHROPIC_ENDPOINT`, `AZURE_ANTHROPIC_API_KEY`, optional `AZURE_ANTHROPIC_DEPLOYMENT` / `AZURE_ANTHROPIC_EFFORT`), with decisions constrained by a strict JSON schema. OpenAI / Azure OpenAI is the fallback when Claude is not configured, declines, truncates, or is unreachable; if every provider fails the decision is `SKIP`.
+
+By default auto-execution is off. When an AI provider (Claude Foundry, `OPENAI_API_KEY`, or the complete Azure OpenAI configuration `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`) is present alongside `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET`, a valid AI trade proposal places a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
 
 ## Quick start on your own server (Docker)
 

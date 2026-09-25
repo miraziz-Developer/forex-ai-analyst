@@ -13,6 +13,7 @@ load_dotenv()
 
 from flask import Flask, abort, jsonify, request
 
+from forex_ai_analyst.shared import llm
 from forex_ai_analyst.trading.application.ai_trader import AITradeDecision, decide
 from forex_ai_analyst.trading.domain.indicators import higher_timeframe_bias
 from forex_ai_analyst.trading.domain.models import Direction, MarketRegime
@@ -86,11 +87,7 @@ def trade_readiness() -> dict:
         blockers.append("bingx_api_key_missing")
     if not os.environ.get("BINGX_SECRET", "").strip():
         blockers.append("bingx_secret_missing")
-    standard_ai = bool(os.environ.get("OPENAI_API_KEY", "").strip())
-    azure_ai = all(os.environ.get(key, "").strip() for key in (
-        "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT"
-    ))
-    if not standard_ai and not azure_ai:
+    if not llm.any_configured():
         blockers.append("ai_provider_missing")
     try:
         controls = runtime_controls.settings()
