@@ -30,6 +30,19 @@ services:
         sync: false
       - key: KILL_SWITCH
         value: "false"
+      # Lab-validated signal engine; the AI only vetoes (see docs/LAB_REPORT.md).
+      - key: SIGNAL_ENGINE
+        value: "donchian_4h"
+      - key: DONCHIAN_ENTRY_N
+        value: "100"
+      - key: DONCHIAN_EXIT_N
+        value: "20"
+      - key: DONCHIAN_STOP_ATR
+        value: "3.0"
+      - key: DONCHIAN_LEVERAGE
+        value: "3"
+      - key: AI_VETO
+        value: "on"
       # Primary AI brain: Claude on Azure AI Foundry; OpenAI below is the fallback.
       - key: AZURE_ANTHROPIC_ENDPOINT
         sync: false

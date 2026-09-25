@@ -71,6 +71,11 @@ def _preview_control(chat_id: str, updates: dict) -> str:
             f"Muddati: {expires.strftime('%H:%M UTC')}")
 
 
+def _target_label(row: dict) -> str:
+    target = float(row.get("target_price") or 0)
+    return f"{target:.6g}" if target > 0 else "kanal chiqishi"
+
+
 def _allowed(chat_id: str) -> bool:
     allowed = {item.strip() for item in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if item.strip()}
     return bool(allowed) and chat_id in allowed
@@ -230,7 +235,7 @@ def _positions_text() -> str:
         risk = f"${float(row['risk_usdt']):.4g}" if row.get("risk_usdt") is not None else "—"
         quantity = f"{float(row['quantity']):.8g}" if row.get("quantity") is not None else "—"
         lines.append(f"• {row['pair']} {row['direction']}{order}\n"
-                     f"  Entry: {float(row['entry_price']):.6g} | TP: {float(row['target_price']):.6g} | SL: {float(row['stop_price']):.6g}\n"
+                     f"  Entry: {float(row['entry_price']):.6g} | TP: {_target_label(row)} | SL: {float(row['stop_price']):.6g}\n"
                      f"  Risk: {risk} | Quantity: {quantity}")
     return "\n".join(lines)
 

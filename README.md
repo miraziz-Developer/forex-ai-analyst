@@ -3,11 +3,11 @@
 One `main` branch and one Render web service:
 
 ```text
-BingX public perpetual-swap closed OHLCV
-  → 15m regime + positioning / liquidity context
-  → PDF knowledge excerpts + prior VST trade reviews
-  → structured AI decision (SKIP, WATCH, PROPOSE_TRADE)
-  → validated BingX VST order + Turso journal + Telegram notification
+BingX public perpetual-swap closed 4h OHLCV
+  → lab-validated Donchian breakout signal (long only)
+  → position / cooldown / runtime-control gates
+  → Claude Opus 5 veto (news, events, crowding) — approve by default
+  → BingX VST order with exchange-side stop + Turso journal + Telegram notification
 ```
 
 The AI brain is **Claude Opus 5 on Azure AI Foundry** (`AZURE_ANTHROPIC_ENDPOINT`, `AZURE_ANTHROPIC_API_KEY`, optional `AZURE_ANTHROPIC_DEPLOYMENT` / `AZURE_ANTHROPIC_EFFORT`), with decisions constrained by a strict JSON schema. OpenAI / Azure OpenAI is the fallback when Claude is not configured, declines, truncates, or is unreachable; if every provider fails the decision is `SKIP`.
@@ -47,7 +47,20 @@ Dockerfile, docker-compose.yml, deploy.sh, deploy/Caddyfile   self-hosting
 render.yaml                 Render blueprint
 ```
 
-## Contextual AI controls
+## Signal engine (default: `donchian_4h`)
+
+The live signal comes from the research lab's best walk-forward family, using the exact function the lab backtested (`forex_ai_analyst.lab.strategies.donchian`):
+
+- **Entry:** a closed 4h candle closes above the prior `DONCHIAN_ENTRY_N` (100) bar high. Long only; shorts lost money in research.
+- **Exit:** exchange-side stop at `DONCHIAN_STOP_ATR` (3) × ATR, or a closed 4h candle below the `DONCHIAN_EXIT_N` (20) bar low. There is no fixed take-profit; a 60-day max hold is a safety net only.
+- **AI = veto only** (`AI_VETO=on`): Claude can block an entry for a concrete reason a price rule cannot see (scheduled event, exchange/asset news, extreme crowding). It never creates or resizes a trade, and if no AI provider answers the mechanical signal stands. Vetoes are journaled as `REJECTED` so their value can be measured later.
+- Sizing uses the same balance-relative runtime controls (`RISK PCT`, daily loss, margin utilisation), one position per pair, `MAX_CONCURRENT_POSITIONS`, and per-pair cooldown.
+
+Evidence and its limits are in [`docs/LAB_REPORT.md`](docs/LAB_REPORT.md): out-of-sample 2023-2026 Sharpe 1.28, CAGR 9.5%, max DD -6.1% at 1% risk per pair sleeve (≈0.2% of total equity per trade), but a deflated Sharpe of 0.83 misses the 0.90 promotion gate. This is a **VST forward test**, not a proven edge. Runtime `RISK PCT 1` risks about 5× the research sizing per trade; use `RISK PCT 0.2`–`0.5` to stay near the researched drawdown.
+
+`SIGNAL_ENGINE=contextual_ai` restores the legacy LLM signal generator described below.
+
+## Contextual AI controls (legacy engine)
 
 - The model receives closed 5m/15m/1h candles, regime features, funding/open-interest/order-book context, retrieved PDF excerpts, earlier outcome reviews, and a bounded VST account snapshot (equity, available margin, unrealized PnL, strategy exposure and daily strategy PnL).
 - It may select `SKIP`, `WATCH`, or `PROPOSE_TRADE`; for a proposal it dynamically chooses direction, entry, stop, target, risk, leverage and cooldown.
