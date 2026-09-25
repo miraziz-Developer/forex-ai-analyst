@@ -196,25 +196,31 @@ def _executed_quantity(order: dict) -> float | None:
 
 
 def place_market_order(symbol: str, direction: str, quantity: float,
-                        take_profit_price: float, stop_loss_price: float, *, leverage: int = DEFAULT_LEVERAGE) -> dict:
-    """direction: 'BUY' opens/adds to a LONG, 'SELL' opens/adds to a SHORT."""
+                        take_profit_price: float | None, stop_loss_price: float, *,
+                        leverage: int = DEFAULT_LEVERAGE) -> dict:
+    """direction: 'BUY' opens/adds to a LONG, 'SELL' opens/adds to a SHORT.
+
+    take_profit_price=None places only the exchange-side stop loss (trend
+    strategies exit on a channel break instead of a fixed target).
+    """
     position_side = "LONG" if direction == "BUY" else "SHORT"
     if not 1 <= int(leverage) <= 125:
         raise ValueError("BingX VST leverage must be 1..125")
     set_leverage(symbol, position_side, int(leverage))
 
-    take_profit = {"type": "TAKE_PROFIT_MARKET", "stopPrice": take_profit_price, "workingType": "MARK_PRICE"}
     stop_loss = {"type": "STOP_MARKET", "stopPrice": stop_loss_price, "workingType": "MARK_PRICE"}
-
-    data = _signed_request("POST", "/openApi/swap/v2/trade/order", {
+    params = {
         "symbol": symbol,
         "side": direction,
         "positionSide": position_side,
         "type": "MARKET",
         "quantity": str(quantity),
-        "takeProfit": json.dumps(take_profit),
         "stopLoss": json.dumps(stop_loss),
-    })
+    }
+    if take_profit_price is not None:
+        params["takeProfit"] = json.dumps({"type": "TAKE_PROFIT_MARKET", "stopPrice": take_profit_price,
+                                           "workingType": "MARK_PRICE"})
+    data = _signed_request("POST", "/openApi/swap/v2/trade/order", params)
     order = data["data"]["order"]
     return {"order_id": str(order["orderId"]), "fill_price": float(order["avgPrice"]),
             "filled_quantity": _executed_quantity(order)}

@@ -16,7 +16,8 @@ from flask import Flask, abort, jsonify, request
 from forex_ai_analyst.shared import llm
 from forex_ai_analyst.trading.application.ai_trader import AITradeDecision, decide
 from forex_ai_analyst.trading.domain.indicators import higher_timeframe_bias
-from forex_ai_analyst.trading.domain.models import Direction, MarketRegime
+from forex_ai_analyst.trading.application import trend_engine
+from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateStatus, Decision, Direction, MarketRegime
 from forex_ai_analyst.trading.infrastructure.institutional_data import fetch_institutional_context
 from forex_ai_analyst.trading.application.learning import summarize as learning_summary
 from forex_ai_analyst.trading.infrastructure.market_intelligence import context_for_pair, status as intelligence_status
@@ -310,8 +311,126 @@ def preflight_rejection(direction: Direction, last_price: float, stop: float, ta
     return None
 
 
+TREND_MAX_HOLD_DAYS = 60  # safety net only; the strategy exits on its stop or exit channel
+
+
+def signal_engine() -> str:
+    """donchian_4h (default, lab-validated) or contextual_ai (legacy LLM signal generator)."""
+    return os.environ.get("SIGNAL_ENGINE", trend_engine.STRATEGY).strip().lower() or trend_engine.STRATEGY
+
+
+def execute_trend_order(pair: str, signal: dict, risk_usdt: float, leverage: int) -> dict | None:
+    """Long market order with an exchange-side stop only (no fixed take-profit)."""
+    if not demo_execution_enabled():
+        return None
+    from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
+    quantity = broker.round_quantity(pair, risk_usdt / signal["stop_distance"])
+    if quantity <= 0:
+        raise ValueError(f"BingX VST quantity rounds to zero for {pair}; risk too small")
+    order = broker.place_market_order(pair, "BUY", quantity, None, signal["stop"], leverage=leverage)
+    filled = order.get("filled_quantity") or quantity
+    result = {**order, "quantity": filled}
+    if float(order["fill_price"]) > signal["stop"]:
+        return result
+    # Filled at or through the stop: never hold a position that is already stopped out.
+    close_order = broker.close_position(pair, "BUY", filled)
+    execution_alerts.report(f"trend-fill-through-stop:{pair}:{signal['candle_time_ms']}",
+                            f"{pair} Donchian fill stopdan past bo'ldi va darhol yopildi.", severity="CRITICAL",
+                            details={"pair": pair, "fill_price": order["fill_price"], "stop": signal["stop"]})
+    return {**result, "unsafe_fill": True, "close_order": close_order}
+
+
+def format_trend_signal(pair: str, signal: dict, params, risk_usdt: float, quantity: float,
+                        broker_order: dict | None, veto_note: str) -> str:
+    execution = (f"BingX VST demo order ochildi: #{broker_order['order_id']}; fill: {broker_order['fill_price']:.6g}."
+                 if broker_order else "Paper signal (VST execution o'chiq).")
+    return (f"📈 DONCHIAN 4H LONG — {pair}\n\n"
+            f"Breakout: 4h yopilish {signal['entry']:.6g} > {params.entry_n}-bar max {signal['channel_high']:.6g}\n"
+            f"Stop ({params.stop_atr:g} ATR, birjada): {signal['stop']:.6g}\n"
+            f"Chiqish: 4h yopilish {params.exit_n}-bar minimumdan pastda yoki stop\n"
+            f"Risk: ${risk_usdt:.2f}; quantity: {quantity:.8g}; leverage {params.leverage}x\n"
+            f"AI veto: yo'q ({veto_note})\n" + execution)
+
+
+def scan_pair_trend(pair: str, provider: MarketDataProvider, now: datetime | None = None,
+                    account_state: dict | None = None) -> list[dict]:
+    """Lab-validated Donchian 4h breakout, AI as veto only (docs/LAB_REPORT.md)."""
+    now = now or datetime.now(timezone.utc)
+    params = trend_engine.params_from_environment()
+    bars = provider.fetch_closed_bars(pair, trend_engine.TIMEFRAME, max(params.history_bars, 260), now)
+    signal = trend_engine.entry_signal(bars, params)
+    if not signal:
+        return [{"status": "SKIP", "reason": "Donchian breakout yo'q"}]
+    regime = classify_market_regime(bars)
+    candidate = CandidateSignal(
+        strategy=trend_engine.STRATEGY, pair=pair.upper(), direction=Direction.BUY, regime=regime.regime,
+        entry_price=signal["entry"], stop_price=signal["stop"], target_price=0.0,  # 0 = no fixed target
+        expires_at=now + timedelta(days=TREND_MAX_HOLD_DAYS), signal_timeframe="4h", trend_timeframe="4h",
+        candle_time_ms=signal["candle_time_ms"], score=100,
+        confirmations=(f"4h close {signal['entry']:.6g} > {params.entry_n}-bar high {signal['channel_high']:.6g}",),
+        invalidation_reason=f"4h close below {params.exit_n}-bar low, or stop",
+        features={"entry_n": params.entry_n, "exit_n": params.exit_n, "stop_atr": params.stop_atr,
+                  "stop_distance": signal["stop_distance"]})
+    if candidate.fingerprint in scalping_storage.existing_fingerprints():
+        return [{"status": "SKIP", "reason": "bu 4h breakout allaqachon ko'rib chiqilgan"}]
+    account_snapshot = account_state if account_state is not None else _vst_account_context()
+    if not account_snapshot.get("available"):
+        return [{"status": "SKIP", "reason": "VST balance state unavailable; order yuborilmadi"}]
+    runtime_rejection = runtime_controls.trade_permitted(pair, 0.0, params.leverage, 0)
+    if runtime_rejection:
+        key = "kill-switch" if "kill switch" in runtime_rejection else f"risk-control:{pair}:{runtime_rejection}"
+        execution_alerts.report(key, f"{pair} yangi VST order bloklandi: {runtime_rejection}.",
+                                severity="CRITICAL" if key == "kill-switch" else "WARNING",
+                                details={"pair": pair, "reason": runtime_rejection})
+        return [{"status": "SKIP", "reason": runtime_rejection}]
+    execution_alerts.resolve("kill-switch", note="runtime execution permission restored")
+    execution_alerts.resolve_prefix(f"risk-control:{pair}:", note="runtime execution permission restored")
+    gate = position_gate_rejection(pair, scalping_storage.open_paper_signals(),
+                                   scalping_storage.closed_paper_signals(50), now)
+    if gate:
+        logger.info("%s Donchian signal rejected by position gate: %s", pair, gate)
+        return [{"status": "SKIP", "reason": gate}]
+    controls = runtime_controls.settings()
+    risk_limit = runtime_controls.balance_risk_limit(account_snapshot, controls)
+    try:
+        margin_supported = (float(account_snapshot["available_usdt"]) * float(controls["max_margin_utilization_pct"])
+                            / 100 * params.leverage * signal["stop_distance"] / signal["entry"])
+    except (KeyError, TypeError, ValueError):
+        margin_supported = 0.0
+    risk_usdt = min(risk_limit or 0.0, margin_supported)
+    if risk_usdt <= 0:
+        return [{"status": "SKIP", "reason": "VST balansi yoki marja risk uchun yetarli emas"}]
+
+    vetoed, veto_note = trend_engine.ai_veto(pair, signal, {
+        "regime": str(regime.regime), "regime_features": regime.features,
+        "institutional": fetch_institutional_context(pair.upper()), "market_intelligence": context_for_pair(pair, now)})
+    if vetoed:
+        # Journaled so the veto's value can be measured later against the deterministic signal.
+        scalping_storage.log_decision(Decision(candidate, CandidateStatus.REJECTED, f"AI veto: {veto_note}"))
+        return [{"status": "VETO", "reason": veto_note}]
+    try:
+        broker_order = execute_trend_order(pair, signal, risk_usdt, params.leverage)
+        quantity = float((broker_order or {}).get("quantity", risk_usdt / signal["stop_distance"]))
+        scalping_storage.mark_accepted(Decision(candidate, CandidateStatus.ACCEPTED_PAPER, "Donchian 4h breakout"),
+                                       risk_usdt, quantity, broker_order)
+        if broker_order and broker_order.get("unsafe_fill"):
+            close_order = broker_order["close_order"]
+            scalping_storage.resolve_paper_signal(candidate.fingerprint, CandidateStatus.LOSS,
+                                                  float(close_order["fill_price"]), close_order)
+            return [{"status": "SKIP", "reason": "fill stopdan past bo'ldi va darhol yopildi"}]
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            send_telegram_message(format_trend_signal(pair, signal, params, risk_usdt, quantity, broker_order, veto_note),
+                                  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+        return [{"status": "ACCEPTED_PAPER", "fingerprint": candidate.fingerprint, "strategy": trend_engine.STRATEGY}]
+    except Exception as exc:
+        logger.exception("Donchian VST execution failed for %s", pair)
+        return [{"status": "SKIP", "reason": f"Donchian/VST execution failed: {type(exc).__name__}"}]
+
+
 def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None,
               account_state: dict | None = None) -> list[dict]:
+    if signal_engine() == trend_engine.STRATEGY:
+        return scan_pair_trend(pair, provider, now, account_state)
     now = now or datetime.now(timezone.utc)
     bars_15m = provider.fetch_closed_bars(pair, "15m", 260, now)
     bars_5m = provider.fetch_closed_bars(pair, "5m", 120, now)
@@ -340,7 +459,6 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
     ai = decide(snapshot, excerpts, scalping_storage.recent_ai_reviews(pair), controls)
     if not ai.proposes_trade:
         return [{"status": ai.action, "reason": ai.rationale}]
-    from forex_ai_analyst.trading.domain.models import CandidateStatus, Decision
     try:
         # Journaled proposals and VST orders use identical balance-relative
         # sizing, so no proposal is accepted without a fresh account snapshot.

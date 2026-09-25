@@ -226,6 +226,7 @@ class HealthTests(unittest.TestCase):
     @patch("forex_ai_analyst.interfaces.http.context_for_pair", return_value={})
     @patch("forex_ai_analyst.interfaces.http.fetch_institutional_context", return_value={})
     @patch("forex_ai_analyst.interfaces.http.scalping_storage.log_market_snapshot")
+    @patch.dict(os.environ, {"SIGNAL_ENGINE": "contextual_ai"})
     @patch("forex_ai_analyst.interfaces.http.classify_market_regime")
     def test_scan_pair_skips_unavailable_vst_balance_without_journaling_or_execution(
             self, regime, log_snapshot, institutional, intelligence, learning, closed_signals, account_context,

@@ -137,8 +137,9 @@ def open_paper_positions() -> int:
 
 
 def open_paper_signals() -> list[dict]:
-    result = storage._execute("""SELECT fingerprint, pair, direction, entry_price, target_price, stop_price,
-                               expiry_time, risk_usdt, quantity, broker_order_id, broker_quantity, candle_time
+    result = storage._execute("""SELECT fingerprint, strategy, pair, direction, entry_price, target_price, stop_price,
+                               expiry_time, risk_usdt, quantity, broker_order_id, broker_quantity,
+                               broker_fill_price, candle_time
                                FROM signal_candidates WHERE status = 'ACCEPTED_PAPER'""")
     return storage._rows_as_dicts(result)
 
