@@ -15,10 +15,8 @@ from forex_ai_analyst.interfaces import telegram_chat as telegram_chat
 class TelegramBotTests(unittest.TestCase):
     @patch("forex_ai_analyst.interfaces.telegram_chat.context", return_value={"safety": "read-only"})
     def test_ai_chat_uses_azure_openai_deployment_when_configured(self, context):
-        completion = Mock()
-        completion.choices = [SimpleNamespace(message=SimpleNamespace(content="Azure javob"))]
         client = Mock()
-        client.chat.completions.create.return_value = completion
+        client.responses.create.return_value = SimpleNamespace(output_text="Azure javob")
         openai_module = SimpleNamespace(OpenAI=Mock(return_value=client))
         with patch.dict(sys.modules, {"openai": openai_module}), patch.dict(os.environ, {
             "OPENAI_API_KEY": "", "AZURE_OPENAI_API_KEY": "azure-key",
@@ -28,9 +26,9 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(telegram_chat.answer("Holat qanday?"), "Azure javob")
         openai_module.OpenAI.assert_called_once_with(
             api_key="azure-key", base_url="https://resource.openai.azure.com/openai/v1/")
-        request = client.chat.completions.create.call_args.kwargs
+        request = client.responses.create.call_args.kwargs
         self.assertEqual(request["model"], "chat-deployment")
-        self.assertNotIn("max_tokens", request)
+        self.assertNotIn("temperature", request)
 
     @patch("forex_ai_analyst.interfaces.telegram_bot.requests.post")
     def test_configure_webhook_registers_callback_updates_and_commands(self, post):

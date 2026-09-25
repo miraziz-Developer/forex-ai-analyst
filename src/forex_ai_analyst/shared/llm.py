@@ -95,16 +95,18 @@ def _openai_client_and_model():
     return OpenAI(api_key=_env("OPENAI_API_KEY")), os.environ.get("AI_TRADER_MODEL", "gpt-4o-mini")
 
 
-def _openai_call(system: str, user: str, json_mode: bool) -> str | None:
+def _openai_call(system: str, user: str, schema: dict | None) -> str | None:
+    """Responses API: works for current Foundry/OpenAI deployments, including
+    reasoning models that reject `temperature` and Chat Completions."""
     try:
         client, model = _openai_client_and_model()
-        kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
-        response = client.chat.completions.create(
-            model=model, temperature=0.2,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], **kwargs)
-        return response.choices[0].message.content
+        kwargs = {}
+        if schema is not None:
+            kwargs["text"] = {"format": {"type": "json_schema", "name": "decision", "schema": schema, "strict": True}}
+        response = client.responses.create(model=model, instructions=system, input=user, **kwargs)
+        return response.output_text
     except Exception as exc:  # the openai package raises many error types; fail closed
-        logger.warning("OpenAI fallback failed: %s", type(exc).__name__)
+        logger.warning("OpenAI provider failed: %s", type(exc).__name__)
         return None
 
 
@@ -117,7 +119,7 @@ def complete_json(system: str, user: str, schema: dict) -> tuple[dict | None, st
         if parsed is not None:
             return parsed, "claude"
     if openai_configured():
-        parsed = _loads(_openai_call(system, user, json_mode=True))
+        parsed = _loads(_openai_call(system, user, schema))
         if parsed is not None:
             return parsed, "openai"
     return None, "none"
@@ -129,7 +131,7 @@ def complete_text(system: str, user: str) -> tuple[str | None, str]:
         if text:
             return text, "claude"
     if openai_configured():
-        text = _openai_call(system, user, json_mode=False)
+        text = _openai_call(system, user, None)
         if text:
             return text, "openai"
     return None, "none"
