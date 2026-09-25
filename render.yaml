@@ -30,6 +30,15 @@ services:
         sync: false
       - key: KILL_SWITCH
         value: "false"
+      # Primary AI brain: Claude on Azure AI Foundry; OpenAI below is the fallback.
+      - key: AZURE_ANTHROPIC_ENDPOINT
+        sync: false
+      - key: AZURE_ANTHROPIC_API_KEY
+        sync: false
+      - key: AZURE_ANTHROPIC_DEPLOYMENT
+        value: "claude-opus-5"
+      - key: AZURE_ANTHROPIC_EFFORT
+        value: "high"
       - key: OPENAI_API_KEY
         sync: false
       - key: AZURE_OPENAI_API_KEY

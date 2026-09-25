@@ -58,7 +58,7 @@ class AITraderTests(unittest.TestCase):
         self.assertEqual(client_class.return_value.chat.completions.create.call_args.kwargs["model"], "trader-deployment")
 
     def test_azure_base_url_adds_openai_v1_for_resource_endpoint(self):
-        from forex_ai_analyst.trading.application.ai_trader import _azure_openai_base_url
+        from forex_ai_analyst.shared.llm import _azure_openai_base_url
         self.assertEqual(_azure_openai_base_url("https://example.openai.azure.com/"),
                          "https://example.openai.azure.com/openai/v1/")
 
@@ -71,6 +71,60 @@ class AITraderTests(unittest.TestCase):
             decide({}, [], [], limits)
         payload = client_class.return_value.chat.completions.create.call_args.kwargs["messages"][1]["content"]
         self.assertEqual(__import__("json").loads(payload)["execution_limits"], limits)
+
+
+CLAUDE_ENV = {"AZURE_ANTHROPIC_ENDPOINT": "https://proj.services.ai.azure.com/anthropic/",
+              "AZURE_ANTHROPIC_API_KEY": "foundry-key", "AZURE_ANTHROPIC_DEPLOYMENT": "claude-opus-5"}
+TRADE = ('{"action":"PROPOSE_TRADE","rationale":"breakout","invalidation":"close below 98","confidence":78,'
+         '"direction":"BUY","entry_price":100,"stop_price":98,"target_price":104,"risk_usdt":1,"leverage":2,'
+         '"cooldown_minutes":60,"citations":[]}')
+
+
+def claude_response(text, stop_reason="end_turn"):
+    from types import SimpleNamespace
+    return SimpleNamespace(stop_reason=stop_reason, content=[SimpleNamespace(type="text", text=text)])
+
+
+class ClaudeFoundryTests(unittest.TestCase):
+    @patch("forex_ai_analyst.shared.llm._claude_client")
+    def test_claude_is_primary_and_uses_structured_output_schema(self, client):
+        client.return_value.messages.create.return_value = claude_response(TRADE)
+        with patch.dict(os.environ, {**CLAUDE_ENV, "OPENAI_API_KEY": "fallback-key"}, clear=False):
+            result = decide({}, [], [])
+        self.assertEqual((result.action, result.direction, result.raw["provider"]), ("PROPOSE_TRADE", Direction.BUY, "claude"))
+        request = client.return_value.messages.create.call_args.kwargs
+        self.assertEqual(request["model"], "claude-opus-5")
+        self.assertEqual(request["output_config"]["format"]["type"], "json_schema")
+        self.assertIn("action", request["output_config"]["format"]["schema"]["required"])
+
+    @patch("openai.OpenAI")
+    @patch("forex_ai_analyst.shared.llm._claude_client")
+    def test_refusal_falls_back_to_openai(self, client, openai_class):
+        client.return_value.messages.create.return_value = claude_response("", stop_reason="refusal")
+        message = Mock(content='{"action":"WATCH","rationale":"wait","invalidation":"none","confidence":40}')
+        openai_class.return_value.chat.completions.create.return_value.choices = [Mock(message=message)]
+        with patch.dict(os.environ, {**CLAUDE_ENV, "OPENAI_API_KEY": "fallback-key"}, clear=False):
+            result = decide({}, [], [])
+        self.assertEqual((result.action, result.raw["provider"]), ("WATCH", "openai"))
+
+    @patch("forex_ai_analyst.shared.llm._claude_client")
+    def test_claude_api_error_without_fallback_fails_closed(self, client):
+        import anthropic
+        import httpx2
+        request = httpx2.Request("POST", "https://proj.services.ai.azure.com/anthropic/v1/messages")
+        client.return_value.messages.create.side_effect = anthropic.APIConnectionError(request=request)
+        env = {**CLAUDE_ENV, "OPENAI_API_KEY": "", "AZURE_OPENAI_API_KEY": "", "AZURE_OPENAI_ENDPOINT": "",
+               "AZURE_OPENAI_DEPLOYMENT": ""}
+        with patch.dict(os.environ, env, clear=False):
+            result = decide({}, [], [])
+        self.assertEqual(result.action, "SKIP")
+
+    @patch("forex_ai_analyst.shared.llm._claude_client")
+    def test_truncated_claude_answer_is_never_acted_on(self, client):
+        client.return_value.messages.create.return_value = claude_response(TRADE[:40], stop_reason="max_tokens")
+        env = {**CLAUDE_ENV, "OPENAI_API_KEY": "", "AZURE_OPENAI_API_KEY": ""}
+        with patch.dict(os.environ, env, clear=False):
+            self.assertEqual(decide({}, [], []).action, "SKIP")
 
 
 if __name__ == "__main__":

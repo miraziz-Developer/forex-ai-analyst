@@ -17,3 +17,5 @@ production_*.json
 .strategy_cache/
 .multi_strategy_cache/
 .backtest_cache/
+.lab_cache/
+research_output/

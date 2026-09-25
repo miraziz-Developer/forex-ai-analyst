@@ -5,12 +5,12 @@ Invalid, unavailable, or non-trade responses always fail closed to ``SKIP``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 import json
-import os
 from typing import Any
 
+from forex_ai_analyst.shared import llm
 from forex_ai_analyst.trading.domain.models import CandidateSignal, Direction, MarketRegime
 
 
@@ -116,44 +116,48 @@ def _parse(payload: dict[str, Any]) -> AITradeDecision:
     )
 
 
-def _azure_openai_base_url(endpoint: str) -> str:
-    """Return an OpenAI-compatible Azure endpoint without duplicating ``/openai/v1``."""
-    normalized = endpoint.rstrip("/")
-    if normalized.endswith("/openai/v1"):
-        return f"{normalized}/"
-    return f"{normalized}/openai/v1/"
+_NULLABLE_NUMBER = {"anyOf": [{"type": "number"}, {"type": "null"}]}
+
+# Enforced by Claude structured outputs; the OpenAI fallback gets json_object mode and
+# the same validation_error() check after parsing.
+DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["SKIP", "WATCH", "PROPOSE_TRADE"]},
+        "rationale": {"type": "string"},
+        "invalidation": {"type": "string"},
+        "confidence": {"type": "integer"},
+        "direction": {"anyOf": [{"type": "string", "enum": ["BUY", "SELL"]}, {"type": "null"}]},
+        "entry_price": _NULLABLE_NUMBER,
+        "stop_price": _NULLABLE_NUMBER,
+        "target_price": _NULLABLE_NUMBER,
+        "risk_usdt": {"type": "number"},
+        "leverage": {"type": "integer"},
+        "cooldown_minutes": {"type": "integer"},
+        "citations": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["action", "rationale", "invalidation", "confidence", "direction", "entry_price", "stop_price",
+                 "target_price", "risk_usdt", "leverage", "cooldown_minutes", "citations"],
+    "additionalProperties": False,
+}
 
 
 def decide(snapshot: dict[str, Any], knowledge: list[dict], reviews: list[dict],
            execution_limits: dict[str, Any] | None = None) -> AITradeDecision:
     """Ask the configured model for a decision; safely skip if it cannot answer."""
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    azure_api_key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
-    azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
-    azure_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
-    if not api_key and not (azure_api_key and azure_endpoint and azure_deployment):
-        return _skip("OpenAI yoki Azure OpenAI credentials configured emas; contextual AI trade ochilmadi")
+    if not llm.any_configured():
+        return _skip("AI provider (Claude Foundry yoki OpenAI) sozlanmagan; contextual AI trade ochilmadi")
+    context = {"market_snapshot": snapshot, "knowledge_excerpts": knowledge, "prior_reviews": reviews,
+               "execution_limits": execution_limits or {}}
+    payload, provider = llm.complete_json(SYSTEM_PROMPT, json.dumps(context, ensure_ascii=False, default=str),
+                                          DECISION_SCHEMA)
+    if payload is None:
+        return _skip("AI qarori olinmadi: provider javob bermadi yoki rad etdi")
     try:
-        if azure_api_key and azure_endpoint and azure_deployment:
-            # Azure AI Foundry and Azure OpenAI expose an OpenAI-compatible
-            # /openai/v1 endpoint. AzureOpenAI would turn a Foundry URL into
-            # .../openai/v1/openai/deployments/... and produce a 404.
-            from openai import OpenAI
-            client = OpenAI(api_key=azure_api_key, base_url=_azure_openai_base_url(azure_endpoint))
-            model = azure_deployment
-        else:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
-            model = os.environ.get("AI_TRADER_MODEL", "gpt-4o-mini")
-        context = {"market_snapshot": snapshot, "knowledge_excerpts": knowledge, "prior_reviews": reviews,
-                   "execution_limits": execution_limits or {}}
-        response = client.chat.completions.create(
-            model=model,
-            temperature=0.2, response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": SYSTEM_PROMPT},
-                      {"role": "user", "content": json.dumps(context, ensure_ascii=False, default=str)}],
-        )
-        result = _parse(json.loads(response.choices[0].message.content or "{}"))
-        return result if result.validation_error() is None else _skip(f"AI qarori yaroqsiz: {result.validation_error()}")
-    except Exception as exc:
-        return _skip(f"AI qarori olinmadi: {type(exc).__name__}")
+        result = _parse(payload)
+    except (TypeError, ValueError) as exc:
+        return _skip(f"AI qarori yaroqsiz: {type(exc).__name__}")
+    error = result.validation_error()
+    if error:
+        return _skip(f"AI qarori yaroqsiz: {error}")
+    return replace(result, raw={**result.raw, "provider": provider})
