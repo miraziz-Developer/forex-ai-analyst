@@ -215,8 +215,8 @@ class RoundQuantityTests(unittest.TestCase):
         self.assertEqual(broker.round_quantity("BTC-USDT", 0.00009), 0.0)
 
     def test_every_live_pair_has_contract_specs(self):
-        for pair in ("BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT",
-                     "DOGE-USDT", "ADA-USDT", "LINK-USDT", "AVAX-USDT", "LTC-USDT"):
+        from forex_ai_analyst.interfaces.http import configured_pairs
+        for pair in configured_pairs():
             self.assertIn(pair, broker.QUANTITY_PRECISION)
             self.assertIn(pair, broker.MIN_QUANTITY)
 

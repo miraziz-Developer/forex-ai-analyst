@@ -17,12 +17,14 @@ class PositionGateTests(unittest.TestCase):
     def test_existing_open_position_on_the_same_pair_is_blocked(self):
         self.assertIsNotNone(app.position_gate_rejection("BTC-USDT", [{"pair": "BTC-USDT"}], [], self.NOW))
 
-    def test_other_pairs_open_do_not_block_until_the_default_cap_of_six(self):
-        opens = [{"pair": p} for p in ("ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT", "DOGE-USDT")]
+    def test_other_pairs_open_do_not_block_until_the_default_cap_of_twelve(self):
+        opens = [{"pair": p} for p in ("ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT", "DOGE-USDT", "ADA-USDT",
+                                        "LINK-USDT", "LTC-USDT", "DOT-USDT", "TRX-USDT", "BCH-USDT")]
         with patch.dict(os.environ):
             os.environ.pop("MAX_CONCURRENT_POSITIONS", None)
+            os.environ.pop("MULTI_STRATEGY_PAIRS", None)
             self.assertIsNone(app.position_gate_rejection("BTC-USDT", opens, [], self.NOW))
-            opens.append({"pair": "ADA-USDT"})
+            opens.append({"pair": "NEAR-USDT"})
             self.assertIsNotNone(app.position_gate_rejection("BTC-USDT", opens, [], self.NOW))
 
     @patch.dict(os.environ, {"MAX_CONCURRENT_POSITIONS": "5"})

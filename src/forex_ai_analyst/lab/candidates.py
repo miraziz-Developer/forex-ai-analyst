@@ -134,3 +134,37 @@ def xs_momentum_returns(daily: dict[str, list[dict]], funding: dict[str, list[tu
                    for p, w in weights.items())
         out[today] = ret
     return out
+
+
+# ---------- regime study (docs/REGIME_STUDY.md) ----------
+
+DAY_MS = 86_400_000
+
+
+def btc_bull_regime(bars: list[dict], btc_daily: list[dict], sma_days: int = 200) -> list[bool | None]:
+    """Per 4h bar: True when BTC's last *completed* daily close is above its sma_days SMA, False
+    below, None before enough history. A daily bar counts only once it has closed by the 4h bar's close."""
+    closes = [b["close"] for b in btc_daily]
+    ends = [b["datetime"] + DAY_MS for b in btc_daily]
+    out, j, window_sum = [], -1, 0.0
+    step = (bars[1]["datetime"] - bars[0]["datetime"]) if len(bars) > 1 else 4 * 3_600_000
+    for bar in bars:
+        bar_end = bar["datetime"] + step
+        while j + 1 < len(btc_daily) and ends[j + 1] <= bar_end:
+            j += 1
+            window_sum += closes[j]
+            if j >= sma_days:
+                window_sum -= closes[j - sma_days]
+        out.append(None if j + 1 < sma_days else closes[j] > window_sum / sma_days)
+    return out
+
+
+def regime_donchian(bars: list[dict], bull: list[bool | None], *, shorts: bool) -> Signals:
+    """Live Donchian (100/20/3 ATR); longs only in a BTC bull regime and, if shorts, shorts only in a
+    bear regime. Exits are the normal channel exits so an open trade is never force-closed by the filter."""
+    from forex_ai_analyst.lab.strategies import donchian
+
+    base = donchian(bars, entry_n=100, exit_n=20, stop_atr=3.0, sides="both" if shorts else "long")
+    le = [bool(e and bull[i] is True) for i, e in enumerate(base.long_entry)]
+    se = [bool(shorts and e and bull[i] is False) for i, e in enumerate(base.short_entry)]
+    return Signals(le, se, base.long_exit, base.short_exit, base.stop_distance)

@@ -22,9 +22,13 @@ DEFAULT_LEVERAGE = int(os.environ.get("LEVERAGE", "3"))
 # our small fixed pair set rather than an extra API call per order.
 # From BingX /openApi/swap/v2/quote/contracts (quantityPrecision, tradeMinQuantity), checked 2026-09-26.
 QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 2, "SOL-USDT": 2, "XRP-USDT": 0, "BNB-USDT": 2,
-                      "DOGE-USDT": 0, "ADA-USDT": 0, "LINK-USDT": 1, "AVAX-USDT": 0, "LTC-USDT": 1}
+                      "DOGE-USDT": 0, "ADA-USDT": 0, "LINK-USDT": 1, "AVAX-USDT": 0, "LTC-USDT": 1,
+                      "DOT-USDT": 1, "TRX-USDT": 0, "BCH-USDT": 2, "UNI-USDT": 0, "NEAR-USDT": 0,
+                      "ATOM-USDT": 2, "ETC-USDT": 2, "FIL-USDT": 1, "AAVE-USDT": 1, "XLM-USDT": 0}
 MIN_QUANTITY = {"BTC-USDT": 0.0001, "ETH-USDT": 0.01, "SOL-USDT": 0.02, "XRP-USDT": 2, "BNB-USDT": 0.01,
-                "DOGE-USDT": 21, "ADA-USDT": 8, "LINK-USDT": 0.2, "AVAX-USDT": 1, "LTC-USDT": 0.1}
+                "DOGE-USDT": 21, "ADA-USDT": 8, "LINK-USDT": 0.2, "AVAX-USDT": 1, "LTC-USDT": 0.1,
+                "DOT-USDT": 1.7, "TRX-USDT": 6, "BCH-USDT": 0.01, "UNI-USDT": 1, "NEAR-USDT": 1,
+                "ATOM-USDT": 1.09, "ETC-USDT": 0.21, "FIL-USDT": 1.9, "AAVE-USDT": 0.1, "XLM-USDT": 10}
 _HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 
