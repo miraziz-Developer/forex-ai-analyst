@@ -73,10 +73,13 @@ def stats(returns: dict[str, float]) -> dict:
             "vol_pct": round(pstdev(values) * math.sqrt(DAYS_PER_YEAR) * 100, 2)}
 
 
-def deflated_sharpe(values: list[float], trial_sharpes: list[float]) -> float | None:
-    """Probability that the true Sharpe exceeds the best-of-N-trials noise level."""
-    t, n = len(values), len(trial_sharpes)
-    if t < 30 or n < 2:
+def deflated_sharpe(values: list[float], trial_sharpes: list[float], n_trials: int | None = None) -> float | None:
+    """Probability that the true Sharpe exceeds the best-of-N-trials noise level.
+
+    n_trials defaults to len(trial_sharpes); pass a larger count when earlier searches whose
+    Sharpes are not at hand must still be paid for (the dispersion comes from trial_sharpes)."""
+    t, n = len(values), n_trials or len(trial_sharpes)
+    if t < 30 or n < 2 or len(trial_sharpes) < 2:
         return None
     m, sd = mean(values), pstdev(values)
     if not sd:
