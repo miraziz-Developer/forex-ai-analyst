@@ -149,8 +149,23 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(scan_pair.call_count, len(app.configured_pairs()))
         for call in scan_pair.call_args_list:
             self.assertIs(call.kwargs["account_state"], context.return_value)
-        resolve.assert_called_once_with("vst-account-context-unavailable",
+        resolve.assert_any_call("vst-account-context-unavailable",
                                         note="BingX VST account holati tiklandi; scan qayta yoqildi.", notify=True)
+
+    def test_misspelled_pair_is_skipped_not_scanned(self):
+        with patch.dict(os.environ, {"MULTI_STRATEGY_PAIRS": "BTC-USDT, xlm-usd ,ETH-USDT,BTC-USDT"}):
+            self.assertEqual(app.configured_pairs(), ("BTC-USDT", "ETH-USDT"))
+            self.assertEqual(app.invalid_configured_pairs(), ("XLM-USD",))
+
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.report")
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.resolve")
+    @patch("forex_ai_analyst.interfaces.http._vst_account_context", return_value={"available": True})
+    @patch("forex_ai_analyst.interfaces.http.scan_pair")
+    def test_invalid_pair_raises_one_config_alert(self, scan_pair, context, resolve, report):
+        with patch.dict(os.environ, {"MULTI_STRATEGY_PAIRS": "BTC-USDT,XLM-USD"}):
+            app.scan_configured_pairs(unittest.mock.Mock())
+        self.assertEqual(report.call_args.args[0], "config-invalid-pairs")
+        self.assertEqual([c.args[0] for c in scan_pair.call_args_list], ["BTC-USDT"])
 
     @patch("forex_ai_analyst.interfaces.http.execution_alerts.resolve")
     def test_retired_static_risk_alerts_are_closed_for_each_configured_pair(self, resolve):
