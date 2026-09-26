@@ -34,11 +34,23 @@ DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
 _VST_ACCOUNT_DIAGNOSTIC: dict = {"available": None, "last_checked_at": None}
 
 
-def configured_pairs() -> tuple[str, ...]:
-    pairs = tuple(item.strip().upper() for item in os.environ.get(
+def _requested_pairs() -> tuple[str, ...]:
+    return tuple(item.strip().upper() for item in os.environ.get(
         "MULTI_STRATEGY_PAIRS", "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT,DOGE-USDT,ADA-USDT,LINK-USDT,AVAX-USDT,LTC-USDT,DOT-USDT,TRX-USDT,BCH-USDT,UNI-USDT,NEAR-USDT,ATOM-USDT,ETC-USDT,FIL-USDT,AAVE-USDT,XLM-USDT").split(",") if item.strip())
+
+
+def invalid_configured_pairs() -> tuple[str, ...]:
+    """Requested pairs with no known BingX contract spec (typos such as XLM-USD)."""
+    from forex_ai_analyst.trading.infrastructure.bingx_broker import QUANTITY_PRECISION
+    return tuple(p for p in _requested_pairs() if p not in QUANTITY_PRECISION)
+
+
+def configured_pairs() -> tuple[str, ...]:
+    """Requested pairs that have a validated BingX contract spec; unknown ones are skipped."""
+    invalid = set(invalid_configured_pairs())
+    pairs = tuple(p for p in dict.fromkeys(_requested_pairs()) if p not in invalid)
     if not pairs:
-        raise ValueError("MULTI_STRATEGY_PAIRS must contain at least one pair")
+        raise ValueError("MULTI_STRATEGY_PAIRS must contain at least one supported pair")
     return pairs
 
 
@@ -273,6 +285,14 @@ def scan_configured_pairs(provider: MarketDataProvider) -> None:
         return
     execution_alerts.resolve("vst-account-context-unavailable", note="BingX VST account holati tiklandi; scan qayta yoqildi.",
                              notify=True)
+    invalid = invalid_configured_pairs()
+    if invalid:
+        execution_alerts.report("config-invalid-pairs",
+                                f"MULTI_STRATEGY_PAIRS ichida noma'lum juftlik(lar): {', '.join(invalid)}. "
+                                "Ular o‘tkazib yuborildi; Render'da nomini tuzating (masalan XLM-USDT).",
+                                details={"invalid": list(invalid)}, remind_after_minutes=None)
+    else:
+        execution_alerts.resolve("config-invalid-pairs", note="pair list valid")
     for pair in configured_pairs():
         try:
             scan_pair(pair, provider, account_state=account_state)
