@@ -118,7 +118,36 @@ def resolve_prefix(key_prefix: str, *, note: str | None = None) -> int:
         return 0
 
 
+def resolve_orphaned(prefixes: tuple[str, ...], live_fingerprints: set[str], *, note: str) -> int:
+    """Close per-row incidents (``<prefix><fingerprint>``) whose journal row is no longer open.
+
+    Such incidents are only re-evaluated while their row is open, so a row
+    closed by another path would otherwise keep its incident OPEN forever.
+    """
+    stale = []
+    for prefix in prefixes:
+        escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = storage._rows_as_dicts(storage._execute(
+            "SELECT incident_key FROM execution_incidents WHERE state = 'OPEN' AND incident_key LIKE ? ESCAPE '\\'",
+            [f"{escaped}%"]))
+        stale += [row["incident_key"] for row in rows if row["incident_key"][len(prefix):] not in live_fingerprints]
+    now = datetime.now(timezone.utc).isoformat()
+    details = json.dumps({"resolution": note}, ensure_ascii=False, sort_keys=True)
+    closed = 0
+    for start in range(0, len(stale), 200):
+        chunk = stale[start:start + 200]
+        result = storage._execute(
+            f"""UPDATE execution_incidents SET state = 'RESOLVED', resolved_at = ?, details_json = ?
+                WHERE state = 'OPEN' AND incident_key IN ({", ".join("?" * len(chunk))})""", [now, details, *chunk])
+        closed += result.get("affected_row_count", 0)
+    return closed
+
+
 def status() -> dict:
     rows = storage._rows_as_dicts(storage._execute("""SELECT count(*) AS open_incidents,
         max(last_seen_at) AS last_incident_at FROM execution_incidents WHERE state = 'OPEN'"""))
-    return rows[0] if rows else {"open_incidents": 0, "last_incident_at": None}
+    summary = rows[0] if rows else {"open_incidents": 0, "last_incident_at": None}
+    by_type = storage._rows_as_dicts(storage._execute("""SELECT CASE WHEN instr(incident_key, ':') > 0
+        THEN substr(incident_key, 1, instr(incident_key, ':') - 1) ELSE incident_key END AS kind, count(*) AS n
+        FROM execution_incidents WHERE state = 'OPEN' GROUP BY kind ORDER BY n DESC"""))
+    return {**summary, "by_type": {row["kind"]: row["n"] for row in by_type}}

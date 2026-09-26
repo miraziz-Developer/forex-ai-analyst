@@ -36,6 +36,24 @@ class ExecutionAlertTests(unittest.TestCase):
         self.assertIn("state = 'RESOLVED'", execute.call_args.args[0])
         self.assertEqual(execute.call_args.args[1][-1], "k")
 
+    @patch("forex_ai_analyst.operations.incidents.storage._rows_as_dicts")
+    @patch("forex_ai_analyst.operations.incidents.storage._execute", return_value={"affected_row_count": 1})
+    def test_orphaned_row_incidents_close_but_live_ones_stay(self, execute, rows_as_dicts):
+        rows_as_dicts.return_value = [{"incident_key": "open-sla:gone"}, {"incident_key": "open-sla:live"}]
+        closed = execution_alerts.resolve_orphaned(("open-sla:",), {"live"}, note="row closed")
+        self.assertEqual(closed, 1)
+        sql, params = execute.call_args.args
+        self.assertIn("IN (?)", sql)
+        self.assertEqual(params[2:], ["open-sla:gone"])
+
+    @patch("forex_ai_analyst.operations.incidents.storage._execute")
+    @patch("forex_ai_analyst.operations.incidents.storage._rows_as_dicts")
+    def test_status_breaks_open_incidents_down_by_type(self, rows_as_dicts, execute):
+        rows_as_dicts.side_effect = [[{"open_incidents": 3, "last_incident_at": "t"}],
+                                     [{"kind": "open-sla", "n": 2}, {"kind": "kill-switch", "n": 1}]]
+        self.assertEqual(execution_alerts.status(), {"open_incidents": 3, "last_incident_at": "t",
+                                                     "by_type": {"open-sla": 2, "kill-switch": 1}})
+
     @patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "chat"})
     @patch("forex_ai_analyst.operations.incidents.storage._execute", return_value={"affected_row_count": 1})
     @patch("forex_ai_analyst.operations.incidents.send_telegram_message")
