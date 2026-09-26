@@ -140,13 +140,29 @@ def closed_paper_signals(limit: int = 10) -> list[dict]:
                                FROM signal_candidates
                                WHERE status IN ('WIN', 'LOSS', 'TIME_EXIT')
                                ORDER BY outcome_time DESC LIMIT ?""", [safe_limit])
-    rows = storage._rows_as_dicts(result)
+    return _with_realized_pnl(storage._rows_as_dicts(result))
+
+
+def _with_realized_pnl(rows: list[dict]) -> list[dict]:
     for row in rows:
         multiplier = 1 if row["direction"] == "BUY" else -1
         entry = float(row.get("broker_fill_price") or row["entry_price"])
         row["realized_pnl_usdt"] = ((float(row["outcome_price"]) - entry) *
                                     float(row["quantity"]) * multiplier)
     return rows
+
+
+def closed_strategy_trades(strategy: str, limit: int = 500) -> list[dict]:
+    """One strategy's most recent resolved trades, oldest first, with the risk each one took."""
+    safe_limit = min(max(int(limit), 1), 1000)
+    result = storage._execute("""SELECT * FROM (
+                                   SELECT fingerprint, pair, direction, entry_price, broker_fill_price, outcome_price,
+                                          outcome_time, status, quantity, risk_usdt, actual_net_pnl_usdt
+                                   FROM signal_candidates
+                                   WHERE strategy = ? AND status IN ('WIN', 'LOSS', 'TIME_EXIT')
+                                   ORDER BY outcome_time DESC LIMIT ?) ORDER BY outcome_time ASC""",
+                              [strategy, safe_limit])
+    return _with_realized_pnl(storage._rows_as_dicts(result))
 
 
 def performance_summary() -> dict:
