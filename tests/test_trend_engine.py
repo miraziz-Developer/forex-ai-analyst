@@ -157,10 +157,32 @@ class ResolveTrendTests(unittest.TestCase):
     def test_exit_channel_break_closes_vst_position_at_market(self, storage):
         storage.open_paper_signals.return_value = [self.row(broker_quantity=0.5, broker_fill_price=110.5)]
         with patch.object(scheduler.broker, "get_position", return_value={"positionAmt": "0.5"}), \
-                patch.object(scheduler.broker, "close_position", return_value={"order_id": "c", "fill_price": 90.2}) as close:
+                patch.object(scheduler.broker, "close_position", return_value={"order_id": "c", "fill_price": 90.2}) as close, \
+                patch.object(scheduler.broker, "cancel_stop_orders", return_value=1) as cancel:
             scheduler.resolve_open_paper_signals(self.provider([], AFTER_BREAKDOWN))
         close.assert_called_once_with("BTC-USDT", "BUY", 0.5)
+        cancel.assert_called_once_with("BTC-USDT", "LONG")
         self.assertEqual(storage.resolve_paper_signal.call_args.args[1:3], (CandidateStatus.LOSS, 90.2))
+
+    def test_broker_row_is_not_closed_from_a_last_price_wick(self, storage):
+        storage.open_paper_signals.return_value = [self.row(broker_quantity=0.5, broker_fill_price=110.5)]
+        entry_open = AFTER_BREAKDOWN[40]["datetime"] + FOUR_H
+        wick = [{"datetime": entry_open + 300_000, "open": 60, "high": 61, "low": 49, "close": 55, "volume": 1}]
+        with patch.object(scheduler.broker, "get_position", return_value={"positionAmt": "0.5"}), \
+                patch.object(scheduler.broker, "close_position") as close:
+            scheduler.resolve_open_paper_signals(self.provider(wick, FLAT_THEN_BREAKOUT))
+        storage.resolve_paper_signal.assert_not_called()
+        close.assert_not_called()
+
+    @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts.report")
+    def test_failed_stop_cancel_after_close_is_alerted_not_fatal(self, report, storage):
+        storage.open_paper_signals.return_value = [self.row(broker_quantity=0.5, broker_fill_price=110.5)]
+        with patch.object(scheduler.broker, "get_position", return_value={"positionAmt": "0.5"}), \
+                patch.object(scheduler.broker, "close_position", return_value={"order_id": "c", "fill_price": 90.2}), \
+                patch.object(scheduler.broker, "cancel_stop_orders", side_effect=RuntimeError("down")):
+            scheduler.resolve_open_paper_signals(self.provider([], AFTER_BREAKDOWN))
+        storage.resolve_paper_signal.assert_called_once()
+        self.assertTrue(report.call_args.args[0].startswith("stale-stop:"))
 
     def test_stop_touch_after_entry_is_a_loss_at_the_stop(self, storage):
         storage.open_paper_signals.return_value = [self.row()]

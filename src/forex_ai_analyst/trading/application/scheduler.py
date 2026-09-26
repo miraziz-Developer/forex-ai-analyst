@@ -150,15 +150,22 @@ _FOUR_HOURS_MS = 4 * 3_600_000
 
 
 def _resolve_trend_signal(signal: dict, provider: MarketDataProvider, now: datetime) -> None:
-    """Donchian 4h: a stop touch is a LOSS at the stop (the exchange stop fills it);
-    an exit-channel break or the max-hold safety net closes at market."""
+    """Donchian 4h exits.
+
+    Paper rows: a 5m stop touch is a LOSS at the stop. Broker rows are never
+    closed from candles: the exchange stop triggers on mark price, which can
+    differ from the last-price candles, so only the broker's own close fill
+    (matched by recover_open_vst_orders) closes them. An exit-channel break or
+    the max-hold safety net closes at market and cancels the leftover stop.
+    """
     params = trend_engine.params_from_environment()
-    entry_open_ms = int(signal["candle_time"]) + _FOUR_HOURS_MS  # entered after the breakout bar closed
-    stop = float(signal["stop_price"])
-    for bar in provider.fetch_closed_bars(signal["pair"], "5m", 300, now):
-        if int(bar["datetime"]) >= entry_open_ms and float(bar["low"]) <= stop:
-            scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.LOSS, stop)
-            return
+    if not signal.get("broker_quantity"):
+        entry_open_ms = int(signal["candle_time"]) + _FOUR_HOURS_MS  # entered after the breakout bar closed
+        stop = float(signal["stop_price"])
+        for bar in provider.fetch_closed_bars(signal["pair"], "5m", 300, now):
+            if int(bar["datetime"]) >= entry_open_ms and float(bar["low"]) <= stop:
+                scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.LOSS, stop)
+                return
     bars_4h = provider.fetch_closed_bars(signal["pair"], trend_engine.TIMEFRAME, params.history_bars, now)
     expired = datetime.fromisoformat(signal["expiry_time"]) <= now
     if not (expired or trend_engine.exit_signal(bars_4h, params, int(signal["candle_time"]))):
@@ -171,15 +178,21 @@ def _resolve_trend_signal(signal: dict, provider: MarketDataProvider, now: datet
                                               exit_price)
         return
     if not broker.get_position(signal["pair"], "LONG"):
-        execution_alerts.report(f"missing-position:{signal['fingerprint']}",
-                                f"{signal['pair']} #{signal['fingerprint'][:10]} Donchian exit uchun broker pozitsiyasi topilmadi; jurnal yopilmadi.",
-                                details={"fingerprint": signal["fingerprint"], "pair": signal["pair"]})
+        # Already closed on the exchange (normally its stop): recover_open_vst_orders
+        # closes the journal from the matching broker fill, or alerts if none matches.
+        logger.info("%s Donchian exit: no broker position; left to broker-fill recovery", signal["pair"])
         return
     close_order = broker.close_position(signal["pair"], "BUY", float(signal["broker_quantity"]))
     exit_price = float(close_order["fill_price"])
     scalping_storage.resolve_paper_signal(signal["fingerprint"],
                                           CandidateStatus.WIN if exit_price > entry else CandidateStatus.LOSS,
-                                          exit_price, close_order)
+                                          exit_price, close_order, close_reason="EXIT_CHANNEL" if not expired else "MAX_HOLD")
+    try:
+        broker.cancel_stop_orders(signal["pair"], "LONG")
+    except Exception as exc:
+        execution_alerts.report(f"stale-stop:{signal['fingerprint']}",
+                                f"{signal['pair']} yopilgandan keyin eski stop order bekor qilinmadi; BingX'da qo‘lda tekshiring.",
+                                details={"fingerprint": signal["fingerprint"], **_broker_error_details(exc)})
 
 
 def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
