@@ -176,13 +176,18 @@ class ReconciliationTests(unittest.TestCase):
     @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts")
     @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_paper_signals",
            return_value=[{"fingerprint": "still-open"}])
-    def test_housekeeping_closes_legacy_and_orphaned_incidents_only(self, open_rows, alerts):
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.closed_vst_orders_pending_reconciliation",
+           return_value=[{"fingerprint": "still-pending"}])
+    def test_housekeeping_closes_legacy_and_orphaned_incidents_only(self, pending, open_rows, alerts):
+        alerts.resolve_orphaned.return_value = 0
         multi_strategy_scheduler.housekeeping()
-        alerts.resolve_prefix.assert_called_once_with("unreconciled-order:", note=ANY)
-        prefixes, live = alerts.resolve_orphaned.call_args.args
+        resolved_prefixes = [c.args[0] for c in alerts.resolve_prefix.call_args_list]
+        self.assertEqual(resolved_prefixes, ["unreconciled-order:", "unsafe-fill-closed:", "unsafe-fill-missing-position:"])
+        (row_prefixes, live), (recon_prefixes, pending_set) = [c.args for c in alerts.resolve_orphaned.call_args_list]
         self.assertEqual(live, {"still-open"})
-        self.assertIn("open-sla:", prefixes)
-        self.assertNotIn("stale-stop:", prefixes)   # needs a manual check on BingX, never auto-closed
+        self.assertIn("open-sla:", row_prefixes)
+        self.assertNotIn("stale-stop:", row_prefixes)   # needs a manual check on BingX, never auto-closed
+        self.assertEqual((recon_prefixes, pending_set), (("reconciliation-failure:",), {"still-pending"}))
 
     @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts.report")
     @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.closed_vst_orders_pending_reconciliation")

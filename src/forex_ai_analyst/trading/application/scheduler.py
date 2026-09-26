@@ -299,11 +299,17 @@ _ROW_INCIDENT_PREFIXES = ("open-sla:", "open-position:", "missing-position:", "r
 
 def housekeeping() -> None:
     """Close incidents that can no longer change: legacy per-order reconciliation
-    notices and per-row incidents whose journal row has since closed."""
+    notices, events from the retired LLM engine, per-row incidents whose journal
+    row has since closed, and reconciliation failures for rows no longer pending."""
     execution_alerts.resolve_prefix("unreconciled-order:",
                                     note="BingX VST does not report order-level P&L; journal P&L is used")
+    for prefix in ("unsafe-fill-closed:", "unsafe-fill-missing-position:"):
+        execution_alerts.resolve_prefix(prefix, note="one-off event from the retired LLM engine")
     live = {row["fingerprint"] for row in scalping_storage.open_paper_signals()}
     closed = execution_alerts.resolve_orphaned(_ROW_INCIDENT_PREFIXES, live, note="journal row is no longer open")
+    pending = {row["fingerprint"] for row in scalping_storage.closed_vst_orders_pending_reconciliation()}
+    closed += execution_alerts.resolve_orphaned(("reconciliation-failure:",), pending,
+                                                note="row is no longer pending reconciliation")
     if closed:
         logger.info("housekeeping resolved %s orphaned incidents", closed)
 
