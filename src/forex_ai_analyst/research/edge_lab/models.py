@@ -32,7 +32,7 @@ def content_hash(value) -> str:
     return hashlib.sha256(canonical_json(value).encode()).hexdigest()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RawRecord:
     """One observation with its provenance.
 
