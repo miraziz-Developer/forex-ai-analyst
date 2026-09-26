@@ -40,7 +40,7 @@ services:
       - key: DONCHIAN_LEVERAGE
         value: "3"
       - key: MAX_CONCURRENT_POSITIONS
-        value: "3"
+        value: "6"
       - key: TRADE_COOLDOWN_MINUTES
         value: "60"
       - key: BINGX_API_KEY
@@ -52,7 +52,7 @@ services:
       - key: MULTI_STRATEGY_PROVIDER
         value: "bingx"
       - key: MULTI_STRATEGY_PAIRS
-        value: "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT"
+        value: "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT,DOGE-USDT,ADA-USDT,LINK-USDT,AVAX-USDT,LTC-USDT"
       - key: MULTI_STRATEGY_SCAN_INTERVAL_SECONDS
         value: "300"
       - key: VST_OPEN_SLA_MINUTES

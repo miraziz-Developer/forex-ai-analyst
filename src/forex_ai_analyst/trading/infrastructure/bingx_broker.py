@@ -20,7 +20,11 @@ DEFAULT_LEVERAGE = int(os.environ.get("LEVERAGE", "3"))
 
 # BingX requires quantity rounded to each contract's precision; hardcoded for
 # our small fixed pair set rather than an extra API call per order.
-QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 3, "SOL-USDT": 2, "XRP-USDT": 0, "BNB-USDT": 2}
+# From BingX /openApi/swap/v2/quote/contracts (quantityPrecision, tradeMinQuantity), checked 2026-09-26.
+QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 2, "SOL-USDT": 2, "XRP-USDT": 0, "BNB-USDT": 2,
+                      "DOGE-USDT": 0, "ADA-USDT": 0, "LINK-USDT": 1, "AVAX-USDT": 0, "LTC-USDT": 1}
+MIN_QUANTITY = {"BTC-USDT": 0.0001, "ETH-USDT": 0.01, "SOL-USDT": 0.02, "XRP-USDT": 2, "BNB-USDT": 0.01,
+                "DOGE-USDT": 21, "ADA-USDT": 8, "LINK-USDT": 0.2, "AVAX-USDT": 1, "LTC-USDT": 0.1}
 _HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 
@@ -90,8 +94,11 @@ def _signed_request(method: str, path: str, params: dict) -> dict:
 
 
 def round_quantity(symbol: str, raw_quantity: float) -> float:
+    """Round down to the contract's step; 0 when below BingX's minimum order size."""
     precision = QUANTITY_PRECISION.get(symbol, 4)
-    return round(raw_quantity, precision)
+    step = 10 ** -precision
+    quantity = round(int(raw_quantity / step + 1e-9) * step, precision)   # never round risk up
+    return quantity if quantity >= MIN_QUANTITY.get(symbol, 0) else 0.0
 
 
 def get_vst_usdt_balance() -> dict:

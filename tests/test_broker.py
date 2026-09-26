@@ -204,6 +204,23 @@ class BingXVstBalanceTests(unittest.TestCase):
         self.assertNotIn("signature", str(raised.exception.diagnostic))
 
 
+class RoundQuantityTests(unittest.TestCase):
+    def test_rounds_down_to_bingx_step_so_risk_is_never_exceeded(self):
+        self.assertEqual(broker.round_quantity("ETH-USDT", 1.23999), 1.23)     # BingX ETH step is 0.01
+        self.assertEqual(broker.round_quantity("DOGE-USDT", 1234.9), 1234.0)
+        self.assertEqual(broker.round_quantity("LINK-USDT", 0.29), 0.2)
+
+    def test_below_bingx_minimum_order_size_is_zero(self):
+        self.assertEqual(broker.round_quantity("DOGE-USDT", 20.9), 0.0)
+        self.assertEqual(broker.round_quantity("BTC-USDT", 0.00009), 0.0)
+
+    def test_every_live_pair_has_contract_specs(self):
+        for pair in ("BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT",
+                     "DOGE-USDT", "ADA-USDT", "LINK-USDT", "AVAX-USDT", "LTC-USDT"):
+            self.assertIn(pair, broker.QUANTITY_PRECISION)
+            self.assertIn(pair, broker.MIN_QUANTITY)
+
+
 class CancelStopOrderTests(unittest.TestCase):
     @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_only_stop_orders_on_the_closed_side_are_cancelled(self, signed_request):
