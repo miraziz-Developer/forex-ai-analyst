@@ -272,11 +272,11 @@ def reconcile_closed_vst_orders() -> None:
             if close:
                 values.extend([close.get("realized_pnl_usdt"), close.get("commission_usdt")])
             if any(value is None for value in values):
+                # A known VST data limitation, not an unsafe condition: record it on the
+                # row (journal P&L stays the measure) instead of opening an incident.
                 scalping_storage.mark_reconciliation(row["fingerprint"], "UNAVAILABLE",
                                                      "order response order-level P&L/fee bermadi; income taqsimlanmadi")
-                execution_alerts.report(f"unreconciled-order:{row['fingerprint']}",
-                                        f"{row['pair']} #{row['fingerprint'][:10]} uchun order-level fee/P&L mavjud emas.",
-                                        details={"fingerprint": row["fingerprint"]})
+                logger.info("%s order-level P&L/fee unavailable; journal P&L retained", row["fingerprint"])
                 continue
             gross = float(entry["realized_pnl_usdt"]) + (float(close["realized_pnl_usdt"]) if close else 0.0)
             fees = abs(float(entry["commission_usdt"])) + (abs(float(close["commission_usdt"])) if close else 0.0)
@@ -291,6 +291,21 @@ def reconcile_closed_vst_orders() -> None:
                                     f"{row['pair']} #{row['fingerprint'][:10]} reconciliation qayta urinadi "
                                     f"({_broker_error_summary(exc)}).",
                                     details=details)
+
+
+# Per-row incidents that are only re-checked while their journal row is open.
+_ROW_INCIDENT_PREFIXES = ("open-sla:", "open-position:", "missing-position:", "resolver-failure:", "recovery-failure:")
+
+
+def housekeeping() -> None:
+    """Close incidents that can no longer change: legacy per-order reconciliation
+    notices and per-row incidents whose journal row has since closed."""
+    execution_alerts.resolve_prefix("unreconciled-order:",
+                                    note="BingX VST does not report order-level P&L; journal P&L is used")
+    live = {row["fingerprint"] for row in scalping_storage.open_paper_signals()}
+    closed = execution_alerts.resolve_orphaned(_ROW_INCIDENT_PREFIXES, live, note="journal row is no longer open")
+    if closed:
+        logger.info("housekeeping resolved %s orphaned incidents", closed)
 
 
 def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: MarketDataProvider,
@@ -310,6 +325,8 @@ def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: Mar
     scheduler.add_job(recover_open_vst_orders, "interval", seconds=interval_seconds,
                       id="bingx-vst-recovery", max_instances=1, coalesce=True,
                       next_run_time=datetime.now(timezone.utc))
+    scheduler.add_job(housekeeping, "interval", hours=6, id="incident-housekeeping", max_instances=1,
+                      coalesce=True, next_run_time=datetime.now(timezone.utc))
     scheduler.add_job(degradation.check, "interval", hours=1, id="strategy-degradation", max_instances=1,
                       coalesce=True, next_run_time=datetime.now(timezone.utc))
     scheduler.start()

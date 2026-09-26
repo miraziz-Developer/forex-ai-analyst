@@ -106,8 +106,8 @@ curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" -d "
 - Every open VST row is reconciled against the broker on each run: a missing position is closed in the journal only when a single, fully matching close fill exists in BingX order history; anything ambiguous stays open and raises a CRITICAL incident.
 - A position still open past its planned expiry plus `VST_OPEN_SLA_MINUTES` raises a warning.
 - **Degradation alarm:** every hour, closed Donchian trades are measured in R (P&L / risk taken) and compared with the backtest of the same configuration (291 trades: 38% wins, mean +0.83R, worst losing run 11, worst drawdown -19R). Ten losses in a row or -12R from the peak raises a WARNING; 13 in a row or -16R raises a CRITICAL alert recommending `STOP`. It alerts only; the operator decides.
-- Closed VST rows are reconciled by order ID; P&L, fees and funding are stored only when BingX reports them for that order, never estimated.
-- Incidents are durable, deduplicated and sent to Telegram; `/health` exposes them without failing liveness.
+- Closed VST rows are reconciled by order ID; P&L, fees and funding are stored only when BingX reports them for that order, never estimated. BingX VST often omits order-level values; such rows are marked `UNAVAILABLE` and the journal P&L is used, without raising an incident.
+- Incidents are durable, deduplicated and sent to Telegram; `/health` shows the open count and a breakdown by type without failing liveness. A housekeeping job (startup and every 6 hours) closes per-row incidents whose journal row has already closed; `stale-stop` incidents always need a manual check on BingX.
 - `KILL_SWITCH=true` (or Telegram `STOP`) blocks every new order; it does not close open positions. Create BingX keys with **no withdrawal permission**.
 
 ## HTTP endpoints

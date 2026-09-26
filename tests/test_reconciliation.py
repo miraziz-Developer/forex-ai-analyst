@@ -171,7 +171,18 @@ class ReconciliationTests(unittest.TestCase):
         with patch.object(multi_strategy_scheduler, "broker", broker):
             multi_strategy_scheduler.reconcile_closed_vst_orders()
         mark.assert_called_once_with("f-2", "UNAVAILABLE", ANY)
-        alert.assert_called_once()
+        alert.assert_not_called()   # a known VST data limitation, recorded on the row, not an incident
+
+    @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_paper_signals",
+           return_value=[{"fingerprint": "still-open"}])
+    def test_housekeeping_closes_legacy_and_orphaned_incidents_only(self, open_rows, alerts):
+        multi_strategy_scheduler.housekeeping()
+        alerts.resolve_prefix.assert_called_once_with("unreconciled-order:", note=ANY)
+        prefixes, live = alerts.resolve_orphaned.call_args.args
+        self.assertEqual(live, {"still-open"})
+        self.assertIn("open-sla:", prefixes)
+        self.assertNotIn("stale-stop:", prefixes)   # needs a manual check on BingX, never auto-closed
 
     @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts.report")
     @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.closed_vst_orders_pending_reconciliation")
