@@ -30,7 +30,7 @@ DEFAULTS = {
     "demo_execution": None,  # None defers to deployment environment.
     "blocked_pairs": [],
     # These are balance-relative VST safety envelopes, not fixed USDT or
-    # leverage limits.  The AI chooses its values within the live envelope.
+    # leverage limits; the strategy sizes each trade within the live envelope.
     "risk_per_trade_pct": 1.0,
     "max_daily_loss_pct": 5.0,
     "max_margin_utilization_pct": 25.0,
@@ -156,5 +156,5 @@ def trade_permitted(pair: str, risk_usdt: float, leverage: int, cooldown_minutes
     if pair.upper() in {str(item).upper() for item in values["blocked_pairs"]}:
         return f"{pair.upper()} runtime bloklangan"
     if not 1 <= int(leverage) <= 125:
-        return "AI leverage BingX 1..125x oralig‘idan tashqarida"
+        return "leverage BingX 1..125x oralig‘idan tashqarida"
     return None

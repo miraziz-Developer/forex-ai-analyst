@@ -214,27 +214,6 @@ def structure_event(bars: list[dict], span: int = 2) -> str | None:
     return None
 
 
-def higher_timeframe_bias(bars: list[dict], fast: int = 20, slow: int = 50) -> str | None:
-    """Lightweight EMA trend bias for a higher timeframe (BULLISH/BEARISH/None).
-
-    Deliberately cheaper than classify_market_regime (which needs 255 bars for
-    EMA200): a daily/4H alignment check only needs a fast/slow EMA read, not a
-    full regime classification. None means "not enough history to judge" and
-    must never be treated as agreement by a caller enforcing alignment.
-    """
-    if len(bars) < slow:
-        return None
-    closes = values(bars)
-    ema_fast, ema_slow = ema(closes, fast), ema(closes, slow)
-    if ema_fast is None or ema_slow is None:
-        return None
-    if ema_fast > ema_slow and closes[-1] > ema_slow:
-        return "BULLISH"
-    if ema_fast < ema_slow and closes[-1] < ema_slow:
-        return "BEARISH"
-    return None
-
-
 def candle_confirmation(bars: list[dict]) -> str | None:
     """Classify the newest closed candle only when it has meaningful directional action."""
     if len(bars) < 2:

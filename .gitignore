@@ -24,3 +24,4 @@ research_output/edge_lab/*
 # Sealed hypothesis manifests, data-source manifest and the append-only ledger are audit evidence.
 !research_output/edge_lab/hypotheses/
 !research_output/edge_lab/manifests/
+.edge_lab_cache/

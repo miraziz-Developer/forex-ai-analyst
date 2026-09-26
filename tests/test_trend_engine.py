@@ -46,27 +46,6 @@ class SignalTests(unittest.TestCase):
         self.assertFalse(trend_engine.exit_signal(AFTER_BREAKDOWN, PARAMS, AFTER_BREAKDOWN[-1]["datetime"]))
 
 
-class VetoTests(unittest.TestCase):
-    SIGNAL = {"entry": 110.0, "stop": 104.0}
-
-    @patch.dict(os.environ, {"AI_VETO": "off"})
-    def test_veto_can_be_disabled(self):
-        self.assertEqual(trend_engine.ai_veto("BTC-USDT", self.SIGNAL, {})[0], False)
-
-    @patch("forex_ai_analyst.shared.llm.any_configured", return_value=True)
-    @patch("forex_ai_analyst.shared.llm.complete_json", return_value=({"decision": "VETO", "reason": "exchange halt"}, "claude"))
-    def test_explicit_veto_blocks(self, complete, configured):
-        vetoed, note = trend_engine.ai_veto("BTC-USDT", self.SIGNAL, {})
-        self.assertTrue(vetoed)
-        self.assertIn("exchange halt", note)
-        self.assertEqual(complete.call_args.args[2], trend_engine.VETO_SCHEMA)
-
-    @patch("forex_ai_analyst.shared.llm.any_configured", return_value=True)
-    @patch("forex_ai_analyst.shared.llm.complete_json", return_value=(None, "none"))
-    def test_unavailable_ai_never_blocks_the_mechanical_signal(self, complete, configured):
-        self.assertFalse(trend_engine.ai_veto("BTC-USDT", self.SIGNAL, {})[0])
-
-
 class BrokerTests(unittest.TestCase):
     @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_stop_only_order_sends_no_take_profit(self, signed_request):
@@ -77,15 +56,41 @@ class BrokerTests(unittest.TestCase):
         self.assertEqual(json.loads(params["stopLoss"])["stopPrice"], 104.0)
 
 
+SIGNAL = {"candle_time_ms": 1, "entry": 110.0, "stop": 104.0, "stop_distance": 6.0, "channel_high": 101.0}
+
+
+@patch("forex_ai_analyst.interfaces.http.demo_execution_enabled", return_value=True)
+@patch("forex_ai_analyst.trading.infrastructure.bingx_broker.round_quantity", side_effect=lambda pair, q: round(q, 3))
+class TrendOrderTests(unittest.TestCase):
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.place_market_order",
+           return_value={"order_id": "o1", "fill_price": 110.2, "filled_quantity": 1.666})
+    def test_long_stop_only_order_sized_from_risk(self, place, *_):
+        result = app.execute_trend_order("BTC-USDT", SIGNAL, 10.0, 3)
+        place.assert_called_once_with("BTC-USDT", "BUY", 1.667, None, 104.0, leverage=3)
+        self.assertEqual(result["quantity"], 1.666)
+        self.assertNotIn("unsafe_fill", result)
+
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.report")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.close_position", return_value={"order_id": "c1", "fill_price": 103.9})
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.place_market_order",
+           return_value={"order_id": "o1", "fill_price": 103.5})
+    def test_fill_through_the_stop_is_closed_immediately(self, place, close, alert, *_):
+        result = app.execute_trend_order("BTC-USDT", SIGNAL, 10.0, 3)
+        close.assert_called_once_with("BTC-USDT", "BUY", 1.667)
+        self.assertTrue(result["unsafe_fill"])
+        alert.assert_called_once()
+
+    def test_nothing_is_sent_when_execution_is_disabled(self, rounded, enabled):
+        enabled.return_value = False
+        self.assertIsNone(app.execute_trend_order("BTC-USDT", SIGNAL, 10.0, 3))
+
+
 ACCOUNT = {"available": True, "equity_usdt": 1000.0, "available_usdt": 800.0, "daily_strategy_pnl_usdt": 0.0}
 CONTROLS = {"kill_switch": False, "blocked_pairs": [], "risk_per_trade_pct": 1.0, "max_daily_loss_pct": 5.0,
             "max_margin_utilization_pct": 25.0, "demo_execution": None}
 
 
-@patch.dict(os.environ, {"SIGNAL_ENGINE": "donchian_4h", "DONCHIAN_ENTRY_N": "20", "DONCHIAN_EXIT_N": "10",
-                         "DONCHIAN_STOP_ATR": "2.0"})
-@patch("forex_ai_analyst.interfaces.http.context_for_pair", return_value={})
-@patch("forex_ai_analyst.interfaces.http.fetch_institutional_context", return_value={})
+@patch.dict(os.environ, {"DONCHIAN_ENTRY_N": "20", "DONCHIAN_EXIT_N": "10", "DONCHIAN_STOP_ATR": "2.0"})
 @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings", return_value=CONTROLS)
 @patch("forex_ai_analyst.interfaces.http.scalping_storage")
 class ScanTrendTests(unittest.TestCase):
@@ -100,8 +105,7 @@ class ScanTrendTests(unittest.TestCase):
         storage.closed_paper_signals.return_value = []
 
     @patch("forex_ai_analyst.interfaces.http.execute_trend_order", return_value=None)
-    @patch("forex_ai_analyst.trading.application.trend_engine.ai_veto", return_value=(False, "approve"))
-    def test_breakout_is_journaled_with_risk_sized_from_equity(self, veto, execute, storage, *_):
+    def test_breakout_is_journaled_with_risk_sized_from_equity(self, execute, storage, *_):
         self.storage(storage)
         result = app.scan_pair("BTC-USDT", self.provider(FLAT_THEN_BREAKOUT), account_state=ACCOUNT)
         self.assertEqual(result[0]["status"], "ACCEPTED_PAPER")
@@ -111,21 +115,24 @@ class ScanTrendTests(unittest.TestCase):
         self.assertAlmostEqual(risk_usdt, 10.0)  # 1% of 1000 equity; margin allows more
 
     @patch("forex_ai_analyst.interfaces.http.execute_trend_order")
-    @patch("forex_ai_analyst.trading.application.trend_engine.ai_veto", return_value=(True, "claude: exchange halt"))
-    def test_veto_is_journaled_as_rejected_and_nothing_is_ordered(self, veto, execute, storage, *_):
-        self.storage(storage)
-        result = app.scan_pair("BTC-USDT", self.provider(FLAT_THEN_BREAKOUT), account_state=ACCOUNT)
-        self.assertEqual(result[0]["status"], "VETO")
-        execute.assert_not_called()
-        self.assertEqual(storage.log_decision.call_args.args[0].status, CandidateStatus.REJECTED)
-
-    @patch("forex_ai_analyst.trading.application.trend_engine.ai_veto")
-    def test_existing_position_on_pair_blocks_before_asking_ai(self, veto, storage, *_):
+    def test_existing_position_on_pair_blocks_before_any_order(self, execute, storage, *_):
         self.storage(storage)
         storage.open_paper_signals.return_value = [{"pair": "BTC-USDT"}]
         result = app.scan_pair("BTC-USDT", self.provider(FLAT_THEN_BREAKOUT), account_state=ACCOUNT)
         self.assertEqual(result[0]["status"], "SKIP")
-        veto.assert_not_called()
+        execute.assert_not_called()
+        storage.mark_accepted.assert_not_called()
+
+    @patch("forex_ai_analyst.interfaces.http.execute_trend_order", return_value=None)
+    def test_already_seen_breakout_is_not_traded_twice(self, execute, storage, *_):
+        self.storage(storage)
+        first = app.scan_pair("BTC-USDT", self.provider(FLAT_THEN_BREAKOUT), account_state=ACCOUNT)
+        self.assertEqual(first[0]["status"], "ACCEPTED_PAPER")
+        storage.existing_fingerprints.return_value = {storage.mark_accepted.call_args.args[0].candidate.fingerprint}
+        execute.reset_mock()
+        again = app.scan_pair("BTC-USDT", self.provider(FLAT_THEN_BREAKOUT), account_state=ACCOUNT)
+        self.assertEqual(again[0]["status"], "SKIP")
+        execute.assert_not_called()
 
     def test_no_breakout_skips(self, storage, *_):
         self.storage(storage)

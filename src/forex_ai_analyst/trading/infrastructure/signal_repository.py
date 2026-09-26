@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-import os
 
 from forex_ai_analyst.shared import turso as storage
-from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateStatus, Decision
+from forex_ai_analyst.trading.domain.models import CandidateStatus, Decision
 
 _CREATE_CANDIDATES = """
 CREATE TABLE IF NOT EXISTS signal_candidates (
@@ -28,24 +27,12 @@ CREATE TABLE IF NOT EXISTS signal_decisions (
  id INTEGER PRIMARY KEY AUTOINCREMENT, fingerprint TEXT NOT NULL, status TEXT NOT NULL,
  reason TEXT, decided_at TEXT NOT NULL
 );"""
-_CREATE_SNAPSHOTS = """
-CREATE TABLE IF NOT EXISTS market_snapshots (
- id INTEGER PRIMARY KEY AUTOINCREMENT, pair TEXT NOT NULL, timeframe TEXT NOT NULL,
- candle_time INTEGER NOT NULL, regime TEXT NOT NULL, features_json TEXT NOT NULL,
- created_at TEXT NOT NULL, UNIQUE(pair, timeframe, candle_time)
-);"""
-_CREATE_AI_REVIEWS = """CREATE TABLE IF NOT EXISTS ai_trade_reviews (
- id INTEGER PRIMARY KEY AUTOINCREMENT, fingerprint TEXT NOT NULL UNIQUE, outcome TEXT NOT NULL,
- realized_pnl_usdt REAL NOT NULL, review TEXT NOT NULL, created_at TEXT NOT NULL
-);"""
 
 
 def init_db() -> None:
     storage._execute(_CREATE_CANDIDATES)
     storage._execute(_CREATE_RISK)
     storage._execute(_CREATE_DECISIONS)
-    storage._execute(_CREATE_SNAPSHOTS)
-    storage._execute(_CREATE_AI_REVIEWS)
     for migration in (
         "ALTER TABLE signal_candidates ADD COLUMN risk_usdt REAL",
         "ALTER TABLE signal_candidates ADD COLUMN quantity REAL",
@@ -85,14 +72,6 @@ def log_decision(decision: Decision) -> None:
          datetime.now(timezone.utc).isoformat()])
     storage._execute("INSERT INTO signal_decisions (fingerprint, status, reason, decided_at) VALUES (?, ?, ?, ?)",
                      [candidate.fingerprint, decision.status, decision.reason, datetime.now(timezone.utc).isoformat()])
-
-
-def log_market_snapshot(pair: str, timeframe: str, candle_time_ms: int, regime: str, features: dict) -> None:
-    """Store one idempotent closed-candle diagnostic snapshot for paper/backtest review."""
-    storage._execute("""INSERT OR IGNORE INTO market_snapshots
-                      (pair, timeframe, candle_time, regime, features_json, created_at) VALUES (?, ?, ?, ?, ?, ?)""",
-                     [pair.upper(), timeframe, candle_time_ms, regime, json.dumps(features, sort_keys=True),
-                      datetime.now(timezone.utc).isoformat()])
 
 
 def existing_fingerprints() -> set[str]:
@@ -229,19 +208,6 @@ def resolve_paper_signal(fingerprint: str, status: CandidateStatus, exit_price: 
                        VALUES (?, 0, ?, ?) ON CONFLICT(trade_date) DO UPDATE SET
                        realized_pnl_usdt = realized_pnl_usdt + excluded.realized_pnl_usdt,
                        updated_at = excluded.updated_at""", [day, pnl, now.isoformat()])
-    review = ("Trade yakuni: " + str(status) + ". Keyingi qarorda aynan shu natijani yakka o‘zi qoida sifatida "
-              "qabul qilma; o‘xshash regime, yo‘nalish va setup namunalarini birgalikda bahola.")
-    storage._execute("""INSERT OR IGNORE INTO ai_trade_reviews
-                      (fingerprint, outcome, realized_pnl_usdt, review, created_at) VALUES (?, ?, ?, ?, ?)""",
-                     [fingerprint, status, pnl, review, now.isoformat()])
-
-
-def recent_ai_reviews(pair: str, limit: int = 8) -> list[dict]:
-    result = storage._execute("""SELECT c.pair, c.direction, c.regime, c.features_json, r.outcome,
-                                      r.realized_pnl_usdt, r.review, r.created_at
-                               FROM ai_trade_reviews r JOIN signal_candidates c ON c.fingerprint = r.fingerprint
-                               WHERE c.pair = ? ORDER BY r.id DESC LIMIT ?""", [pair.upper(), min(max(limit, 1), 20)])
-    return storage._rows_as_dicts(result)
 
 
 def recent_candidates(limit: int = 100) -> list[dict]:

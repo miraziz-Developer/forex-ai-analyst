@@ -106,3 +106,93 @@ def parameter_configs() -> list[dict]:
     grid = MANIFEST["parameter_grid"]
     names = list(grid)
     return [dict(zip(names, values)) for values in product(*(grid[n] for n in names))]
+
+
+def event_configs() -> list[dict]:
+    """Event-study configurations: the grid without the exit, which only matters once trading."""
+    seen, out = set(), []
+    for config in parameter_configs():
+        key = tuple((k, v) for k, v in config.items() if k != "exit")
+        if key not in seen:
+            seen.add(key)
+            out.append(dict(key))
+    return out
+
+
+# Feature-v1 event thresholds. Fixed before the first event study; changing any of
+# them is a new hypothesis version.
+OI_PCT_MIN = 90
+FLOW_PCT_MIN = 80
+IMPACT_PCT_MAX = 50
+BASIS_PCT_EXTREME = 90
+TRIGGER_WITHIN_BARS = 8
+STRUCTURE_BARS = 8
+COOLDOWN_BARS = 96
+
+
+def _setup(f: dict, frame, i: int, config: dict, direction: str) -> bool:
+    n = config["price_lookback_bars"]
+    oi_pct = f[f"oi_chg_{config['oi_change_lookback']}_pct"][i]
+    funding = f["funding_pct"][i]
+    basis = f["premium_pct"][i]
+    if oi_pct is None or funding is None or oi_pct < OI_PCT_MIN:
+        return False
+    if direction == "SHORT":
+        prior, spot_prior, spot_now = f[f"prior_high_{n}"][i], f[f"spot_prior_high_{n}"][i], frame.spot_high[i]
+        flow, impact = f["buy_ratio4_pct"][i], f["up_impact_pct"][i]
+        if prior is None or flow is None or impact is None or funding < config["funding_percentile"]:
+            return False
+        if not frame.high[i] > prior:
+            return False
+        spot_confirms = spot_now is not None and spot_prior is not None and spot_now > spot_prior
+        diverges = (basis is not None and basis >= BASIS_PCT_EXTREME) or not spot_confirms
+    else:
+        prior, spot_prior, spot_now = f[f"prior_low_{n}"][i], f[f"spot_prior_low_{n}"][i], frame.spot_low[i]
+        flow, impact = f["sell_ratio4_pct"][i], f["down_impact_pct"][i]
+        if prior is None or flow is None or impact is None or funding > 100 - config["funding_percentile"]:
+            return False
+        if not frame.low[i] < prior:
+            return False
+        spot_confirms = spot_now is not None and spot_prior is not None and spot_now < spot_prior
+        diverges = (basis is not None and basis <= 100 - BASIS_PCT_EXTREME) or not spot_confirms
+    return flow >= FLOW_PCT_MIN and impact <= IMPACT_PCT_MAX and diverges
+
+
+def _trigger(frame, i: int, setup_index: int, config: dict, direction: str) -> bool:
+    if config["confirmation"] == "prior_bar_low_break":
+        return frame.close[i] < frame.low[i - 1] if direction == "SHORT" else frame.close[i] > frame.high[i - 1]
+    start = max(0, setup_index - STRUCTURE_BARS)
+    if direction == "SHORT":
+        return frame.close[i] < min(frame.low[start:i])
+    return frame.close[i] > max(frame.high[start:i])
+
+
+def detect_events(frame, config: dict, direction: str, hypothesis_id: str) -> list:
+    """Crowding setup followed within TRIGGER_WITHIN_BARS by a structural break against the crowd."""
+    from forex_ai_analyst.research.edge_lab.features import FEATURE_VERSION
+    from forex_ai_analyst.research.edge_lab.models import MarketEvent
+
+    f, events, setup_index, cooldown_until = frame.features, [], None, -1
+    for i in range(1, len(frame)):
+        if i < cooldown_until:
+            continue
+        if _setup(f, frame, i, config, direction):
+            setup_index = i
+            continue
+        if setup_index is None:
+            continue
+        if i - setup_index > TRIGGER_WITHIN_BARS:
+            setup_index = None
+            continue
+        if _trigger(frame, i, setup_index, config, direction):
+            snapshot = {name: f[name][i] for name in ("funding_pct", "oi_chg_1h_pct", "oi_chg_4h_pct", "premium_pct",
+                                                      "buy_ratio4_pct", "sell_ratio4_pct", "up_impact_pct",
+                                                      "down_impact_pct")}
+            events.append(MarketEvent(
+                event_id=f"{frame.pair}:{direction}:{frame.decision_time[i]}", hypothesis_id=hypothesis_id,
+                pair=frame.pair, direction=direction, event_time_ms=frame.open_time[setup_index],
+                decision_time_ms=frame.decision_time[i], reference_price=frame.close[i],
+                feature_version=FEATURE_VERSION, features={"bar_index": i, "setup_index": setup_index, **snapshot},
+                data_quality={}))
+            setup_index, cooldown_until = None, i + COOLDOWN_BARS
+    return events

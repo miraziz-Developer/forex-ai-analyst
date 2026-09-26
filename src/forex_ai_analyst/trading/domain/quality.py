@@ -1,6 +1,6 @@
 """Fail-closed, configurable quality gates — research/backtest replays only.
 
-Not used by the live contextual-AI scan path (see interfaces/http.py:scan_pair);
+Not used by the live Donchian scan path (see interfaces/http.py:scan_pair);
 QUALITY_MIN_SCORE/QUALITY_MIN_STOP_ATR_MULTIPLE and QUALITY_BLOCKED_PAIRS only
 take effect inside research/backtest.py and research/production_backtest.py.
 """

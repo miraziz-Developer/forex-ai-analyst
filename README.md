@@ -1,18 +1,16 @@
-# Context-Aware BingX VST AI Trader
+# BingX VST Donchian Trend Trader
 
-One `main` branch and one Render web service:
+A rule-based crypto trend follower for the BingX **VST (virtual-money demo)** exchange, plus a research lab that decides what is allowed to trade. One `main` branch, one web service:
 
 ```text
 BingX public perpetual-swap closed 4h OHLCV
-  → lab-validated Donchian breakout signal (long only)
+  → Donchian 4h breakout signal (long only)
   → position / cooldown / runtime-control gates
-  → Claude Opus 5 veto (news, events, crowding) — approve by default
-  → BingX VST order with exchange-side stop + Turso journal + Telegram notification
+  → balance-relative sizing from the live VST account
+  → BingX VST market order with exchange-side stop + Turso journal + Telegram notification
 ```
 
-The AI brain is **Claude Opus 5 on Azure AI Foundry** (`AZURE_ANTHROPIC_ENDPOINT`, `AZURE_ANTHROPIC_API_KEY`, optional `AZURE_ANTHROPIC_DEPLOYMENT` / `AZURE_ANTHROPIC_EFFORT`), with decisions constrained by a strict JSON schema. OpenAI / Azure OpenAI is the fallback when Claude is not configured, declines, truncates, or is unreachable; if every provider fails the decision is `SKIP`.
-
-By default auto-execution is off. When an AI provider (Claude Foundry, `OPENAI_API_KEY`, or the complete Azure OpenAI configuration `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`) is present alongside `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, and `BINGX_SECRET`, a valid AI trade proposal places a BingX **VST/virtual-money demo** market order with exchange-side TP/SL. The execution client is hardcoded to `open-api-vst.bingx.com`; it has no live-money endpoint configuration.
+There is **no AI/LLM anywhere in the service**: every entry, stop, size and exit is a deterministic rule, so live behaviour is exactly what was backtested and there is no model API cost. The execution client is hardcoded to `open-api-vst.bingx.com`; there is no live-money endpoint or configuration switch.
 
 ## Quick start on your own server (Docker)
 
@@ -21,7 +19,7 @@ Requirements: a Linux server (Docker is installed for you if missing) and, for T
 ```bash
 git clone https://github.com/miraziz-Developer/forex-ai-analyst.git
 cd forex-ai-analyst
-cp .env.example .env      # fill in TURSO_*, BINGX_*, OpenAI/Azure, TELEGRAM_*, and DOMAIN
+cp .env.example .env      # fill in TURSO_*, BINGX_*, TELEGRAM_*, and DOMAIN
 ./deploy.sh
 ```
 
@@ -32,158 +30,108 @@ cp .env.example .env      # fill in TURSO_*, BINGX_*, OpenAI/Azure, TELEGRAM_*, 
 ```text
 app.py                      process entrypoint (Render / Docker)
 src/forex_ai_analyst/
-  interfaces/               Flask HTTP API, Telegram bot + chat
+  interfaces/               Flask HTTP API, Telegram button bot
   trading/
-    application/            AI decision engine, scheduler, outcome learning
-    domain/                 models, indicators, regime, risk/quality, strategies (research)
-    infrastructure/         BingX broker, market data, signal repository, intelligence feeds
+    application/            Donchian trend engine, scheduler (scan, exits, reconciliation)
+    domain/                 models, indicators, regime; research-only risk/quality/strategies
+    infrastructure/         BingX VST broker, market data, Turso signal repository
   operations/               incidents/alerts, runtime controls
-  knowledge/                PDF knowledge base
-  research/                 backtest / walk-forward tooling (not on the live path)
+  knowledge/                PDF knowledge base (Telegram upload + search)
+  lab/                      walk-forward strategy lab (docs/LAB_REPORT.md)
+  research/
+    edge_lab/               pre-registered hypothesis lab (see below)
+    backtest.py, production_backtest.py   legacy deterministic replays
   shared/                   Turso client, Telegram notifier
-tests/                      unit tests (python3 -m unittest discover -s tests)
-docs/                       research notes
+tests/                      unit tests
+docs/                       lab report and research notes
+research_output/edge_lab/   sealed hypothesis manifests, data-source manifest, append-only ledger
 Dockerfile, docker-compose.yml, deploy.sh, deploy/Caddyfile   self-hosting
 render.yaml                 Render blueprint
 ```
 
-## Signal engine (default: `donchian_4h`)
+## Strategy: Donchian 4h long
 
-The live signal comes from the research lab's best walk-forward family, using the exact function the lab backtested (`forex_ai_analyst.lab.strategies.donchian`):
+The live signal uses the exact function the lab backtested (`forex_ai_analyst.lab.strategies.donchian`):
 
 - **Entry:** a closed 4h candle closes above the prior `DONCHIAN_ENTRY_N` (100) bar high. Long only; shorts lost money in research.
-- **Exit:** exchange-side stop at `DONCHIAN_STOP_ATR` (3) × ATR, or a closed 4h candle below the `DONCHIAN_EXIT_N` (20) bar low. There is no fixed take-profit; a 60-day max hold is a safety net only.
-- **AI = veto only** (`AI_VETO=on`): Claude can block an entry for a concrete reason a price rule cannot see (scheduled event, exchange/asset news, extreme crowding). It never creates or resizes a trade, and if no AI provider answers the mechanical signal stands. Vetoes are journaled as `REJECTED` so their value can be measured later.
-- Sizing uses the same balance-relative runtime controls (`RISK PCT`, daily loss, margin utilisation), one position per pair, `MAX_CONCURRENT_POSITIONS`, and per-pair cooldown.
+- **Stop:** exchange-side stop-market at `DONCHIAN_STOP_ATR` (3) × ATR below the entry close. If the market order fills at or through the stop, the position is closed immediately and alerted.
+- **Exit:** the stop, or a closed 4h candle below the `DONCHIAN_EXIT_N` (20) bar low (closed at market). There is no fixed take-profit; a 60-day maximum hold is a safety net only.
+- **Gates:** one position per pair, at most `MAX_CONCURRENT_POSITIONS` (3) open, `TRADE_COOLDOWN_MINUTES` (60) per pair after a close, each 4h breakout traded at most once, runtime kill switch and blocked pairs.
+- **Sizing:** risk per trade = live VST equity × `risk_per_trade_pct`, capped by the remaining daily-loss budget and by available margin × `max_margin_utilization_pct`. A fresh VST balance is required; if it cannot be fetched, the scan is skipped (the system never guesses equity).
 
-Evidence and its limits are in [`docs/LAB_REPORT.md`](docs/LAB_REPORT.md): out-of-sample 2023-2026 Sharpe 1.28, CAGR 9.5%, max DD -6.1% at 1% risk per pair sleeve (≈0.2% of total equity per trade), but a deflated Sharpe of 0.83 misses the 0.90 promotion gate. This is a **VST forward test**, not a proven edge. Runtime `RISK PCT 1` risks about 5× the research sizing per trade; use `RISK PCT 0.2`–`0.5` to stay near the researched drawdown.
+Evidence and its limits are in [`docs/LAB_REPORT.md`](docs/LAB_REPORT.md): out-of-sample 2023-2026 Sharpe 1.28, CAGR 9.5%, max drawdown -6.1% at about 0.2% of total equity risked per trade, but a deflated Sharpe of 0.83 misses the 0.90 promotion gate. This is a **VST forward test**, not a proven edge. Runtime `RISK PCT 1` risks about 5× the research sizing per trade; `RISK PCT 0.2`–`0.5` stays near the researched drawdown. Leverage does not change the risk per trade (the stop distance and quantity do); it only changes the margin used.
 
-`SIGNAL_ENGINE=contextual_ai` restores the legacy LLM signal generator described below.
+## Edge lab (pre-registered research)
 
-## Contextual AI controls (legacy engine)
+`forex_ai_analyst.research.edge_lab` tests new trading ideas without being able to fool itself. It never imports live execution code (enforced by a test).
 
-- The model receives closed 5m/15m/1h candles, regime features, funding/open-interest/order-book context, retrieved PDF excerpts, earlier outcome reviews, and a bounded VST account snapshot (equity, available margin, unrealized PnL, strategy exposure and daily strategy PnL).
-- It may select `SKIP`, `WATCH`, or `PROPOSE_TRADE`; for a proposal it dynamically chooses direction, entry, stop, target, risk, leverage and cooldown.
-- Risk is balance-relative, rather than a fixed USDT cap: the accepted risk is capped by current VST equity × `risk_per_trade_pct`, remaining daily loss budget (`max_daily_loss_pct`), and available-margin utilization (`max_margin_utilization_pct`). There is no application-level leverage cap below BingX's 125x technical validation and no minimum cooldown; the AI selects both per trade.
-- A valid fresh VST balance snapshot is required before a proposal can be journaled or executed. If it cannot be fetched, the result is `SKIP`; the system never guesses account equity.
-- Model output is JSON-validated and invalid/API-unavailable output always becomes `SKIP` (no trade).
-- A code-level (non-LLM) gate independently blocks a proposal whose direction contradicts a determined 1h/4h/1d EMA20/EMA50 trend bias, whose 15m regime is `HIGH_VOLATILITY`/`UNCERTAIN`, or whose stated confidence is below `AI_MIN_TRADE_CONFIDENCE` (default 70) — the AI's own rationale cannot argue past this. Further code-level gates prevent order floods: a pre-flight check rejects a trade whose reward:risk at the *current* price is already below 1.3 (so it is not opened and instantly closed), only one position per pair may be open, at most `MAX_CONCURRENT_POSITIONS` (default 3) overall, and each pair rests `TRADE_COOLDOWN_MINUTES` (default 60) after a close. Routine rejections are logged, not alerted. See [`docs/RESEARCH_FINDINGS.md`](docs/RESEARCH_FINDINGS.md).
-- BingX perpetual-swap public REST klines; no BingX account or API key is required. This is market data only; VST order execution remains separately restricted to the demo endpoint.
-- Only fully closed candles are used. Same-candle fingerprints are persisted and rejected.
-- Technical safety remains: allowed-pair whitelist, 1–125x leverage validation, structurally valid trade levels, exchange-side TP/SL, `KILL_SWITCH`, idempotency and fail-closed broker/data errors. Create BingX keys with **no withdrawal permission**.
-- Outcome resolution is candle-based and conservative: when a candle touches both stop and target, it records `LOSS`.
-- Telegram's **Foyda / zarar** button shows the local candle-based AI journal separately from BingX VST's API-reported account income. BingX income is account-scoped (manual/other-bot activity can be included), so it is never falsely attributed to an individual AI journal order.
-- Each VST time-close retains the immutable entry and close order IDs plus confirmed fills. On every scheduler start/run, closed VST rows are retried for order-ID reconciliation. A row becomes `VERIFIED` only if BingX's matching order response explicitly returns its P&L and commission fields; otherwise it remains `UNAVAILABLE` and an operational alert is retained. Funding and account-level income are never guessed or allocated to a signal.
-- Failed time closes, absent broker positions, reconciliation failures, and unavailable order-level values create durable, deduplicated VST incidents and Telegram alerts (when Telegram credentials are configured). `/health` exposes the current incident diagnostic without failing the web-service liveness check.
+- Every hypothesis is an immutable manifest (thesis, markets, periods, parameter grid, cost model, gates) registered with a content hash before any data is examined. Changing anything is a new version; the old one is superseded in the append-only ledger.
+- Data comes from Binance public archives (perpetual/spot/premium klines, funding, 5-minute open interest) with a point-in-time contract: every value carries the time it became available, and features only use data available at the decision bar close.
+- Stages are gated in order: event study → trading simulation → walk-forward with purge/embargo, deflated Sharpe and cost stress → a single-use holdout → VST shadow. The best possible verdict is `ELIGIBLE_FOR_SHADOW`; the lab can never approve live money.
+
+```bash
+forex-edge-lab register    --hypothesis crowding_exhaustion_v2
+forex-edge-lab feasibility --hypothesis crowding_exhaustion_v2
+forex-edge-lab events      --hypothesis crowding_exhaustion_v2   # one-shot; refuses a re-run
+```
+
+Results are written under `research_output/edge_lab/`; manifests and the ledger are committed as audit evidence.
 
 ## Setup
 
 ```bash
 cp .env.example .env
-# Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.
-# Telegram credentials are optional but required for paper alerts.
+# Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN; Telegram and BingX VST keys are optional.
 python3 -m pip install .
 python3 app.py
 ```
 
-Required Turso variables:
+The app creates and migrates its own tables (signal journal, decisions, daily risk state, incidents, runtime controls, knowledge documents) in Turso. Render's disk is ephemeral, so all state lives in Turso.
 
-```env
-TURSO_DATABASE_URL=libsql://your-database.turso.io
-TURSO_AUTH_TOKEN=your-token
-```
+## Telegram
 
-The app creates and migrates its own signals, snapshots, AI reviews, knowledge documents and knowledge chunks in that database. Existing legacy `signals` rows are not changed.
+Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send `/start` to open the button panel: status, recent signals, open VST positions, closed orders, P&L, knowledge base and PDF upload. **Foyda / zarar** shows the local journal separately from BingX's API-reported account income; account income can include manual activity, so it is never attributed to individual journal orders.
 
-## Telegram PDF knowledge and webhook
+Runtime controls are strictly allowlisted: `STOP`, `START DEMO`, `BLOCK BTC-USDT`, `UNBLOCK BTC-USDT`, `RISK PCT 0.5`, `DAILY LOSS PCT 5`, `MARGIN PCT 25`. The bot replies with a preview and a random single-use code; send `TASDIQLAYMAN <code>` within 10 minutes to apply it. Every preview and change is audited in Turso. Controls cannot enable live-money trading or change code, credentials or broker endpoints.
 
-Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send `/start` once to open the button-based control panel: **Holat**, **So‘nggi signallar**, **Ochiq VST pozitsiyalar**, **Bilim bazasi**, **Bilimdan qidirish**, and **PDF yuklash**. Send a text-based PDF to the bot and it will extract/chunk the text into Turso. Scanned PDFs need OCR before upload. Legacy `/knowledge` and `/knowledge_search <query>` remain available for compatibility.
-
-Free text is also an Uzbek read-only AI chat: ask about signals, skipped trades, regime, P&L, learning, RSS/news, reconciliation, or current system state. The chat receives only a bounded operational snapshot and cannot place an order or write settings itself.
-
-Authorized users can request strictly allowlisted runtime controls with explicit text: `STOP`, `START DEMO`, `BLOCK BTC-USDT`, `UNBLOCK BTC-USDT`, `RISK PCT 1.5`, `DAILY LOSS PCT 5`, or `MARGIN PCT 25`. The bot always sends a preview and a random, single-use confirmation code; reply `TASDIQLAYMAN <code>` within 10 minutes to apply it. Every preview, rejection, and applied update is recorded in Turso. Controls apply only to subsequent AI/VST decisions and cannot enable live-money trading, change code/model prompts, credentials, or broker endpoints. There is no fixed-USDT risk cap or leverage cap below BingX's 1–125x technical range — risk, leverage and cooldown remain balance-relative and AI-selected per trade, as described above.
-
-Set `PUBLIC_BASE_URL` to the deployed HTTPS URL and `TELEGRAM_WEBHOOK_SECRET`; the service registers its webhook, callback updates, and command menu automatically on startup. If automatic setup is unavailable, register it manually once:
+Set `PUBLIC_BASE_URL` (HTTPS) and `TELEGRAM_WEBHOOK_SECRET`; the webhook and command menu are registered automatically at startup. Manual fallback:
 
 ```bash
-curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
-  -d "url=https://YOUR-RENDER-SERVICE.onrender.com/telegram/webhook" \
-  -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}" \
-  -d 'allowed_updates=["message","channel_post","callback_query"]'
+curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" -d "url=https://YOUR-SERVICE/telegram/webhook" -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}" -d 'allowed_updates=["message","channel_post","callback_query"]'
 ```
 
-The endpoint verifies Telegram's `X-Telegram-Bot-Api-Secret-Token` header. `callback_query` is required for the button panel. PDF metadata and extracted text are persisted; binary PDFs are not written to Render's ephemeral filesystem.
+## Operations and safety
 
-## Legacy deterministic replay (research-only)
-
-The `forex_ai_analyst.research.backtest` and `forex_ai_analyst.research.production_backtest` modules remain available for historical deterministic-strategy research. They are not the deployed contextual AI/VST decision path and their fixed research limits do not override an AI trade decision. Their evaluator receives history only through the signal candle, enters at the next candle open, applies configurable round-trip fee/slippage/funding costs, records stale trades as `TIME_EXIT`, and resolves an OHLC candle touching both levels as `LOSS`.
-
-Use `metrics(trades)` to report trade count, win rate, after-cost net P&L, expectancy, profit factor, maximum drawdown, and average holding time. Review results independently by `strategy`, `pair`, and `regime`; no strategy may be promoted beyond paper operation solely from an in-sample win rate.
-
-For independent chronological validation, split a fixed period into equal account resets rather than relying on its aggregate result:
-
-```bash
-python3 -m forex_ai_analyst.research.production_backtest --start 2026-06-01 --days 90 \
-  --pairs BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT \
-  --risk-usdt 0.5 --max-daily-loss-usdt 1.5 --max-daily-trades 4 \
-  --max-open-positions 1 --max-notional-usdt 75 --max-fee-to-risk-ratio 0.15 \
-  --fee-pct-round-trip 0.10 --slippage-pct-round-trip 0.02 \
-  --starting-equity-usdt 100 --min-score 75 --min-stop-atr-multiple 0.8 \
-  --blocked-pairs XRP-USDT --walk-forward-windows 3 \
-  --output production_walk_forward_90d.json
-```
-
-Each `walk_forward_windows` item is a separate `$100` replay with its own risk state. `promotion_eligible` is only a mechanical screen requiring every window to have positive after-cost P&L and profit factor above one; it is **not** permission to enable a pair or live trading. Require adequate independent sample size and stable paper/VST results before changing pair defaults.
-
-## Configuration
-
-See [`.env.example`](.env.example). The production-safe defaults are:
-
-```env
-# Effective VST execution also requires OpenAI and both BingX demo credentials.
-OPENAI_API_KEY=
-# Or use Azure OpenAI. Deployment is passed to the SDK as the model name.
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_ENDPOINT=https://your-resource.services.ai.azure.com/openai/v1
-AZURE_OPENAI_DEPLOYMENT=your-chat-deployment
-AUTO_EXECUTE_TRADES=false
-KILL_SWITCH=false
-MULTI_STRATEGY_PROVIDER=bingx
-MULTI_STRATEGY_PAIRS=BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT
-MULTI_STRATEGY_SCAN_INTERVAL_SECONDS=300
-```
-
-Do not set the scan interval below 300 seconds. The scheduler scans pairs serially and prevents overlapping runs.
+- Only fully closed candles are used. Market data is BingX's public REST API; no account is needed for data.
+- Every open VST row is reconciled against the broker on each run: a missing position is closed in the journal only when a single, fully matching close fill exists in BingX order history; anything ambiguous stays open and raises a CRITICAL incident.
+- A position still open past its planned expiry plus `VST_OPEN_SLA_MINUTES` raises a warning.
+- Closed VST rows are reconciled by order ID; P&L, fees and funding are stored only when BingX reports them for that order, never estimated.
+- Incidents are durable, deduplicated and sent to Telegram; `/health` exposes them without failing liveness.
+- `KILL_SWITCH=true` (or Telegram `STOP`) blocks every new order; it does not close open positions. Create BingX keys with **no withdrawal permission**.
 
 ## HTTP endpoints
 
-- `GET /health` — service/provider/VST-only status plus non-fatal execution-incident diagnostics; used by Render. `trade_readiness.blockers` reports safe configuration/runtime reasons that prevent new VST orders (for example disabled auto-execution, missing credentials/provider, or a kill switch). `vst_account` contains only safe account-query diagnostics (`available`, check time, failure category, HTTP status and BingX code/message), never credentials, signatures or balances.
-- `GET /api/signals?limit=100` — recent AI candidates and outcomes. If `DASHBOARD_TOKEN` is configured, provide it as `?token=...` or `X-Dashboard-Token`.
-- `POST /telegram/webhook` — authenticated Telegram button/callback/PDF receiver.
+- `GET /health` — service status, `trade_readiness` (blockers such as disabled auto-execution, missing BingX keys, or a kill switch), incidents, and safe VST account diagnostics (never credentials or balances).
+- `GET /api/signals?limit=100` — recent journal rows. With `DASHBOARD_TOKEN` set, pass `?token=...` or `X-Dashboard-Token`.
+- `GET /api/reconciliation` — broker reconciliation status (same token rule).
+- `POST /telegram/webhook` — authenticated Telegram receiver.
 
 ## Render deployment
 
-`render.yaml` installs the package and defines the single `forex-ai-analyst` web service, started by the root `app.py` composition root. Configure the Turso credentials and optional Telegram credentials in Render. Deploy this repository’s `main` branch only.
-
-After deploy, verify:
-
-```bash
-curl https://YOUR-RENDER-SERVICE.onrender.com/health
-```
-
-Expected essentials before enabling demo orders: `"demo_only":true` and `"auto_execute_trades":false`. Upload a PDF and verify `/knowledge` before setting `AUTO_EXECUTE_TRADES=true`. Set `KILL_SWITCH=true` to prevent every new VST order; it does not force-close already-open exchange positions.
-
-When demo execution is enabled, verify `vst_account.available` becomes `true`. If it is `false`, inspect its sanitized `category`, `http_status`, `bingx_code`, and `bingx_msg`: confirm the VST/demo key pair, Swap/Futures read/trade permissions, and any IP allowlist for Render. While this account query is unavailable, one account-level incident is reported and the scheduler deliberately skips all AI calls and new orders for that scan cycle.
+`render.yaml` defines the single `forex-ai-analyst` web service (`pip install .`, `python app.py`, health check `/health`, auto-deploy on `main`). Set `TURSO_*`, `TELEGRAM_*`, `PUBLIC_BASE_URL`, and, to place VST demo orders, `AUTO_EXECUTE_TRADES=true`, `BINGX_API_KEY`, `BINGX_SECRET`. After deploy, `/health` should show `"demo_only": true` and `trade_readiness.ready: true` with no blockers. If `vst_account.available` is `false`, check its sanitized `category`, `http_status` and `bingx_code`: the VST key pair, swap read/trade permission, and any IP allowlist.
 
 ## Live-money boundary
 
-This repository deliberately has **no live BingX endpoint, live credential variable, or configuration switch**. It must not be represented as a real-money execution platform. A future live-only service requires an independent security review and release, separate credentials/secrets rotation, explicit multi-step operator approval, hard maximum notional/per-trade/daily-loss limits, audited emergency rollback, and independent monitoring. VST forward testing with realistic fees, slippage, funding, restarts and API failures remains required before that work.
+This repository deliberately has **no live BingX endpoint, live credential variable, or configuration switch**, and must not be represented as a real-money platform. A live service would need its own security review, separate credentials, hard notional and loss limits, audited rollback, independent monitoring, and a strategy that has passed the edge lab and a VST forward test with realistic costs. Nothing here is financial advice or a promise of profit.
+
+## Legacy research replays
+
+`forex_ai_analyst.research.backtest` and `production_backtest` replay the older deterministic 5m/15m strategies (entry at next open, round-trip costs, `LOSS` when a candle touches both levels). They are not on the live path.
 
 ## Validation
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m unittest discover -s tests
 python3 -m compileall -q src tests app.py
 python3 -m pip check
-git diff --check
 ```

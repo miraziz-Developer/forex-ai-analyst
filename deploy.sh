@@ -77,8 +77,6 @@ prepare_env() {
     warn "TELEGRAM_BOT_TOKEN is set but neither DOMAIN nor PUBLIC_BASE_URL is: Telegram buttons/commands need a public HTTPS URL."
   fi
   { [ -n "$(env_get BINGX_API_KEY)" ] && [ -n "$(env_get BINGX_SECRET)" ]; } || warn "BINGX_API_KEY/BINGX_SECRET not set: no VST orders can be placed."
-  { [ -n "$(env_get AZURE_ANTHROPIC_API_KEY)" ] || [ -n "$(env_get OPENAI_API_KEY)" ] || [ -n "$(env_get AZURE_OPENAI_API_KEY)" ]; } \
-    || warn "No AI key set (AZURE_ANTHROPIC_API_KEY or OpenAI/Azure OpenAI): the AI will always SKIP."
 }
 
 health_port() { local p; p="$(env_get HOST_PORT)"; echo "${p:-5000}"; }

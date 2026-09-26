@@ -1,35 +1,15 @@
 import os
-import sys
 import unittest
 from datetime import datetime, timezone
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 os.environ.setdefault("TURSO_DATABASE_URL", "libsql://test.invalid")
 os.environ.setdefault("TURSO_AUTH_TOKEN", "test")
 
 from forex_ai_analyst.interfaces import telegram_bot as telegram_bot
-from forex_ai_analyst.interfaces import telegram_chat as telegram_chat
 
 
 class TelegramBotTests(unittest.TestCase):
-    @patch("forex_ai_analyst.interfaces.telegram_chat.context", return_value={"safety": "read-only"})
-    def test_ai_chat_uses_azure_openai_deployment_when_configured(self, context):
-        client = Mock()
-        client.responses.create.return_value = SimpleNamespace(output_text="Azure javob")
-        openai_module = SimpleNamespace(OpenAI=Mock(return_value=client))
-        with patch.dict(sys.modules, {"openai": openai_module}), patch.dict(os.environ, {
-            "OPENAI_API_KEY": "", "AZURE_OPENAI_API_KEY": "azure-key",
-            "AZURE_OPENAI_ENDPOINT": "https://resource.openai.azure.com",
-            "AZURE_OPENAI_DEPLOYMENT": "chat-deployment",
-        }, clear=False):
-            self.assertEqual(telegram_chat.answer("Holat qanday?"), "Azure javob")
-        openai_module.OpenAI.assert_called_once_with(
-            api_key="azure-key", base_url="https://resource.openai.azure.com/openai/v1/")
-        request = client.responses.create.call_args.kwargs
-        self.assertEqual(request["model"], "chat-deployment")
-        self.assertNotIn("temperature", request)
-
     @patch("forex_ai_analyst.interfaces.telegram_bot.requests.post")
     def test_configure_webhook_registers_callback_updates_and_commands(self, post):
         post.return_value.raise_for_status.return_value = None
@@ -63,13 +43,11 @@ class TelegramBotTests(unittest.TestCase):
             telegram_bot.handle_update({"message": {"chat": {"id": 7}, "text": "/help"}})
         reply.assert_not_called()
 
-    @patch("forex_ai_analyst.interfaces.telegram_bot.telegram_chat.answer", return_value="AI javob")
     @patch("forex_ai_analyst.interfaces.telegram_bot._reply")
-    def test_free_text_routes_to_read_only_ai_chat(self, reply, answer):
+    def test_free_text_gets_a_static_hint_and_no_model_call(self, reply):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
             telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "Nega signal o'tkazib yuborildi?"}})
-        answer.assert_called_once_with("Nega signal o'tkazib yuborildi?")
-        self.assertEqual(reply.call_args.args[1], "AI javob")
+        self.assertIn("Buyruq tanilmadi", reply.call_args.args[1])
 
     @patch("forex_ai_analyst.interfaces.telegram_bot.runtime_controls.create_pending", return_value=("ABC123", datetime.now(timezone.utc)))
     @patch("forex_ai_analyst.interfaces.telegram_bot._reply")
@@ -94,12 +72,12 @@ class TelegramBotTests(unittest.TestCase):
             telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "TASDIQLAYMAN DEAD00"}})
         self.assertIn("muddati tugagan", reply.call_args.args[1])
 
-    @patch("forex_ai_analyst.interfaces.telegram_bot.telegram_chat.answer", return_value="Bu ruxsat etilmagan.")
+    @patch("forex_ai_analyst.interfaces.telegram_bot.runtime_controls.create_pending")
     @patch("forex_ai_analyst.interfaces.telegram_bot._reply")
-    def test_live_trading_request_is_never_a_control(self, reply, answer):
+    def test_live_trading_request_is_never_a_control(self, reply, pending):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
             telegram_bot.handle_update({"message": {"chat": {"id": 42}, "text": "live tradingni yoq"}})
-        answer.assert_called_once()
+        pending.assert_not_called()
 
     def test_balance_relative_control_requests_require_explicit_percent_commands(self):
         self.assertEqual(telegram_bot._control_request("RISK PCT 1.5"), {"risk_per_trade_pct": 1.5})

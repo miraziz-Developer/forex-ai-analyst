@@ -90,8 +90,8 @@ class FeasibilityTests(unittest.TestCase):
 
 
 class IsolationTests(unittest.TestCase):
-    FORBIDDEN = ("bingx_broker", "interfaces", "scheduler", "signal_repository", "shared.turso", "shared.llm",
-                 "notifier", "runtime_controls", "trend_engine", "ai_trader")
+    FORBIDDEN = ("bingx_broker", "interfaces", "scheduler", "signal_repository", "shared.turso", "notifier",
+                 "runtime_controls", "trend_engine")
 
     def test_edge_lab_never_imports_live_execution_modules(self):
         root = Path(__file__).resolve().parents[1] / "src" / "forex_ai_analyst" / "research" / "edge_lab"

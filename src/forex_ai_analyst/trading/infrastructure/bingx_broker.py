@@ -99,7 +99,7 @@ def get_vst_usdt_balance() -> dict:
 
     The exchange has returned the balance row both directly and nested under
     ``data.balance`` across API revisions.  Do not return the raw payload: this
-    value is passed to the AI context and must never include account metadata.
+    value feeds risk sizing and /health and must never include account metadata.
     """
     path = "/openApi/swap/v2/user/balance"
     data = _signed_request("GET", path, {})
@@ -458,7 +458,7 @@ def vst_income_summary(start_time_ms: int) -> dict:
     """Return BingX-reported VST income totals for the configured account.
 
     Income is account-scoped, not reliably attributable to an originating
-    strategy order ID, so it must remain separate from the local AI journal.
+    strategy order ID, so it must remain separate from the local strategy journal.
     """
     totals = {"realized_pnl_usdt": 0.0, "fees_usdt": 0.0, "funding_usdt": 0.0, "entries": 0}
     for symbol in QUANTITY_PRECISION:

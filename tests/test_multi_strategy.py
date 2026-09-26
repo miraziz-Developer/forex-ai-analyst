@@ -13,7 +13,7 @@ from forex_ai_analyst.trading.domain.risk import RiskConfig, assess_risk
 from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateStatus, Direction, MarketRegime
 from forex_ai_analyst.trading.infrastructure.market_data import (MarketDataProvider, bingx_swap_symbol, binance_futures_symbol, closed_bars,
                             fetch_bingx_swap_bars, fetch_binance_futures_bars, provider_from_environment)
-from forex_ai_analyst.trading.domain.indicators import candle_confirmation, higher_timeframe_bias, support_resistance_zones
+from forex_ai_analyst.trading.domain.indicators import candle_confirmation, support_resistance_zones
 from forex_ai_analyst.research.backtest import BacktestCosts, simulate as multi_simulate
 from forex_ai_analyst.research.production_backtest import apply_account_limits, walk_forward_periods
 from forex_ai_analyst.trading.domain.quality import QualityPolicy, quality_rejection_reason
@@ -121,15 +121,6 @@ class MultiStrategyTests(unittest.TestCase):
         self.assertEqual(candle_confirmation(candles[-2:]), "BULLISH_ENGULFING")
         supports, _ = support_resistance_zones(candles)
         self.assertTrue(any(low <= 90 <= high for low, high in supports))
-
-    def test_higher_timeframe_bias_reads_ema_fast_slow_relationship(self):
-        uptrend = [bar(index, 100 + index * .5, interval=14400000) for index in range(60)]
-        downtrend = [bar(index, 200 - index * .5, interval=14400000) for index in range(60)]
-        flat = [bar(index, 100, interval=14400000) for index in range(60)]
-        self.assertEqual(higher_timeframe_bias(uptrend), "BULLISH")
-        self.assertEqual(higher_timeframe_bias(downtrend), "BEARISH")
-        self.assertIsNone(higher_timeframe_bias(flat))
-        self.assertIsNone(higher_timeframe_bias(uptrend[:10]))  # not enough history
 
     def test_sr_strategy_rejects_long_rejection_in_downtrend(self):
         bars = [bar(index, 100, spread=1) for index in range(60)]
