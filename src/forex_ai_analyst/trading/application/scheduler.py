@@ -8,7 +8,7 @@ from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from forex_ai_analyst.trading.application import trend_engine
+from forex_ai_analyst.trading.application import degradation, trend_engine
 from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
 from forex_ai_analyst.trading.infrastructure import signal_repository as scalping_storage
 from forex_ai_analyst.operations import incidents as execution_alerts
@@ -297,6 +297,8 @@ def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: Mar
     scheduler.add_job(recover_open_vst_orders, "interval", seconds=interval_seconds,
                       id="bingx-vst-recovery", max_instances=1, coalesce=True,
                       next_run_time=datetime.now(timezone.utc))
+    scheduler.add_job(degradation.check, "interval", hours=1, id="strategy-degradation", max_instances=1,
+                      coalesce=True, next_run_time=datetime.now(timezone.utc))
     scheduler.start()
     logger.info("Multi-strategy scheduler started: scan and resolver every %s seconds", interval_seconds)
     return scheduler
