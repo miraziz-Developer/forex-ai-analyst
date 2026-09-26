@@ -2,12 +2,15 @@
 
 Each closed trade is measured in R (realized P&L / risk taken). The limits come
 from the lab backtest of the live configuration (entry 100, exit 20, 3 ATR,
-long, the 10 live markets, 2021-2026 with taker costs and funding; 575 trades):
+long, the 20 live markets, 2021-2026 with taker costs and funding; 1147 trades):
 
-    win rate 34%, mean +0.67R, median -0.7R, worst losing run 18,
-    worst cumulative-R drawdown -34R.
-    Bootstrap of 30-trade windows: drawdown p5 -14R, p1 -17R;
-    losing run p95 11, p99 15.
+    win rate 31%, mean +0.51R, median -0.8R, worst losing run 26,
+    worst cumulative-R drawdown -64R (trades taken in chronological order).
+
+Limits are anchored to that real history, not to a bootstrap of independent
+trades: breakouts on correlated coins happen together, so losses cluster and a
+bootstrap understates how deep a normal drawdown gets. WARNING = half the
+historical worst; CRITICAL = worse than anything in the backtest.
 
 A trend follower loses most of the time and earns from rare large winners, so
 short losing streaks are normal. The alarm fires only when live results leave
@@ -24,8 +27,8 @@ from forex_ai_analyst.trading.infrastructure import signal_repository as scalpin
 
 logger = logging.getLogger(__name__)
 
-WARN_LOSS_RUN, CRITICAL_LOSS_RUN = 11, 15
-WARN_DRAWDOWN_R, CRITICAL_DRAWDOWN_R = -14.0, -17.0
+WARN_LOSS_RUN, CRITICAL_LOSS_RUN = 16, 27
+WARN_DRAWDOWN_R, CRITICAL_DRAWDOWN_R = -32.0, -65.0
 INCIDENT_KEY = f"degradation:{trend_engine.STRATEGY}"
 
 
@@ -74,7 +77,7 @@ def check() -> None:
         execution_alerts.resolve(INCIDENT_KEY, note="live results back inside the backtested range")
         return
     advice = ("Backtestdagi eng yomon holatdan ham yomon: STOP yuborib, strategiyani qayta tekshirish tavsiya etiladi."
-              if level == "CRITICAL" else "Backtestdagi eng yomon 5% holatlar oralig‘ida: kuzatib boring.")
+              if level == "CRITICAL" else "Backtestdagi eng yomon davrning yarmiga yetdi: normal bo‘lishi mumkin, kuzatib boring.")
     message = (f"Donchian 4h degradatsiya ({level}): ketma-ket {metrics['current_loss_run']} zarar, "
                f"cho‘qqidan {metrics['drawdown_r']}R pastda ({metrics['trades']} yopiq trade). {advice}")
     logger.warning(message)
