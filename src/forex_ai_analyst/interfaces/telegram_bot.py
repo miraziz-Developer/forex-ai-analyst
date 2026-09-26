@@ -11,7 +11,6 @@ import requests
 from forex_ai_analyst.knowledge import service as knowledge
 from forex_ai_analyst.trading.infrastructure import signal_repository as scalping_storage
 from forex_ai_analyst.operations import runtime_controls as runtime_controls
-from forex_ai_analyst.interfaces import telegram_chat as telegram_chat
 from forex_ai_analyst.shared.notifier import send_telegram_message
 
 _AWAITING_KNOWLEDGE_SEARCH: set[str] = set()
@@ -66,7 +65,7 @@ def _preview_control(chat_id: str, updates: dict) -> str:
     code, expires = runtime_controls.create_pending(chat_id, updates)
     items = ", ".join(_describe_control_value(key, value) for key, value in updates.items())
     return (f"⚠️ Runtime o‘zgarishi preview: {items}\n"
-            "Bu faqat keyingi AI/VST qarorlarga ta’sir qiladi; live trading yoqilmaydi.\n"
+            "Bu faqat keyingi VST orderlarga ta’sir qiladi; live trading yoqilmaydi.\n"
             f"Qo‘llash uchun 10 daqiqa ichida: TASDIQLAYMAN {code}\n"
             f"Muddati: {expires.strftime('%H:%M UTC')}")
 
@@ -159,7 +158,7 @@ def _download(file_id: str) -> bytes:
 
 
 def _menu(chat_id: str) -> None:
-    _reply(chat_id, "🤖 AI VST Trader boshqaruv paneli\n\nBarcha ma’lumotlarni quyidagi tugmalar orqali ko‘ring.", menu=True)
+    _reply(chat_id, "📈 Donchian 4H VST Trader boshqaruv paneli\n\nBarcha ma’lumotlarni quyidagi tugmalar orqali ko‘ring.", menu=True)
 
 
 def _status_text() -> str:
@@ -187,7 +186,7 @@ def _status_text() -> str:
             f"Ochiq order: {open_signals}\n"
             f"Bugungi trade: {daily_trades} | P&L: {daily_pnl_text}\n"
             f"Scan interval: {os.environ.get('MULTI_STRATEGY_SCAN_INTERVAL_SECONDS', '300')} soniya\n"
-            "AI model qarori faqat BingX VST/demo uchun ishlatiladi.")
+            "Strategiya: Donchian 4h long (qoidaga asoslangan, AI yo‘q); faqat BingX VST/demo.")
 
 
 def _signals_text() -> str:
@@ -228,8 +227,8 @@ def _positions_text() -> str:
     except Exception:
         return "📌 Ochiq pozitsiyalar vaqtincha olinmadi. Keyinroq 🔄 Yangilash tugmasini bosing."
     if not rows:
-        return "📌 Hozir ochiq AI VST/paper pozitsiya yo‘q."
-    lines = ["📌 Ochiq AI VST/paper orderlar:"]
+        return "📌 Hozir ochiq VST/paper pozitsiya yo‘q."
+    lines = ["📌 Ochiq VST/paper orderlar:"]
     for row in rows[:10]:
         order = f" | order: #{row['broker_order_id']}" if row.get("broker_order_id") else " | paper signal"
         risk = f"${float(row['risk_usdt']):.4g}" if row.get("risk_usdt") is not None else "—"
@@ -247,10 +246,10 @@ def _performance_text() -> str:
         return "💰 Foyda/zarar ma’lumoti vaqtincha olinmadi. Keyinroq 🔄 Panelni yangilash tugmasini bosing."
     pnl = float(summary["realized_pnl_usdt"])
     win_rate = summary["win_rate_pct"]
-    journal = ("💰 AI jurnal foyda / zarar (candle-based hisob)\n\n"
+    journal = ("💰 Jurnal foyda / zarar (candle-based hisob)\n\n"
             f"Jami yopilgan order: {summary['closed_orders']}\n"
             f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⏱ TIME EXIT: {summary.get('time_exits', 0)}\n"
-            f"🎯 Win rate: {win_rate:.1f}%" if win_rate is not None else "💰 AI jurnal foyda / zarar (candle-based hisob)\n\n"
+            f"🎯 Win rate: {win_rate:.1f}%" if win_rate is not None else "💰 Jurnal foyda / zarar (candle-based hisob)\n\n"
             f"Jami yopilgan order: {summary['closed_orders']}\n"
             f"✅ WIN: {summary['wins']} | ❌ LOSS: {summary['losses']} | ⏱ TIME EXIT: {summary.get('time_exits', 0)}\n"
             "🎯 Win rate: —") + f"\n💵 Journal P&L: {pnl:+.4g} USDT\nBugungi journal P&L: {float(summary['today_pnl_usdt']):+.4g} USDT"
@@ -258,7 +257,7 @@ def _performance_text() -> str:
         from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
         started = scalping_storage.first_broker_order_time()
         if not started:
-            return journal + "\n\n🔗 BingX VST: ushbu AI jurnalida exchange order hali yo‘q."
+            return journal + "\n\n🔗 BingX VST: jurnalda exchange order hali yo‘q."
         if not (os.environ.get("BINGX_API_KEY", "").strip() and os.environ.get("BINGX_SECRET", "").strip()):
             return journal + "\n\n🔗 BingX VST actual P&L tekshiruvi uchun API credentials sozlanmagan."
         income = broker.vst_income_summary(int(started.astimezone(timezone.utc).timestamp() * 1000))
@@ -278,8 +277,8 @@ def _closed_orders_text() -> str:
     except Exception:
         return "✅ Yopiq orderlar vaqtincha olinmadi. Keyinroq 🔄 Panelni yangilash tugmasini bosing."
     if not rows:
-        return "✅ Hali yopilgan AI VST/paper order yo‘q."
-    lines = ["✅ So‘nggi 10 yopiq AI VST/paper order:"]
+        return "✅ Hali yopilgan VST/paper order yo‘q."
+    lines = ["✅ So‘nggi 10 yopiq VST/paper order:"]
     for row in rows:
         pnl = float(row["realized_pnl_usdt"])
         order = f" | order: #{row['broker_order_id']}" if row.get("broker_order_id") else " | paper signal"
@@ -315,7 +314,7 @@ def _handle_callback(callback: dict) -> None:
     elif action == "upload":
         _reply(chat_id, "📤 Endi PDF faylni shu chatga yuboring. Text-based PDF avtomatik bilim bazasiga qo‘shiladi.", menu=True)
     elif action == "help":
-        _reply(chat_id, "Savolni oddiy yozing: signal, P&L, regime, learning, RSS yoki reconciliation haqida tushuntiraman. Runtime control misollari: STOP, START DEMO, BLOCK BTC-USDT, UNBLOCK BTC-USDT, RISK PCT 1.5, DAILY LOSS PCT 5, MARGIN PCT 25. Har biri preview va TASDIQLAYMAN kodi talab qiladi. Live trading, kod, credential va broker endpointi o‘zgarmaydi.", menu=True)
+        _reply(chat_id, "Holatni tugmalar orqali ko‘ring. Runtime control misollari: STOP, START DEMO, BLOCK BTC-USDT, UNBLOCK BTC-USDT, RISK PCT 1.5, DAILY LOSS PCT 5, MARGIN PCT 25. Har biri preview va TASDIQLAYMAN kodi talab qiladi. Live trading, kod, credential va broker endpointi o‘zgarmaydi.", menu=True)
 
 
 def handle_update(update: dict) -> None:
@@ -385,4 +384,4 @@ def handle_update(update: dict) -> None:
     if updates is not None:
         _reply(chat_id, _preview_control(chat_id, updates), menu=True)
         return
-    _reply(chat_id, telegram_chat.answer(text), menu=True)
+    _reply(chat_id, "Buyruq tanilmadi. Tugmalardan foydalaning yoki ❓ Yordam ni bosing.", menu=True)

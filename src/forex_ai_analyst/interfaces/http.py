@@ -1,10 +1,9 @@
-"""The one Render entrypoint: deterministic, Binance-data, paper-only multi-strategy service."""
+"""The one Render entrypoint: deterministic Donchian 4h trend service, BingX VST demo only (no LLM in the trade path)."""
 from __future__ import annotations
 
 import logging
 import os
 import secrets
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -13,14 +12,8 @@ load_dotenv()
 
 from flask import Flask, abort, jsonify, request
 
-from forex_ai_analyst.shared import llm
-from forex_ai_analyst.trading.application.ai_trader import AITradeDecision, decide
-from forex_ai_analyst.trading.domain.indicators import higher_timeframe_bias
 from forex_ai_analyst.trading.application import trend_engine
-from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateStatus, Decision, Direction, MarketRegime
-from forex_ai_analyst.trading.infrastructure.institutional_data import fetch_institutional_context
-from forex_ai_analyst.trading.application.learning import summarize as learning_summary
-from forex_ai_analyst.trading.infrastructure.market_intelligence import context_for_pair, status as intelligence_status
+from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateStatus, Decision, Direction
 from forex_ai_analyst.knowledge import service as knowledge
 from forex_ai_analyst.operations import incidents as execution_alerts
 from forex_ai_analyst.trading.domain.regime import classify_market_regime
@@ -39,8 +32,6 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DASHBOARD_TOKEN = os.environ.get("DASHBOARD_TOKEN", "").strip()
 _VST_ACCOUNT_DIAGNOSTIC: dict = {"available": None, "last_checked_at": None}
-_MIN_POST_FILL_REWARD_RISK = 1.3
-_MAX_POST_FILL_RISK_MULTIPLIER = 1.05
 
 
 def configured_pairs() -> tuple[str, ...]:
@@ -63,19 +54,6 @@ def resolve_retired_static_risk_alerts() -> None:
             execution_alerts.resolve(f"risk-control:{pair}:{reason}", note="fixed runtime limit retired")
 
 
-def format_paper_signal(candidate, decision: AITradeDecision, quantity: float, broker_order: dict | None = None) -> str:
-    execution_note = (f"BingX VST demo order ochildi: #{broker_order['order_id']}; "
-                      f"fill: {broker_order['fill_price']:.6g}."
-                      if broker_order else "Bu paper signal. BingX order ochilmaydi.")
-    return (f"🤖 AI VST SIGNAL — {candidate.pair} {candidate.direction}\n\n"
-            f"Regime: {candidate.regime}\nAI ishonchi: {decision.confidence}/100\n\n"
-            f"Entry: {candidate.entry_price:.6g}\nStop: {candidate.stop_price:.6g}\n"
-            f"Target: {candidate.target_price:.6g}\nR:R: {candidate.reward_risk:.2f}\n\nTasdiqlar:\n• " +
-            "\n• ".join(candidate.confirmations) + f"\n\nAI risk: ${decision.risk_usdt:.2f}; leverage: {decision.leverage}x; quantity: {quantity:.8g}\n"
-            f"Cooldown: {decision.cooldown_minutes} daqiqa\nInvalidation: {decision.invalidation}\n"
-            + execution_note)
-
-
 def trade_readiness() -> dict:
     """Return safe, actionable reasons why the VST trade pipeline is blocked."""
     blockers = []
@@ -88,8 +66,6 @@ def trade_readiness() -> dict:
         blockers.append("bingx_api_key_missing")
     if not os.environ.get("BINGX_SECRET", "").strip():
         blockers.append("bingx_secret_missing")
-    if not llm.any_configured():
-        blockers.append("ai_provider_missing")
     try:
         controls = runtime_controls.settings()
     except Exception:
@@ -113,79 +89,8 @@ def demo_execution_enabled() -> bool:
     return trade_readiness()["ready"]
 
 
-def execute_bingx_vst_order(candidate, decision: AITradeDecision) -> dict | None:
-    if not demo_execution_enabled():
-        return None
-    from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
-    distance = abs(candidate.entry_price - candidate.stop_price)
-    quantity = broker.round_quantity(candidate.pair, decision.risk_usdt / distance)
-    if quantity <= 0:
-        raise ValueError(f"BingX VST quantity rounds to zero for {candidate.pair}; AI risk too small")
-    order = broker.place_market_order(candidate.pair, str(candidate.direction), quantity,
-                                       candidate.target_price, candidate.stop_price, leverage=decision.leverage)
-    # BingX's own executed quantity, when reported, can differ from what was
-    # requested (precision rounding on BingX's side); trusting the requested
-    # amount instead is what causes a later broker-vs-journal quantity
-    # mismatch alert in scheduler.recover_open_vst_orders.
-    filled_quantity = order.get("filled_quantity") or quantity
-    fill = float(order["fill_price"])
-    if str(candidate.direction) == "BUY":
-        actual_risk_per_unit, actual_reward_per_unit = fill - candidate.stop_price, candidate.target_price - fill
-    else:
-        actual_risk_per_unit, actual_reward_per_unit = candidate.stop_price - fill, fill - candidate.target_price
-    actual_risk = filled_quantity * actual_risk_per_unit
-    actual_reward_risk = actual_reward_per_unit / actual_risk_per_unit if actual_risk_per_unit > 0 else 0.0
-    accepted_risk = float(decision.risk_usdt)
-    unsafe_fill = (actual_risk_per_unit <= 0 or actual_reward_per_unit <= 0 or
-                   actual_reward_risk < _MIN_POST_FILL_REWARD_RISK or
-                   actual_risk > accepted_risk * _MAX_POST_FILL_RISK_MULTIPLIER)
-    result = {**order, "quantity": filled_quantity}
-    if not unsafe_fill:
-        return result
-
-    position_side = "LONG" if str(candidate.direction) == "BUY" else "SHORT"
-    details = {"pair": candidate.pair, "order_id": str(order["order_id"]),
-               "fill_price": fill, "planned_risk_usdt": accepted_risk,
-               "actual_risk_usdt": actual_risk, "actual_reward_risk": actual_reward_risk}
-    position = broker.get_position(candidate.pair, position_side)
-    if not position:
-        execution_alerts.report(f"unsafe-fill-missing-position:{candidate.fingerprint}",
-                                f"{candidate.pair} unsafe market filldan keyin broker pozitsiyasi topilmadi; exit fill taxmin qilinmadi.",
-                                severity="CRITICAL", details=details)
-        return {**result, "unsafe_fill": True}
-    close_order = broker.close_position(candidate.pair, str(candidate.direction), filled_quantity)
-    execution_alerts.report(f"unsafe-fill-closed:{candidate.fingerprint}",
-                            f"{candidate.pair} unsafe market fill sabab darhol yopildi (post-fill R:R {actual_reward_risk:.2f}).",
-                            severity="CRITICAL", details=details)
-    return {**result, "unsafe_fill": True, "close_order": close_order}
-
-
-def _constrain_ai_decision(decision: AITradeDecision, controls: dict, account_state: dict) -> AITradeDecision:
-    """Constrain AI risk by current VST equity, daily loss budget and margin.
-
-    There is deliberately no fixed-USDT risk cap, leverage cap below BingX's
-    125x technical limit, or minimum cooldown.  The account's live available
-    margin and the AI-selected stop/leverage determine what it can support.
-    """
-    risk_limit = runtime_controls.balance_risk_limit(account_state, controls)
-    if risk_limit is None:
-        raise ValueError("VST balance state is unavailable for risk sizing")
-    try:
-        available = float(account_state["available_usdt"])
-        margin_pct = float(controls["max_margin_utilization_pct"])
-        distance = abs(float(decision.entry_price) - float(decision.stop_price))
-        entry = float(decision.entry_price)
-    except (KeyError, TypeError, ValueError):
-        raise ValueError("VST available margin state is invalid") from None
-    if available <= 0 or not 0 < margin_pct <= 100 or distance <= 0 or entry <= 0:
-        raise ValueError("VST account cannot support a new risk-sized position")
-    # risk / stop_distance is quantity; quantity * entry / leverage is margin.
-    margin_supported_risk = available * margin_pct / 100 * decision.leverage * distance / entry
-    return replace(decision, risk_usdt=min(decision.risk_usdt, risk_limit, margin_supported_risk))
-
-
 def _vst_account_context() -> dict:
-    """Build a bounded, non-sensitive VST account snapshot for AI sizing context."""
+    """Build a bounded, non-sensitive VST account snapshot for risk sizing."""
     context = {"available": False, "open_strategy_positions": scalping_storage.open_paper_positions(),
                "daily_strategy_pnl_usdt": scalping_storage.risk_state()[1]}
     checked_at = datetime.now(timezone.utc).isoformat()
@@ -217,43 +122,6 @@ def _vst_account_context() -> dict:
         return {**context, **safe}
 
 
-_TREND_BIAS_FOR_DIRECTION = {Direction.BUY: "BULLISH", Direction.SELL: "BEARISH"}
-
-
-def _min_ai_confidence() -> int:
-    try:
-        return int(os.environ.get("AI_MIN_TRADE_CONFIDENCE", "70"))
-    except ValueError:
-        return 70
-
-
-def mechanical_gate_rejection(direction: Direction, regime: MarketRegime,
-                              higher_tf_bias: dict[str, str | None], confidence: int) -> str | None:
-    """Mechanical, code-level pre-trade filters the AI's own reasoning cannot
-    override. See docs/RESEARCH_FINDINGS.md #1 (volatility regime) and #2
-    (multi-timeframe alignment): both are evidence-backed, not LLM judgment.
-
-    A bias of None ("not enough history to judge") never blocks a trade — only
-    a determined, contradicting bias does.
-
-    confidence is otherwise purely informational (never gated anywhere else):
-    without this floor, a PROPOSE_TRADE at confidence 1 executes identically
-    to one at confidence 99. The default (70, tunable via
-    AI_MIN_TRADE_CONFIDENCE) is an operator choice to trade only the AI's
-    higher-conviction calls, not itself a scientific claim about what
-    confidence is "safe."
-    """
-    if confidence < _min_ai_confidence():
-        return f"AI ishonchi {confidence}/100 minimal {_min_ai_confidence()} dan past - ishonch mexanik filtri"
-    if regime in {MarketRegime.HIGH_VOLATILITY, MarketRegime.UNCERTAIN}:
-        return f"15m rejim {regime} - volatillik mexanik filtri"
-    expected = _TREND_BIAS_FOR_DIRECTION[direction]
-    against = sorted(label for label, bias in higher_tf_bias.items() if bias is not None and bias != expected)
-    if against:
-        return f"{'/'.join(against)} trend AI yo'nalishiga zid - multi-timeframe mexanik filtri"
-    return None
-
-
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.environ.get(name, str(default)))
@@ -265,9 +133,8 @@ def position_gate_rejection(pair: str, open_signals: list[dict], closed_signals:
                             now: datetime) -> str | None:
     """Stop the bot from stacking near-identical trades.
 
-    Without this, the AI could open a new order on the same pair on every 5m
-    candle (fingerprints are per candle) - the source of hundreds of
-    time-exited, low-quality trades. Limits are env-tunable:
+    One position per pair, a global cap, and a per-pair cooldown after a close.
+    Limits are env-tunable:
     MAX_CONCURRENT_POSITIONS (default 3) and TRADE_COOLDOWN_MINUTES (default 60,
     per pair, measured from the last close).
     """
@@ -292,31 +159,7 @@ def position_gate_rejection(pair: str, open_signals: list[dict], closed_signals:
     return None
 
 
-def preflight_rejection(direction: Direction, last_price: float, stop: float, target: float) -> str | None:
-    """Reject before ordering if the trade is already unsafe at the current price.
-
-    The exchange fills a MARKET order near the latest price, not at the AI's
-    stated entry. Checking R:R at that price up front avoids opening a
-    position that the post-fill safety check would close immediately, paying
-    fees both ways for nothing.
-    """
-    if direction is Direction.BUY:
-        risk, reward = last_price - stop, target - last_price
-    else:
-        risk, reward = stop - last_price, last_price - target
-    if risk <= 0 or reward <= 0:
-        return "joriy narx stop/target chegarasidan o'tib ketgan - preflight filtri"
-    if reward / risk < _MIN_POST_FILL_REWARD_RISK:
-        return f"joriy narxda R:R {reward / risk:.2f} < {_MIN_POST_FILL_REWARD_RISK} - preflight filtri"
-    return None
-
-
 TREND_MAX_HOLD_DAYS = 60  # safety net only; the strategy exits on its stop or exit channel
-
-
-def signal_engine() -> str:
-    """donchian_4h (default, lab-validated) or contextual_ai (legacy LLM signal generator)."""
-    return os.environ.get("SIGNAL_ENGINE", trend_engine.STRATEGY).strip().lower() or trend_engine.STRATEGY
 
 
 def execute_trend_order(pair: str, signal: dict, risk_usdt: float, leverage: int) -> dict | None:
@@ -341,20 +184,19 @@ def execute_trend_order(pair: str, signal: dict, risk_usdt: float, leverage: int
 
 
 def format_trend_signal(pair: str, signal: dict, params, risk_usdt: float, quantity: float,
-                        broker_order: dict | None, veto_note: str) -> str:
+                        broker_order: dict | None) -> str:
     execution = (f"BingX VST demo order ochildi: #{broker_order['order_id']}; fill: {broker_order['fill_price']:.6g}."
                  if broker_order else "Paper signal (VST execution o'chiq).")
     return (f"📈 DONCHIAN 4H LONG — {pair}\n\n"
             f"Breakout: 4h yopilish {signal['entry']:.6g} > {params.entry_n}-bar max {signal['channel_high']:.6g}\n"
             f"Stop ({params.stop_atr:g} ATR, birjada): {signal['stop']:.6g}\n"
             f"Chiqish: 4h yopilish {params.exit_n}-bar minimumdan pastda yoki stop\n"
-            f"Risk: ${risk_usdt:.2f}; quantity: {quantity:.8g}; leverage {params.leverage}x\n"
-            f"AI veto: yo'q ({veto_note})\n" + execution)
+            f"Risk: ${risk_usdt:.2f}; quantity: {quantity:.8g}; leverage {params.leverage}x\n" + execution)
 
 
-def scan_pair_trend(pair: str, provider: MarketDataProvider, now: datetime | None = None,
+def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None,
                     account_state: dict | None = None) -> list[dict]:
-    """Lab-validated Donchian 4h breakout, AI as veto only (docs/LAB_REPORT.md)."""
+    """Donchian 4h long breakout (docs/LAB_REPORT.md); every decision is a deterministic rule."""
     now = now or datetime.now(timezone.utc)
     params = trend_engine.params_from_environment()
     bars = provider.fetch_closed_bars(pair, trend_engine.TIMEFRAME, max(params.history_bars, 260), now)
@@ -401,13 +243,6 @@ def scan_pair_trend(pair: str, provider: MarketDataProvider, now: datetime | Non
     if risk_usdt <= 0:
         return [{"status": "SKIP", "reason": "VST balansi yoki marja risk uchun yetarli emas"}]
 
-    vetoed, veto_note = trend_engine.ai_veto(pair, signal, {
-        "regime": str(regime.regime), "regime_features": regime.features,
-        "institutional": fetch_institutional_context(pair.upper()), "market_intelligence": context_for_pair(pair, now)})
-    if vetoed:
-        # Journaled so the veto's value can be measured later against the deterministic signal.
-        scalping_storage.log_decision(Decision(candidate, CandidateStatus.REJECTED, f"AI veto: {veto_note}"))
-        return [{"status": "VETO", "reason": veto_note}]
     try:
         broker_order = execute_trend_order(pair, signal, risk_usdt, params.leverage)
         quantity = float((broker_order or {}).get("quantity", risk_usdt / signal["stop_distance"]))
@@ -419,7 +254,7 @@ def scan_pair_trend(pair: str, provider: MarketDataProvider, now: datetime | Non
                                                   float(close_order["fill_price"]), close_order)
             return [{"status": "SKIP", "reason": "fill stopdan past bo'ldi va darhol yopildi"}]
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-            send_telegram_message(format_trend_signal(pair, signal, params, risk_usdt, quantity, broker_order, veto_note),
+            send_telegram_message(format_trend_signal(pair, signal, params, risk_usdt, quantity, broker_order),
                                   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
         return [{"status": "ACCEPTED_PAPER", "fingerprint": candidate.fingerprint, "strategy": trend_engine.STRATEGY}]
     except Exception as exc:
@@ -427,94 +262,16 @@ def scan_pair_trend(pair: str, provider: MarketDataProvider, now: datetime | Non
         return [{"status": "SKIP", "reason": f"Donchian/VST execution failed: {type(exc).__name__}"}]
 
 
-def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None,
-              account_state: dict | None = None) -> list[dict]:
-    if signal_engine() == trend_engine.STRATEGY:
-        return scan_pair_trend(pair, provider, now, account_state)
-    now = now or datetime.now(timezone.utc)
-    bars_15m = provider.fetch_closed_bars(pair, "15m", 260, now)
-    bars_5m = provider.fetch_closed_bars(pair, "5m", 120, now)
-    bars_1h = provider.fetch_closed_bars(pair, "1h", 200, now)
-    bars_4h = provider.fetch_closed_bars(pair, "4h", 80, now)
-    bars_1d = provider.fetch_closed_bars(pair, "1d", 80, now)
-    regime = classify_market_regime(bars_15m)
-    higher_tf_bias = {"1h": higher_timeframe_bias(bars_1h), "4h": higher_timeframe_bias(bars_4h),
-                      "1d": higher_timeframe_bias(bars_1d)}
-    if bars_15m:
-        scalping_storage.log_market_snapshot(pair, "15m", int(bars_15m[-1]["datetime"]),
-                                             regime.regime, regime.features)
-    if not bars_5m or not bars_15m:
-        return [{"status": "SKIP", "reason": "yetarli yopilgan sham yo‘q"}]
-    account_snapshot = account_state if account_state is not None else _vst_account_context()
-    snapshot = {"pair": pair.upper(), "time_utc": now.isoformat(), "regime": str(regime.regime),
-                "regime_features": regime.features, "higher_timeframe_bias": higher_tf_bias,
-                "institutional": fetch_institutional_context(pair.upper()),
-                "market_intelligence": context_for_pair(pair, now),
-                "outcome_learning": learning_summary(scalping_storage.closed_paper_signals(500), pair),
-                "account_state": account_snapshot,
-                "bars_5m": bars_5m[-80:], "bars_15m": bars_15m[-120:], "bars_1h": bars_1h[-120:]}
-    excerpts = knowledge.search(f"{pair} {regime.regime} trend volatility risk")
-    controls = runtime_controls.settings()
-    account_state = account_snapshot
-    ai = decide(snapshot, excerpts, scalping_storage.recent_ai_reviews(pair), controls)
-    if not ai.proposes_trade:
-        return [{"status": ai.action, "reason": ai.rationale}]
-    try:
-        # Journaled proposals and VST orders use identical balance-relative
-        # sizing, so no proposal is accepted without a fresh account snapshot.
-        if not account_state["available"]:
-            return [{"status": "SKIP", "reason": "VST balance state unavailable; order yuborilmadi"}]
-        ai = _constrain_ai_decision(ai, controls, account_state)
-        candidate = ai.to_candidate(pair, regime.regime, int(bars_5m[-1]["datetime"]), now)
-        runtime_rejection = runtime_controls.trade_permitted(pair, ai.risk_usdt, ai.leverage, ai.cooldown_minutes)
-        if runtime_rejection:
-            key = "kill-switch" if "kill switch" in runtime_rejection else f"risk-control:{pair}:{runtime_rejection}"
-            execution_alerts.report(key, f"{pair} yangi VST order bloklandi: {runtime_rejection}.",
-                                    severity="CRITICAL" if key == "kill-switch" else "WARNING",
-                                    details={"pair": pair, "reason": runtime_rejection})
-            return [{"status": "SKIP", "reason": runtime_rejection}]
-        execution_alerts.resolve("kill-switch", note="runtime execution permission restored")
-        execution_alerts.resolve_prefix(f"risk-control:{pair}:", note="runtime execution permission restored")
-        gate_rejection = (mechanical_gate_rejection(ai.direction, regime.regime, higher_tf_bias, ai.confidence)
-                          or preflight_rejection(ai.direction, float(bars_5m[-1]["close"]),
-                                                 ai.stop_price, ai.target_price)
-                          or position_gate_rejection(pair, scalping_storage.open_paper_signals(),
-                                                     scalping_storage.closed_paper_signals(50), now))
-        if gate_rejection:
-            # Routine filtering, not an incident: log only, never alert Telegram.
-            logger.info("%s proposal rejected by mechanical gate: %s", pair, gate_rejection)
-            return [{"status": "SKIP", "reason": gate_rejection}]
-        if candidate.fingerprint in scalping_storage.existing_fingerprints():
-            return [{"status": "SKIP", "reason": "duplicate AI candle decision"}]
-        broker_order = execute_bingx_vst_order(candidate, ai)
-        quantity = float((broker_order or {}).get("quantity", ai.risk_usdt / abs(candidate.entry_price - candidate.stop_price)))
-        accepted = Decision(candidate, CandidateStatus.ACCEPTED_PAPER, "AI contextual decision")
-        scalping_storage.mark_accepted(accepted, ai.risk_usdt, quantity, broker_order)
-        if broker_order and broker_order.get("unsafe_fill"):
-            close_order = broker_order.get("close_order")
-            if close_order:
-                scalping_storage.resolve_paper_signal(candidate.fingerprint, CandidateStatus.TIME_EXIT,
-                                                      float(close_order["fill_price"]), close_order)
-                return [{"status": "SKIP", "reason": "unsafe post-fill execution was immediately closed"}]
-            return [{"status": "SKIP", "reason": "unsafe post-fill execution requires broker reconciliation"}]
-        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-            send_telegram_message(format_paper_signal(candidate, ai, quantity, broker_order), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-        return [{"status": "ACCEPTED_PAPER", "fingerprint": candidate.fingerprint, "ai": ai.raw}]
-    except Exception as exc:
-        logger.exception("AI VST execution failed for %s", pair)
-        return [{"status": "SKIP", "reason": f"AI/VST execution failed: {type(exc).__name__}"}]
-
-
 def scan_configured_pairs(provider: MarketDataProvider) -> None:
     account_state = _vst_account_context()
     if not account_state["available"]:
         details = {key: account_state.get(key) for key in ("category", "http_status", "bingx_code", "bingx_msg")}
         execution_alerts.report("vst-account-context-unavailable",
-                                "BingX VST account holati olinmadi; AI scan va yangi orderlar fail-closed to‘xtatildi.",
+                                "BingX VST account holati olinmadi; scan va yangi orderlar fail-closed to‘xtatildi.",
                                 details=details, remind_after_minutes=None)
-        logger.warning("Skipping configured-pair AI scan: VST account context is unavailable")
+        logger.warning("Skipping configured-pair scan: VST account context is unavailable")
         return
-    execution_alerts.resolve("vst-account-context-unavailable", note="BingX VST account holati tiklandi; AI scan qayta yoqildi.",
+    execution_alerts.resolve("vst-account-context-unavailable", note="BingX VST account holati tiklandi; scan qayta yoqildi.",
                              notify=True)
     for pair in configured_pairs():
         try:
@@ -553,11 +310,10 @@ def signals_api():
     return jsonify({"signals": scalping_storage.recent_candidates(request.args.get("limit", 100, type=int))})
 
 
-@app.route("/api/intelligence")
-def intelligence_api():
+@app.route("/api/reconciliation")
+def reconciliation_api():
     _require_dashboard_access()
-    return jsonify({"market_intelligence": intelligence_status(),
-                    "reconciliation": scalping_storage.reconciliation_status()})
+    return jsonify({"reconciliation": scalping_storage.reconciliation_status()})
 
 
 @app.route("/telegram/webhook", methods=["POST"])

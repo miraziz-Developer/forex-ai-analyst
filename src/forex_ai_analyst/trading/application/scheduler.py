@@ -124,11 +124,18 @@ def recover_open_vst_orders() -> None:
                                         severity="CRITICAL", details={"fingerprint": row["fingerprint"], "expected_quantity": expected, "broker_quantity": actual})
             else:
                 execution_alerts.resolve(key, note="broker position matches open journal")
+            # A position is overdue only past its own planned expiry (Donchian trades
+            # legitimately stay open for days); rows without one use the flat SLA.
             opened_at = datetime.fromisoformat(row["created_at"])
-            if now - opened_at > timedelta(minutes=sla_minutes):
+            deadline = opened_at + timedelta(minutes=sla_minutes)
+            if row.get("expiry_time"):
+                expiry = datetime.fromisoformat(str(row["expiry_time"]))
+                deadline = (expiry if expiry.tzinfo else expiry.replace(tzinfo=timezone.utc)) + timedelta(minutes=sla_minutes)
+            if now > deadline:
                 execution_alerts.report(f"open-sla:{row['fingerprint']}",
-                                        f"{row['pair']} #{row['fingerprint'][:10]} {sla_minutes} daqiqalik open-position SLA dan oshdi.",
-                                        severity="WARNING", details={"fingerprint": row["fingerprint"], "opened_at": row["created_at"], "sla_minutes": sla_minutes})
+                                        f"{row['pair']} #{row['fingerprint'][:10]} rejalashtirilgan muddatdan {sla_minutes} daqiqa o‘tdi, pozitsiya hali ochiq.",
+                                        severity="WARNING", details={"fingerprint": row["fingerprint"], "opened_at": row["created_at"],
+                                                                     "expiry_time": row.get("expiry_time"), "sla_minutes": sla_minutes})
             else:
                 execution_alerts.resolve(f"open-sla:{row['fingerprint']}", note="position remains within open SLA")
         except Exception as exc:
@@ -239,7 +246,7 @@ def reconcile_closed_vst_orders() -> None:
 
     P&L, fee and funding are stored only when the broker order response itself
     explicitly provides every value. VST income remains account-scoped and is
-    intentionally not assigned to an AI signal.
+    intentionally not assigned to a strategy signal.
     """
     for row in scalping_storage.closed_vst_orders_pending_reconciliation():
         try:

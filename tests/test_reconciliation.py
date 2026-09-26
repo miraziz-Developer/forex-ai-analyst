@@ -29,6 +29,21 @@ class ReconciliationTests(unittest.TestCase):
     @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts.resolve")
     @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts.report")
     @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_vst_orders")
+    def test_multi_day_trend_position_is_not_overdue_before_its_expiry(self, open_orders, report, resolve):
+        now = datetime.now(timezone.utc)
+        open_orders.return_value = [{"fingerprint": "trend-1", "pair": "BTC-USDT", "direction": "BUY",
+                                    "broker_quantity": .1, "created_at": (now - timedelta(days=5)).isoformat(),
+                                    "expiry_time": (now + timedelta(days=55)).isoformat()}]
+        broker = Mock()
+        broker.get_position.return_value = {"positionAmt": ".1"}
+        with patch.object(multi_strategy_scheduler, "broker", broker), patch.dict(os.environ, {"VST_OPEN_SLA_MINUTES": "120"}):
+            multi_strategy_scheduler.recover_open_vst_orders()
+        report.assert_not_called()
+        resolve.assert_any_call("open-sla:trend-1", note="position remains within open SLA")
+
+    @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts.resolve")
+    @patch("forex_ai_analyst.trading.application.scheduler.execution_alerts.report")
+    @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage.open_vst_orders")
     def test_open_vst_recovery_reports_absent_position_without_closing_journal(self, open_orders, report, resolve):
         open_orders.return_value = [{"fingerprint": "missing-1", "pair": "BTC-USDT", "direction": "SELL",
                                     "broker_order_id": "entry-1", "broker_quantity": .1, "created_at": datetime.now(timezone.utc).isoformat()}]

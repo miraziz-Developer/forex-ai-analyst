@@ -1,5 +1,10 @@
 # Research findings — candidate accuracy improvements
 
+> **Historical (2026-09-26).** These notes concern the retired LLM signal
+> engine. The live service is now the rule-based Donchian 4h strategy with no
+> AI in the trade path (see README and docs/LAB_REPORT.md); the gates named
+> below were removed with that engine.
+
 Collected 2026-09-02, after 12 resolved trades at a 16.7% win rate (-$3.61).
 Each item below is evidence-backed rather than folklore, with the source and
 the honest caveat attached.
