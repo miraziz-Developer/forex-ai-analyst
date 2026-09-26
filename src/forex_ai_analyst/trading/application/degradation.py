@@ -2,12 +2,12 @@
 
 Each closed trade is measured in R (realized P&L / risk taken). The limits come
 from the lab backtest of the live configuration (entry 100, exit 20, 3 ATR,
-long, 5 pairs, 2021-2026 with taker costs and funding; 291 trades):
+long, the 10 live markets, 2021-2026 with taker costs and funding; 575 trades):
 
-    win rate 38%, mean +0.83R, median -0.6R, worst losing run 11,
-    worst cumulative-R drawdown -19R.
-    Bootstrap of 30-trade windows: drawdown p5 -12R, p1 -16R;
-    losing run p95 10, p99 13.
+    win rate 34%, mean +0.67R, median -0.7R, worst losing run 18,
+    worst cumulative-R drawdown -34R.
+    Bootstrap of 30-trade windows: drawdown p5 -14R, p1 -17R;
+    losing run p95 11, p99 15.
 
 A trend follower loses most of the time and earns from rare large winners, so
 short losing streaks are normal. The alarm fires only when live results leave
@@ -24,8 +24,8 @@ from forex_ai_analyst.trading.infrastructure import signal_repository as scalpin
 
 logger = logging.getLogger(__name__)
 
-WARN_LOSS_RUN, CRITICAL_LOSS_RUN = 10, 13
-WARN_DRAWDOWN_R, CRITICAL_DRAWDOWN_R = -12.0, -16.0
+WARN_LOSS_RUN, CRITICAL_LOSS_RUN = 11, 15
+WARN_DRAWDOWN_R, CRITICAL_DRAWDOWN_R = -14.0, -17.0
 INCIDENT_KEY = f"degradation:{trend_engine.STRATEGY}"
 
 

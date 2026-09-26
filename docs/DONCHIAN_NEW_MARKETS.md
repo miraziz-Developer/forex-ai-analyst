@@ -26,6 +26,21 @@ result counts as evidence against the strategy's generality.
 Whichever way the result goes, it is appended below and not re-run with
 different settings.
 
-## Result
+## Result (2026-09-26) — PASS
 
-(pending)
+| Market | Trades | Win rate | Total R |
+|---|---|---|---|
+| DOGE-USDT | 55 | 27% | +50.7 |
+| ADA-USDT | 50 | 34% | +48.0 |
+| LINK-USDT | 66 | 33% | +8.9 |
+| AVAX-USDT | 53 | 36% | +50.0 |
+| LTC-USDT | 60 | 22% | -14.3 |
+
+Pooled: 284 trades, mean +0.50R, bootstrap P(mean R > 0) = 0.993, profit
+factor 1.86, 4 of 5 markets positive, largest market share of positive R 28%.
+All four criteria pass. The effect is weaker than on the original five markets
+(+0.83R), as expected out of sample, and LTC lost.
+
+**Action:** the live pair list becomes the ten markets. On all ten
+(575 trades, 2021-2026): win rate 34%, mean +0.67R, worst losing run 18,
+worst drawdown -34R; the degradation alarm is recalibrated to these numbers.

@@ -36,7 +36,7 @@ _VST_ACCOUNT_DIAGNOSTIC: dict = {"available": None, "last_checked_at": None}
 
 def configured_pairs() -> tuple[str, ...]:
     pairs = tuple(item.strip().upper() for item in os.environ.get(
-        "MULTI_STRATEGY_PAIRS", "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT").split(",") if item.strip())
+        "MULTI_STRATEGY_PAIRS", "BTC-USDT,ETH-USDT,SOL-USDT,XRP-USDT,BNB-USDT,DOGE-USDT,ADA-USDT,LINK-USDT,AVAX-USDT,LTC-USDT").split(",") if item.strip())
     if not pairs:
         raise ValueError("MULTI_STRATEGY_PAIRS must contain at least one pair")
     return pairs
@@ -135,13 +135,13 @@ def position_gate_rejection(pair: str, open_signals: list[dict], closed_signals:
 
     One position per pair, a global cap, and a per-pair cooldown after a close.
     Limits are env-tunable:
-    MAX_CONCURRENT_POSITIONS (default 3) and TRADE_COOLDOWN_MINUTES (default 60,
+    MAX_CONCURRENT_POSITIONS (default 6) and TRADE_COOLDOWN_MINUTES (default 60,
     per pair, measured from the last close).
     """
     pair = pair.upper()
     if any(str(item.get("pair", "")).upper() == pair for item in open_signals):
         return f"{pair} bo'yicha pozitsiya allaqachon ochiq - pozitsiya filtri"
-    max_open = _env_int("MAX_CONCURRENT_POSITIONS", 3)
+    max_open = _env_int("MAX_CONCURRENT_POSITIONS", 6)
     if len(open_signals) >= max_open:
         return f"ochiq pozitsiyalar limiti to'lgan ({len(open_signals)}/{max_open}) - pozitsiya filtri"
     cooldown = timedelta(minutes=_env_int("TRADE_COOLDOWN_MINUTES", 60))

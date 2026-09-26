@@ -15,12 +15,12 @@ class AssessTests(unittest.TestCase):
         self.assertIsNone(degradation.assess(r)[0])
 
     def test_loss_run_beyond_the_backtest_is_critical(self):
-        level, metrics = degradation.assess([2.0] + [-1.0] * 13)
+        level, metrics = degradation.assess([2.0] + [-1.0] * 15)
         self.assertEqual(level, "CRITICAL")
-        self.assertEqual(metrics["current_loss_run"], 13)
+        self.assertEqual(metrics["current_loss_run"], 15)
 
-    def test_ten_losses_in_a_row_is_a_warning(self):
-        self.assertEqual(degradation.assess([-1.0] * 10)[0], "WARNING")
+    def test_eleven_losses_in_a_row_is_a_warning(self):
+        self.assertEqual(degradation.assess([2.0] * 3 + [-0.5] * 11)[0], "WARNING")
 
     def test_deep_drawdown_is_flagged_even_with_scattered_wins(self):
         r = ([-1.0] * 4 + [0.5]) * 4          # -3.5R per block, never 10 losses in a row
@@ -47,7 +47,7 @@ class TradeRTests(unittest.TestCase):
 @patch("forex_ai_analyst.trading.application.degradation.scalping_storage")
 class CheckTests(unittest.TestCase):
     def test_breach_reports_one_deduplicated_incident(self, storage, alerts):
-        storage.closed_strategy_trades.return_value = [{"risk_usdt": 5, "realized_pnl_usdt": -5}] * 13
+        storage.closed_strategy_trades.return_value = [{"risk_usdt": 5, "realized_pnl_usdt": -5}] * 15
         degradation.check()
         storage.closed_strategy_trades.assert_called_once_with("donchian_4h", 500)
         key, _ = alerts.report.call_args.args
