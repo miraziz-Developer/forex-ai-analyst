@@ -96,7 +96,8 @@ def cmd_events(args) -> None:
         oi, reports["open_interest_5m"] = _source_report("oi", oi, data.FIVE_MIN, load_start, load_end, now_ms,
                                                          non_negative=("oi",))
         quality_report["pairs"][pair] = reports
-        frame = features.compute(features.align(pair, perp, spot, premium, funding, oi))
+        frame = features.compute(features.align(pair, perp, spot, premium, funding, oi,
+                                                feature_version=manifest.get("feature_version", "v1")))
         for direction in manifest["directions"]:
             for config in configs:
                 key = (direction, tuple(sorted(config.items())))

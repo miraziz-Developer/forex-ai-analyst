@@ -35,6 +35,22 @@ class RollingTests(unittest.TestCase):
         self.assertEqual([round(v, 1) for v in out], [100.0, 50.0, 33.3, 25.0])
         self.assertEqual(features.rolling_percentile([1, 9, 1, 9], 2, min_obs=1)[3], 100.0)
 
+    def test_v1_tie_rule_is_unchanged_so_registered_results_reproduce(self):
+        self.assertEqual(features.rolling_percentile([1, 1, 1, 1], 4, min_obs=1), [100.0] * 4)
+
+    def test_mid_rank_puts_a_flat_series_in_the_middle_not_the_tail(self):
+        self.assertEqual(features.rolling_percentile([1, 1, 1, 1], 4, min_obs=1, ties="mid"), [50.0] * 4)
+        out = features.rolling_percentile([1, 1, 1, 5], 4, min_obs=1, ties="mid")
+        self.assertEqual(out[3], 87.5)                        # a genuinely higher value reaches the upper tail
+        low = features.rolling_percentile([5, 5, 5, 1], 4, min_obs=1, ties="mid")
+        self.assertEqual(low[3], 12.5)                        # and a lower one the lower tail (v1 gives 25)
+
+    def test_flat_funding_is_not_crowded_under_feature_v2(self):
+        day = 8 * 3_600_000
+        events = [(k * day, 0.0001) for k in range(60)]
+        self.assertEqual(features.event_percentiles(events, features.WINDOW_MS, 30)[-1], 100.0)
+        self.assertEqual(features.event_percentiles(events, features.WINDOW_MS, 30, ties="mid")[-1], 50.0)
+
     def test_missing_values_are_skipped_not_zeroed(self):
         out = features.rolling_percentile([None, 5, None, 1], 4, min_obs=1)
         self.assertIsNone(out[0])

@@ -99,7 +99,23 @@ MANIFEST_V2 = {
     },
 }
 
-MANIFEST = MANIFEST_V2  # current version
+MANIFEST_V3 = {
+    **MANIFEST_V2,
+    "hypothesis_id": "crowding_exhaustion_v3",
+    "supersedes": "crowding_exhaustion_v2",
+    "feature_version": "v2",
+    "change_from_v2": (
+        "Only the percentile tie rule changes, from share-<= to mid-rank. Under v1 features the "
+        "baseline funding rate (identical for long stretches) scored as an extreme high and a low "
+        "extreme was nearly unreachable, so the SHORT funding condition did not test crowding and "
+        "LONG produced zero events. Thresholds, grid, periods, gates and costs are unchanged."
+    ),
+    "found_after": "crowding_exhaustion_v2 event study (INSUFFICIENT_EVIDENCE: at most 4 events per config)",
+    "prior_trials": {"crowding_exhaustion_v2": 32},
+    "multiple_testing": "Deflated Sharpe for any later stage counts every trial across v2 and v3.",
+}
+
+MANIFEST = MANIFEST_V3  # current version
 
 
 def parameter_configs() -> list[dict]:
@@ -169,7 +185,6 @@ def _trigger(frame, i: int, setup_index: int, config: dict, direction: str) -> b
 
 def detect_events(frame, config: dict, direction: str, hypothesis_id: str) -> list:
     """Crowding setup followed within TRIGGER_WITHIN_BARS by a structural break against the crowd."""
-    from forex_ai_analyst.research.edge_lab.features import FEATURE_VERSION
     from forex_ai_analyst.research.edge_lab.models import MarketEvent
 
     f, events, setup_index, cooldown_until = frame.features, [], None, -1
@@ -192,7 +207,7 @@ def detect_events(frame, config: dict, direction: str, hypothesis_id: str) -> li
                 event_id=f"{frame.pair}:{direction}:{frame.decision_time[i]}", hypothesis_id=hypothesis_id,
                 pair=frame.pair, direction=direction, event_time_ms=frame.open_time[setup_index],
                 decision_time_ms=frame.decision_time[i], reference_price=frame.close[i],
-                feature_version=FEATURE_VERSION, features={"bar_index": i, "setup_index": setup_index, **snapshot},
+                feature_version=frame.feature_version, features={"bar_index": i, "setup_index": setup_index, **snapshot},
                 data_quality={}))
             setup_index, cooldown_until = None, i + COOLDOWN_BARS
     return events
