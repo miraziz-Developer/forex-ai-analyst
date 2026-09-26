@@ -69,6 +69,22 @@ class RuleTests(unittest.TestCase):
         self.assertEqual({d: r for d, r in base.items() if d <= cut}, {d: r for d, r in after.items() if d <= cut})
 
 
+class RegimeTests(unittest.TestCase):
+    def test_regime_uses_only_completed_daily_closes(self):
+        daily = [{"datetime": i * DAY, "close": 100.0} for i in range(5)] + [{"datetime": 5 * DAY, "close": 200.0}]
+        bars = [{"datetime": 5 * DAY + h * 4 * 3_600_000} for h in range(7)]
+        regime = candidates.btc_bull_regime(bars, daily, sma_days=3)
+        self.assertFalse(regime[0])        # day 5 (close 200) has not closed during the first bars of day 5
+        self.assertTrue(regime[5])         # its close is known once the 4h bar ending at day 6 closes
+
+    def test_filter_blocks_longs_in_bear_and_shorts_in_bull(self):
+        bars = random_bars(600, seed=4)
+        bull = [i % 2 == 0 for i in range(len(bars))]
+        s = candidates.regime_donchian(bars, bull, shorts=True)
+        self.assertTrue(all(bull[i] for i, e in enumerate(s.long_entry) if e))
+        self.assertTrue(all(not bull[i] for i, e in enumerate(s.short_entry) if e))
+
+
 class DeflatedSharpeTests(unittest.TestCase):
     def test_more_trials_can_only_lower_the_probability(self):
         rng = random.Random(3)
