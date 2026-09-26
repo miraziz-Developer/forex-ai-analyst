@@ -24,6 +24,17 @@ markets, 2021-01-01..2026-09-01, lab engine costs and historical funding.
 If both pass, the one with the higher full-period Sharpe is adopted. If
 neither passes, live stays unchanged. No re-run with other settings.
 
-## Result
+## Result (2026-09-26) — neither variant passes; live unchanged
 
-(pending)
+| Variant | Sharpe | CAGR | Max DD | 2021-23 | 2024-26 | Trades/mo | Mean R | PF |
+|---|---|---|---|---|---|---|---|---|
+| **baseline (live)** | **1.32** | **6.7%** | -4.9% | **1.52** | 1.06 | 8.5 | +0.67 | 2.18 |
+| long_bull_filter | 1.01 | 3.7% | -4.3% | 0.82 | 1.19 | 5.1 | +0.63 | 2.12 |
+| long_bull_short_bear | 0.77 | 3.5% | -5.8% | 0.51 | 1.00 | 9.6 | +0.32 | 1.60 |
+
+- The bull filter removes 40% of trades, including early breakouts that start
+  a new bull market while BTC is still under its 200-day average (2021-2023
+  Sharpe 1.52 -> 0.82). It helps slightly in 2024-2026, not in both halves.
+- Bear-regime shorts: 306 trades, mean -0.03R, profit factor 0.95, bootstrap
+  P(mean > 0) = 0.40. Short Donchian does not work on these markets even when
+  restricted to bear regimes.
