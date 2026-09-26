@@ -204,5 +204,20 @@ class BingXVstBalanceTests(unittest.TestCase):
         self.assertNotIn("signature", str(raised.exception.diagnostic))
 
 
+class CancelStopOrderTests(unittest.TestCase):
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
+    def test_only_stop_orders_on_the_closed_side_are_cancelled(self, signed_request):
+        signed_request.side_effect = [
+            {"code": 0, "data": {"orders": [
+                {"orderId": 1, "type": "STOP_MARKET", "positionSide": "LONG"},
+                {"orderId": 2, "type": "STOP_MARKET", "positionSide": "SHORT"},
+                {"orderId": 3, "type": "LIMIT", "positionSide": "LONG"}]}},
+            {"code": 0, "data": {}},
+        ]
+        self.assertEqual(broker.cancel_stop_orders("BTC-USDT", "LONG"), 1)
+        method, path, params = signed_request.call_args_list[-1].args
+        self.assertEqual((method, path, params["orderId"]), ("DELETE", "/openApi/swap/v2/trade/order", "1"))
+
+
 if __name__ == "__main__":
     unittest.main()
