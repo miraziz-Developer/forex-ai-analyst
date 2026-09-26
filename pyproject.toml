@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 forex-production-backtest = "forex_ai_analyst.research.production_backtest:main"
+forex-edge-lab = "forex_ai_analyst.research.edge_lab.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

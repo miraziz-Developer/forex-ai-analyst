@@ -1,0 +1,3 @@
+{"at": "2026-09-26T06:55:52.161397+00:00", "event": "REGISTERED", "hypothesis_id": "crowding_exhaustion_v1", "manifest_hash": "e4c01d45d15adb8ce22c8e101ac101cd739e08786a2c21a4c327c1721a770263"}
+{"at": "2026-09-26T07:01:58.608075+00:00", "event": "REGISTERED", "hypothesis_id": "crowding_exhaustion_v2", "manifest_hash": "c7f807dfe5c2f17bcbb9ca45044a88f872eef19f8e7407bcbff7882abd39e780"}
+{"at": "2026-09-26T07:01:58.682922+00:00", "event": "SUPERSEDED", "hypothesis_id": "crowding_exhaustion_v1", "reason": "Phase 0 probe: 5m OI metrics start 2021-12-01 for 9 of 10 markets (BTC 2021-01-01); v1 was registered before the probe finished. No trials were run on v1.", "successor": "crowding_exhaustion_v2", "trials_before_supersede": 0}
