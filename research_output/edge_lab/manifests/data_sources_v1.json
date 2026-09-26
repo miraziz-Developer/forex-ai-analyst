@@ -1,0 +1,846 @@
+{
+  "period": [
+    "2021-01-01",
+    "2026-09-01"
+  ],
+  "sources": [
+    {
+      "name": "perp_klines_5m",
+      "url": "https://data.binance.vision/data/futures/um/monthly/klines/{symbol}/5m/{symbol}-5m-{period}.zip",
+      "cadence": "monthly",
+      "interval_ms": 300000,
+      "availability": "HISTORICAL_AND_LIVE",
+      "event_time": "open_time",
+      "available_time_rule": "open_time + interval"
+    },
+    {
+      "name": "spot_klines_5m",
+      "url": "https://data.binance.vision/data/spot/monthly/klines/{symbol}/5m/{symbol}-5m-{period}.zip",
+      "cadence": "monthly",
+      "interval_ms": 300000,
+      "availability": "HISTORICAL_AND_LIVE",
+      "event_time": "open_time",
+      "available_time_rule": "open_time + interval"
+    },
+    {
+      "name": "premium_index_5m",
+      "url": "https://data.binance.vision/data/futures/um/monthly/premiumIndexKlines/{symbol}/5m/{symbol}-5m-{period}.zip",
+      "cadence": "monthly",
+      "interval_ms": 300000,
+      "availability": "HISTORICAL_AND_LIVE",
+      "event_time": "open_time",
+      "available_time_rule": "open_time + interval"
+    },
+    {
+      "name": "mark_price_1h",
+      "url": "https://data.binance.vision/data/futures/um/monthly/markPriceKlines/{symbol}/1h/{symbol}-1h-{period}.zip",
+      "cadence": "monthly",
+      "interval_ms": 3600000,
+      "availability": "HISTORICAL_AND_LIVE",
+      "event_time": "open_time",
+      "available_time_rule": "open_time + interval"
+    },
+    {
+      "name": "index_price_1h",
+      "url": "https://data.binance.vision/data/futures/um/monthly/indexPriceKlines/{symbol}/1h/{symbol}-1h-{period}.zip",
+      "cadence": "monthly",
+      "interval_ms": 3600000,
+      "availability": "HISTORICAL_AND_LIVE",
+      "event_time": "open_time",
+      "available_time_rule": "open_time + interval"
+    },
+    {
+      "name": "funding",
+      "url": "https://data.binance.vision/data/futures/um/monthly/fundingRate/{symbol}/{symbol}-fundingRate-{period}.zip",
+      "cadence": "monthly",
+      "interval_ms": 28800000,
+      "availability": "HISTORICAL_AND_LIVE",
+      "event_time": "calc_time",
+      "available_time_rule": "calc_time"
+    },
+    {
+      "name": "open_interest_5m",
+      "url": "https://data.binance.vision/data/futures/um/daily/metrics/{symbol}/{symbol}-metrics-{period}.zip",
+      "cadence": "daily",
+      "interval_ms": 300000,
+      "availability": "HISTORICAL_AND_LIVE",
+      "event_time": "create_time",
+      "available_time_rule": "create_time + 5m"
+    },
+    {
+      "name": "liquidations",
+      "url": "https://data.binance.vision/data/futures/um/daily/liquidationSnapshot/{symbol}/{symbol}-liquidationSnapshot-{period}.zip",
+      "cadence": "daily",
+      "interval_ms": 0,
+      "availability": "UNAVAILABLE",
+      "event_time": "time",
+      "available_time_rule": "not collected historically"
+    }
+  ],
+  "summary": {
+    "perp_klines_5m": {
+      "declared": "HISTORICAL_AND_LIVE",
+      "pairs_available": 10,
+      "pairs_probed": 10
+    },
+    "spot_klines_5m": {
+      "declared": "HISTORICAL_AND_LIVE",
+      "pairs_available": 10,
+      "pairs_probed": 10
+    },
+    "premium_index_5m": {
+      "declared": "HISTORICAL_AND_LIVE",
+      "pairs_available": 10,
+      "pairs_probed": 10
+    },
+    "mark_price_1h": {
+      "declared": "HISTORICAL_AND_LIVE",
+      "pairs_available": 10,
+      "pairs_probed": 10
+    },
+    "index_price_1h": {
+      "declared": "HISTORICAL_AND_LIVE",
+      "pairs_available": 10,
+      "pairs_probed": 10
+    },
+    "funding": {
+      "declared": "HISTORICAL_AND_LIVE",
+      "pairs_available": 10,
+      "pairs_probed": 10
+    },
+    "open_interest_5m": {
+      "declared": "HISTORICAL_AND_LIVE",
+      "pairs_available": 1,
+      "pairs_probed": 10
+    },
+    "liquidations": {
+      "declared": "UNAVAILABLE",
+      "pairs_available": 0,
+      "pairs_probed": 10
+    }
+  },
+  "probes": [
+    {
+      "source": "perp_klines_5m",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "perp_klines_5m",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "spot_klines_5m",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "premium_index_5m",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "mark_price_1h",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "index_price_1h",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "funding",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01",
+      "last_period": "2026-08",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 200,
+      "last_status": 200,
+      "available": true
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "open_interest_5m",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 200,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "BTC-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "ETH-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "SOL-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "XRP-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "BNB-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "DOGE-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "ADA-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "LINK-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "AVAX-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    },
+    {
+      "source": "liquidations",
+      "pair": "LTC-USDT",
+      "first_period": "2021-01-01",
+      "last_period": "2026-08-31",
+      "first_status": 404,
+      "last_status": 404,
+      "available": false
+    }
+  ],
+  "hypothesis_id": "crowding_exhaustion_v1",
+  "generated_at": "2026-09-26T06:58:52.672737+00:00"
+}

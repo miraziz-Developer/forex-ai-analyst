@@ -1,0 +1,122 @@
+{
+  "manifest": {
+    "ai_role": "May explain results and propose new hypotheses; any AI-suggested change is a new version.",
+    "availability_rules": {
+      "funding": "available at settlement time",
+      "klines": "available at bar close (open_time + interval)",
+      "open_interest_5m": "available one 5-minute interval after create_time (conservative)"
+    },
+    "cost_model": {
+      "base": {
+        "funding": "historical",
+        "slippage_pct_per_side": 0.02,
+        "taker_fee_pct_per_side": 0.05
+      },
+      "severe": {
+        "entry_delay_bars": 1,
+        "funding": "adverse",
+        "gap_through_stop": true,
+        "slippage_pct_per_side": 0.06,
+        "taker_fee_pct_per_side": 0.1
+      },
+      "stress": {
+        "funding": "historical",
+        "slippage_pct_per_side": 0.06,
+        "taker_fee_pct_per_side": 0.1
+      }
+    },
+    "data": {
+      "funding": "HISTORICAL_AND_LIVE",
+      "liquidations": "UNAVAILABLE",
+      "open_interest_5m": "HISTORICAL_AND_LIVE",
+      "order_book_depth": "LIVE_ONLY",
+      "perp_ohlcv": "HISTORICAL_AND_LIVE",
+      "premium_index_basis": "HISTORICAL_AND_LIVE",
+      "spot_ohlcv": "HISTORICAL_AND_LIVE",
+      "taker_buy_volume": "HISTORICAL_AND_LIVE"
+    },
+    "direction_policy": "Each direction is a separate family with its own trials, report and verdict.",
+    "directions": [
+      "SHORT",
+      "LONG"
+    ],
+    "discovery_period": [
+      "2021-01-01",
+      "2024-01-01"
+    ],
+    "economic_thesis": "When leveraged traders crowd one side (extreme funding percentile and fast open-interest growth) while aggressive flow in that direction moves price less per unit of flow, the crowd is exhausted. A structural break against the crowd can start a forced unwind; falling open interest confirms it. SHORT studies crowded longs; LONG studies crowded shorts. The signal is the failed price response to leverage and flow, not the funding level alone.",
+    "event_study_gate": {
+      "effect_must_exceed_base_cost": true,
+      "leave_one_pair_out_must_hold": true,
+      "min_bootstrap_positive_probability": 0.9,
+      "min_discovery_events": 100,
+      "min_holdout_events": 30,
+      "min_pairs": 3
+    },
+    "feature_version": "v1",
+    "forward_period": "after implementation, VST shadow only",
+    "holdout_period": [
+      "2025-07-01",
+      "2026-09-01"
+    ],
+    "hypothesis_id": "crowding_exhaustion_v1",
+    "market_selection_note": "All still listed in 2026: survivorship bias is acknowledged, not corrected.",
+    "markets": [
+      "BTC-USDT",
+      "ETH-USDT",
+      "SOL-USDT",
+      "XRP-USDT",
+      "BNB-USDT",
+      "DOGE-USDT",
+      "ADA-USDT",
+      "LINK-USDT",
+      "AVAX-USDT",
+      "LTC-USDT"
+    ],
+    "max_trials_per_direction": 32,
+    "parameter_grid": {
+      "confirmation": [
+        "prior_bar_low_break",
+        "local_structure_break"
+      ],
+      "exit": [
+        "fixed_2r",
+        "oi_unwind_or_max_hold"
+      ],
+      "funding_percentile": [
+        90,
+        95
+      ],
+      "oi_change_lookback": [
+        "1h",
+        "4h"
+      ],
+      "price_lookback_bars": [
+        20,
+        55
+      ]
+    },
+    "percentile_window": "rolling 30 days of prior observations only",
+    "promotion_gate": {
+      "max_drawdown_pct": -20.0,
+      "max_single_pair_profit_share": 0.5,
+      "min_deflated_sharpe_probability": 0.9,
+      "min_holdout_trades": 30,
+      "min_oos_sharpe": 1.0,
+      "min_positive_window_share": 0.65,
+      "min_profit_factor": 1.2,
+      "min_stress_sharpe": 0.3
+    },
+    "signal_timeframe": "15m",
+    "validation_period": [
+      "2024-01-01",
+      "2025-07-01"
+    ],
+    "verdicts": [
+      "REJECTED",
+      "INSUFFICIENT_EVIDENCE",
+      "ELIGIBLE_FOR_SHADOW"
+    ]
+  },
+  "manifest_hash": "e4c01d45d15adb8ce22c8e101ac101cd739e08786a2c21a4c327c1721a770263"
+}
