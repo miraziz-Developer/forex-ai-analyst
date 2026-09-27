@@ -129,17 +129,31 @@ class TelegramBotTests(unittest.TestCase):
         search.assert_called_once_with("BTC risk")
         self.assertIn("Mos bilim topilmadi", reply.call_args.args[1])
 
+    @patch("forex_ai_analyst.trading.infrastructure.market_data.latest_prices", return_value={"BTC-USDT": 104.0})
     @patch("forex_ai_analyst.interfaces.telegram_bot._reply")
     @patch("forex_ai_analyst.interfaces.telegram_bot.scalping_storage.open_paper_signals", return_value=[{
-        "pair": "BTC-USDT", "direction": "BUY", "entry_price": 100, "target_price": 105,
-        "stop_price": 98, "broker_order_id": "vst-7",
+        "pair": "BTC-USDT", "direction": "BUY", "entry_price": 100, "target_price": 0, "broker_fill_price": 101,
+        "stop_price": 95, "broker_order_id": "vst-7", "broker_quantity": 2, "risk_usdt": 12,
     }])
-    def test_positions_button_lists_open_vst_position(self, positions, reply):
+    def test_positions_button_shows_live_unrealized_pnl(self, positions, reply, prices):
         with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
             telegram_bot.handle_update({"callback_query": {"id": "callback-3", "data": "positions",
                                        "message": {"chat": {"id": 42}}}})
-        self.assertIn("BTC-USDT BUY", reply.call_args.args[1])
-        self.assertIn("#vst-7", reply.call_args.args[1])
+        text = reply.call_args.args[1]
+        self.assertIn("BTC-USDT: +6.00 USDT (+0.50R)", text)       # (104 - 101 fill) * 2, risk 12
+        self.assertIn("#vst-7", text)
+        self.assertIn("Jami ochiq (realizatsiya qilinmagan): +6.00 USDT", text)
+
+    @patch("forex_ai_analyst.trading.infrastructure.market_data.latest_prices", side_effect=RuntimeError("down"))
+    @patch("forex_ai_analyst.interfaces.telegram_bot._reply")
+    @patch("forex_ai_analyst.interfaces.telegram_bot.scalping_storage.open_paper_signals", return_value=[{
+        "pair": "BTC-USDT", "direction": "BUY", "entry_price": 100, "target_price": 0, "stop_price": 95,
+    }])
+    def test_positions_still_listed_when_prices_are_unavailable(self, positions, reply, prices):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42"}):
+            telegram_bot.handle_update({"callback_query": {"id": "callback-5", "data": "positions",
+                                       "message": {"chat": {"id": 42}}}})
+        self.assertIn("joriy narx olinmadi", reply.call_args.args[1])
 
     @patch("forex_ai_analyst.interfaces.telegram_bot._reply")
     @patch("forex_ai_analyst.interfaces.telegram_bot.scalping_storage.performance_summary", return_value={

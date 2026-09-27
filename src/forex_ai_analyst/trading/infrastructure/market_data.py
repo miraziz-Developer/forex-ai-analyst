@@ -15,6 +15,7 @@ _BINANCE_FUTURES_KLINES_URLS = (
     "https://fapi3.binance.com/fapi/v1/klines",
 )
 _BINGX_SWAP_KLINES_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
+_BINGX_SWAP_PRICE_URL = "https://open-api.bingx.com/openApi/swap/v2/quote/price"
 
 
 def binance_futures_symbol(pair: str) -> str:
@@ -87,6 +88,22 @@ def fetch_bingx_swap_bars(pair: str, timeframe: str, outputsize: int = 300) -> l
         for row in payload["data"]
         if isinstance(row, dict)
     ]
+
+
+def latest_prices() -> dict[str, float]:
+    """Latest public BingX perpetual prices for every symbol, in one request (no API key)."""
+    response = requests.get(_BINGX_SWAP_PRICE_URL, timeout=15)
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("code") != 0 or not isinstance(payload.get("data"), list):
+        raise ValueError(f"unexpected BingX price response: {payload.get('msg', '')}")
+    prices = {}
+    for row in payload["data"]:
+        try:
+            prices[str(row["symbol"]).upper()] = float(row["price"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return prices
 
 
 def closed_bars(bars: list[dict], timeframe: str, now: datetime | None = None) -> list[dict]:
