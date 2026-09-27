@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import timezone
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import requests
@@ -228,14 +228,41 @@ def _positions_text() -> str:
         return "📌 Ochiq pozitsiyalar vaqtincha olinmadi. Keyinroq 🔄 Yangilash tugmasini bosing."
     if not rows:
         return "📌 Hozir ochiq VST/paper pozitsiya yo‘q."
-    lines = ["📌 Ochiq VST/paper orderlar:"]
-    for row in rows[:10]:
-        order = f" | order: #{row['broker_order_id']}" if row.get("broker_order_id") else " | paper signal"
-        risk = f"${float(row['risk_usdt']):.4g}" if row.get("risk_usdt") is not None else "—"
-        quantity = f"{float(row['quantity']):.8g}" if row.get("quantity") is not None else "—"
-        lines.append(f"• {row['pair']} {row['direction']}{order}\n"
-                     f"  Entry: {float(row['entry_price']):.6g} | TP: {_target_label(row)} | SL: {float(row['stop_price']):.6g}\n"
-                     f"  Risk: {risk} | Quantity: {quantity}")
+    try:
+        from forex_ai_analyst.trading.infrastructure.market_data import latest_prices
+        prices = latest_prices()
+    except Exception:
+        prices = {}
+    now = datetime.now(timezone.utc)
+    lines, total_pnl, total_r, priced = [f"📌 Ochiq pozitsiyalar: {len(rows)} ta"], 0.0, 0.0, 0
+    for row in rows[:20]:
+        entry = float(row.get("broker_fill_price") or row["entry_price"])
+        quantity = float(row.get("broker_quantity") or row.get("quantity") or 0)
+        risk = float(row["risk_usdt"]) if row.get("risk_usdt") else None
+        stop, side = float(row["stop_price"]), 1 if row["direction"] == "BUY" else -1
+        order = f"#{row['broker_order_id']}" if row.get("broker_order_id") else "paper"
+        opened = ""
+        if row.get("candle_time"):
+            held = now - datetime.fromtimestamp(int(row["candle_time"]) / 1000, timezone.utc)
+            opened = f" | {held.days} kun {held.seconds // 3600} soat"
+        price = prices.get(str(row["pair"]).upper())
+        if price is None:
+            lines.append(f"• {row['pair']} — joriy narx olinmadi\n  Kirish: {entry:.6g} | SL: {stop:.6g} | {order}")
+            continue
+        pnl = (price - entry) * quantity * side
+        r_multiple = pnl / risk if risk else None
+        total_pnl += pnl
+        total_r += r_multiple or 0.0
+        priced += 1
+        icon = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+        r_text = f" ({r_multiple:+.2f}R)" if r_multiple is not None else ""
+        to_stop = (price - stop) / price * 100 * side
+        lines.append(f"{icon} {row['pair']}: {pnl:+.2f} USDT{r_text}\n"
+                     f"  Kirish {entry:.6g} → hozir {price:.6g} | SL {stop:.6g} ({to_stop:.1f}% uzoqda)\n"
+                     f"  Chiqish: {_target_label(row)} yoki SL{opened} | {order}")
+    if priced:
+        lines.append(f"\nJami ochiq (realizatsiya qilinmagan): {total_pnl:+.2f} USDT ({total_r:+.2f}R)\n"
+                     "Pozitsiya stop urilsa yoki 4h sham 20-sham minimumidan pastda yopilsa yopiladi.")
     return "\n".join(lines)
 
 
