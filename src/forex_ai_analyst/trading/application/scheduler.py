@@ -105,6 +105,8 @@ def recover_open_vst_orders() -> None:
                     reason = str(close_order.get("type") or "BROKER_CLOSE")
                     scalping_storage.resolve_paper_signal(row["fingerprint"], status, float(close_order["fill_price"]),
                                                           close_order, close_reason=reason)
+                    logger.info("TRADE CLOSE %s exit=%s reason=%s (broker fill)", row["pair"],
+                                close_order["fill_price"], reason)
                     execution_alerts.resolve(key, note="broker-side close fill matched immutable order history", notify=True)
                     execution_alerts.resolve(f"missing-position:{row['fingerprint']}", note="broker-side close fill matched")
                     continue
@@ -187,6 +189,8 @@ def _resolve_trend_signal(signal: dict, provider: MarketDataProvider, now: datet
     scalping_storage.resolve_paper_signal(signal["fingerprint"],
                                           CandidateStatus.WIN if exit_price > entry else CandidateStatus.LOSS,
                                           exit_price, close_order, close_reason="EXIT_CHANNEL" if not expired else "MAX_HOLD")
+    logger.info("TRADE CLOSE %s entry=%.6g exit=%.6g reason=%s", signal["pair"], entry, exit_price,
+                "EXIT_CHANNEL" if not expired else "MAX_HOLD")
     try:
         broker.cancel_stop_orders(signal["pair"], "LONG")
     except Exception as exc:

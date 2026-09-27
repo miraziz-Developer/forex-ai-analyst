@@ -265,6 +265,9 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
             scalping_storage.resolve_paper_signal(candidate.fingerprint, CandidateStatus.LOSS,
                                                   float(close_order["fill_price"]), close_order)
             return [{"status": "SKIP", "reason": "fill stopdan past bo'ldi va darhol yopildi"}]
+        logger.info("TRADE OPEN %s entry=%.6g fill=%s stop=%.6g risk_usdt=%.2f qty=%.8g order=%s", pair,
+                    signal["entry"], (broker_order or {}).get("fill_price", "paper"), signal["stop"], risk_usdt,
+                    quantity, (broker_order or {}).get("order_id", "paper"))
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             send_telegram_message(format_trend_signal(pair, signal, params, risk_usdt, quantity, broker_order),
                                   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
