@@ -100,7 +100,7 @@ class ScanTrendTests(unittest.TestCase):
         return provider
 
     def storage(self, storage):
-        storage.existing_fingerprints.return_value = set()
+        storage.fingerprint_exists.return_value = False
         storage.open_paper_signals.return_value = []
         storage.closed_paper_signals.return_value = []
 
@@ -128,7 +128,7 @@ class ScanTrendTests(unittest.TestCase):
         self.storage(storage)
         first = app.scan_pair("BTC-USDT", self.provider(FLAT_THEN_BREAKOUT), account_state=ACCOUNT)
         self.assertEqual(first[0]["status"], "ACCEPTED_PAPER")
-        storage.existing_fingerprints.return_value = {storage.mark_accepted.call_args.args[0].candidate.fingerprint}
+        storage.fingerprint_exists.return_value = True
         execute.reset_mock()
         again = app.scan_pair("BTC-USDT", self.provider(FLAT_THEN_BREAKOUT), account_state=ACCOUNT)
         self.assertEqual(again[0]["status"], "SKIP")

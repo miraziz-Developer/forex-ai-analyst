@@ -209,5 +209,27 @@ class ReconciliationTests(unittest.TestCase):
         self.assertIn("bingx_code=109400", message)
 
 
+class DatabaseOutageTests(unittest.TestCase):
+    def setUp(self):
+        multi_strategy_scheduler._DB_ALERT["last_sent"] = 0.0
+
+    @patch("forex_ai_analyst.trading.application.scheduler.send_telegram_message")
+    def test_quota_block_is_alerted_directly_and_throttled(self, send):
+        def failing():
+            raise RuntimeError("Turso query failed: {'message': 'SQL read operations are forbidden', 'code': 'BLOCKED'}")
+        job = multi_strategy_scheduler._guarded(failing, "scan_configured_pairs")
+        with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"}):
+            self.assertIsNone(job())
+            job()                                   # a second failure within 6 hours is not re-sent
+        send.assert_called_once()
+        self.assertIn("o‘qish limiti", send.call_args.args[0])
+
+    def test_other_errors_still_raise(self):
+        def failing():
+            raise RuntimeError("something else")
+        with self.assertRaises(RuntimeError):
+            multi_strategy_scheduler._guarded(failing, "x")()
+
+
 if __name__ == "__main__":
     unittest.main()
