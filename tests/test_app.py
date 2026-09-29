@@ -42,7 +42,9 @@ class HealthTests(unittest.TestCase):
     def setUp(self):
         app._HEALTH_CACHE.update(at=0.0, readiness=None, alerts=None)
 
-    def test_health_identifies_the_single_paper_only_service(self):
+    @patch("forex_ai_analyst.interfaces.http._database_usage",
+           return_value={"day": "2026-09-29", "rows_read": 12, "queries": 3})
+    def test_health_identifies_the_single_paper_only_service(self, usage):
         with patch("forex_ai_analyst.interfaces.http.execution_alerts.status", return_value={"open_incidents": 0, "last_incident_at": None}), patch.dict(os.environ, {
             "MULTI_STRATEGY_PROVIDER": "bingx", "AUTO_EXECUTE_TRADES": "false",
             "BINGX_API_KEY": "", "BINGX_SECRET": "",
@@ -66,6 +68,7 @@ class HealthTests(unittest.TestCase):
             },
             "execution_alerts": {"open_incidents": 0, "last_incident_at": None},
             "vst_account": {"available": None, "last_checked_at": None},
+            "database_usage_today": {"day": "2026-09-29", "rows_read": 12, "queries": 3},
         })
 
     def test_auto_execute_requires_both_bingx_vst_credentials(self):

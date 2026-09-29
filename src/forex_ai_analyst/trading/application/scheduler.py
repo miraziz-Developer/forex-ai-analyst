@@ -347,6 +347,27 @@ def _database_outage_alert(job_name: str, exc: Exception) -> None:
     _DB_ALERT["last_sent"] = now
 
 
+DAILY_READ_BUDGET = int(os.environ.get("TURSO_DAILY_READ_BUDGET", "5000000"))  # ~150M/month = 30% of free quota
+_BUDGET_ALERT: dict = {"day": None}
+
+
+def database_budget_check() -> None:
+    """Warn once a day, straight through Telegram, if today's reads outrun the budget."""
+    from forex_ai_analyst.shared import turso
+    usage = turso.usage_today()
+    if usage["rows_read"] <= DAILY_READ_BUDGET or _BUDGET_ALERT["day"] == usage["day"]:
+        return
+    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(), os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    logger.warning("Turso reads today %s exceed the daily budget %s", usage["rows_read"], DAILY_READ_BUDGET)
+    if token and chat:
+        text = (f"⚠️ Turso o‘qishlari bugun {usage['rows_read']:,} qatorga yetdi "
+                f"(kunlik chegara {DAILY_READ_BUDGET:,}). Shu sur'atda oylik 500M limit tugashi mumkin — "
+                "kodni tekshirish kerak.")
+        for chat_id in (c.strip() for c in chat.split(",") if c.strip()):
+            send_telegram_message(text, token, chat_id)
+    _BUDGET_ALERT["day"] = usage["day"]
+
+
 def _guarded(job: Callable, name: str) -> Callable:
     def run(*args, **kwargs):
         try:
@@ -376,6 +397,7 @@ def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: Mar
         (recover_open_vst_orders, "recover_open_vst_orders", "bingx-vst-recovery", every, None),
         (housekeeping, "housekeeping", "incident-housekeeping", {"hours": 6}, None),
         (degradation.check, "degradation_check", "strategy-degradation", {"hours": 1}, None),
+        (database_budget_check, "database_budget_check", "database-budget", {"minutes": 15}, None),
     ):
         scheduler.add_job(_guarded(job, name), "interval", args=args, id=job_id, max_instances=1, coalesce=True,
                           next_run_time=now, **trigger)
