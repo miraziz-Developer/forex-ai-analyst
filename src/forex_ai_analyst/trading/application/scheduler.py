@@ -357,7 +357,7 @@ def _guarded(job: Callable, name: str) -> Callable:
                 _database_outage_alert(name, exc)
                 return None
             raise
-    run.__name__ = name
+    run.__name__ = run.__qualname__ = name   # APScheduler logs the qualified name
     return run
 
 
