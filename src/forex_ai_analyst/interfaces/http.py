@@ -333,6 +333,11 @@ def _health_snapshot() -> tuple[dict, dict]:
     return _HEALTH_CACHE["readiness"], _HEALTH_CACHE["alerts"]
 
 
+def _database_usage() -> dict:
+    from forex_ai_analyst.shared import turso
+    return turso.usage_today()   # in-memory counter; never queries the database
+
+
 @app.route("/health")
 def health():
     readiness, alerts = _health_snapshot()
@@ -342,7 +347,8 @@ def health():
                    auto_execute_trades=demo_execution,
                    auto_execute_trades_configured=readiness["auto_execute_trades_configured"],
                    trade_readiness=readiness,
-                   execution_alerts=alerts, vst_account=dict(_VST_ACCOUNT_DIAGNOSTIC)), 200
+                   execution_alerts=alerts, vst_account=dict(_VST_ACCOUNT_DIAGNOSTIC),
+                   database_usage_today=_database_usage()), 200
 
 
 @app.route("/api/signals")

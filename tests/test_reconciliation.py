@@ -231,5 +231,26 @@ class DatabaseOutageTests(unittest.TestCase):
             multi_strategy_scheduler._guarded(failing, "x")()
 
 
+class DatabaseBudgetTests(unittest.TestCase):
+    def setUp(self):
+        multi_strategy_scheduler._BUDGET_ALERT["day"] = None
+
+    @patch("forex_ai_analyst.trading.application.scheduler.send_telegram_message")
+    def test_reads_over_budget_alert_once_per_day(self, send):
+        usage = {"day": "2026-10-02", "rows_read": multi_strategy_scheduler.DAILY_READ_BUDGET + 1, "queries": 9}
+        with patch("forex_ai_analyst.shared.turso.usage_today", return_value=usage), \
+                patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "42"}):
+            multi_strategy_scheduler.database_budget_check()
+            multi_strategy_scheduler.database_budget_check()
+        send.assert_called_once()
+
+    @patch("forex_ai_analyst.trading.application.scheduler.send_telegram_message")
+    def test_reads_within_budget_stay_quiet(self, send):
+        with patch("forex_ai_analyst.shared.turso.usage_today",
+                   return_value={"day": "2026-10-02", "rows_read": 1000, "queries": 9}):
+            multi_strategy_scheduler.database_budget_check()
+        send.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
