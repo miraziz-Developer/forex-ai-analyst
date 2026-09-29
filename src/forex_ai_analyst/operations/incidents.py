@@ -30,6 +30,8 @@ def init_db() -> None:
         except RuntimeError as exc:
             if "duplicate column" not in str(exc).lower():
                 raise
+    # /health and housekeeping count OPEN incidents; without this index each count read the whole table.
+    storage._execute("CREATE INDEX IF NOT EXISTS idx_incidents_state ON execution_incidents (state, incident_key)")
 
 
 def report(incident_key: str, message: str, *, severity: str = "WARNING", details: dict | None = None,

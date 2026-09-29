@@ -39,6 +39,9 @@ class PositionGateTests(unittest.TestCase):
         self.assertIsNone(app.position_gate_rejection("BTC-USDT", [], [old], self.NOW))
 
 class HealthTests(unittest.TestCase):
+    def setUp(self):
+        app._HEALTH_CACHE.update(at=0.0, readiness=None, alerts=None)
+
     def test_health_identifies_the_single_paper_only_service(self):
         with patch("forex_ai_analyst.interfaces.http.execution_alerts.status", return_value={"open_incidents": 0, "last_incident_at": None}), patch.dict(os.environ, {
             "MULTI_STRATEGY_PROVIDER": "bingx", "AUTO_EXECUTE_TRADES": "false",
@@ -151,6 +154,17 @@ class HealthTests(unittest.TestCase):
             self.assertIs(call.kwargs["account_state"], context.return_value)
         resolve.assert_any_call("vst-account-context-unavailable",
                                         note="BingX VST account holati tiklandi; scan qayta yoqildi.", notify=True)
+
+    @patch("forex_ai_analyst.interfaces.http.execution_alerts.status", return_value={"open_incidents": 0})
+    @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings",
+           return_value={"kill_switch": False, "demo_execution": None})
+    def test_health_hits_the_database_at_most_once_a_minute(self, controls, status):
+        app._HEALTH_CACHE.update(at=0.0, readiness=None, alerts=None)
+        client = app.app.test_client()
+        for _ in range(5):
+            self.assertEqual(client.get("/health").status_code, 200)
+        self.assertEqual(controls.call_count, 1)
+        self.assertEqual(status.call_count, 1)
 
     def test_misspelled_pair_is_skipped_not_scanned(self):
         with patch.dict(os.environ, {"MULTI_STRATEGY_PAIRS": "BTC-USDT, xlm-usd ,ETH-USDT,BTC-USDT"}):

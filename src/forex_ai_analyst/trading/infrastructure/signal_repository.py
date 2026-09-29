@@ -57,6 +57,13 @@ def init_db() -> None:
         except RuntimeError as exc:
             if "duplicate column" not in str(exc).lower():
                 raise
+    # Turso bills rows read: every hot query must hit an index, not scan the table.
+    for index in ("CREATE INDEX IF NOT EXISTS idx_candidates_status ON signal_candidates (status)",
+                  "CREATE INDEX IF NOT EXISTS idx_candidates_strategy_status ON signal_candidates "
+                  "(strategy, status, outcome_time)",
+                  "CREATE INDEX IF NOT EXISTS idx_candidates_reconciliation ON signal_candidates "
+                  "(reconciliation_state, status)"):
+        storage._execute(index)
 
 
 def log_decision(decision: Decision) -> None:
@@ -74,9 +81,10 @@ def log_decision(decision: Decision) -> None:
                      [candidate.fingerprint, decision.status, decision.reason, datetime.now(timezone.utc).isoformat()])
 
 
-def existing_fingerprints() -> set[str]:
-    result = storage._execute("SELECT fingerprint FROM signal_candidates")
-    return {row["fingerprint"] for row in storage._rows_as_dicts(result)}
+def fingerprint_exists(fingerprint: str) -> bool:
+    """One-row lookup on the UNIQUE fingerprint index (never a full-table read)."""
+    result = storage._execute("SELECT 1 AS hit FROM signal_candidates WHERE fingerprint = ? LIMIT 1", [fingerprint])
+    return bool(storage._rows_as_dicts(result))
 
 
 def risk_state() -> tuple[int, float]:

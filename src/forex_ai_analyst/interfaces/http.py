@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
@@ -17,7 +18,7 @@ from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateSta
 from forex_ai_analyst.knowledge import service as knowledge
 from forex_ai_analyst.operations import incidents as execution_alerts
 from forex_ai_analyst.trading.domain.regime import classify_market_regime
-from forex_ai_analyst.trading.application.scheduler import start_scheduler
+from forex_ai_analyst.trading.application.scheduler import _database_outage_alert, start_scheduler
 from forex_ai_analyst.shared.notifier import send_telegram_message
 from forex_ai_analyst.trading.infrastructure.market_data import MarketDataProvider, provider_from_environment
 from forex_ai_analyst.trading.infrastructure import signal_repository as scalping_storage
@@ -225,7 +226,7 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
         invalidation_reason=f"4h close below {params.exit_n}-bar low, or stop",
         features={"entry_n": params.entry_n, "exit_n": params.exit_n, "stop_atr": params.stop_atr,
                   "stop_distance": signal["stop_distance"]})
-    if candidate.fingerprint in scalping_storage.existing_fingerprints():
+    if scalping_storage.fingerprint_exists(candidate.fingerprint):
         return [{"status": "SKIP", "reason": "bu 4h breakout allaqachon ko'rib chiqilgan"}]
     account_snapshot = account_state if account_state is not None else _vst_account_context()
     if not account_snapshot.get("available"):
@@ -311,14 +312,31 @@ def _require_dashboard_access() -> None:
         abort(401)
 
 
+_HEALTH_CACHE: dict = {"at": 0.0, "readiness": None, "alerts": None}
+_HEALTH_TTL_SECONDS = 60
+
+
+def _health_snapshot() -> tuple[dict, dict]:
+    """Readiness and incident summary, recomputed at most once a minute.
+
+    Render polls /health every few seconds; hitting the database on each poll
+    exhausted the Turso free plan's monthly read quota on 2026-09-28.
+    """
+    now = time.monotonic()
+    if _HEALTH_CACHE["readiness"] is None or now - _HEALTH_CACHE["at"] >= _HEALTH_TTL_SECONDS:
+        readiness = trade_readiness()
+        try:
+            alerts = execution_alerts.status()
+        except Exception:
+            alerts = {"unavailable": True}
+        _HEALTH_CACHE.update(at=now, readiness=readiness, alerts=alerts)
+    return _HEALTH_CACHE["readiness"], _HEALTH_CACHE["alerts"]
+
+
 @app.route("/health")
 def health():
-    readiness = trade_readiness()
+    readiness, alerts = _health_snapshot()
     demo_execution = readiness["ready"]
-    try:
-        alerts = execution_alerts.status()
-    except Exception:
-        alerts = {"unavailable": True}
     return jsonify(status="ok", service="multi-strategy-paper", paper_only=not demo_execution, demo_only=True,
                    provider=os.environ.get("MULTI_STRATEGY_PROVIDER", "").strip().lower() or "bingx",
                    auto_execute_trades=demo_execution,
@@ -349,12 +367,22 @@ def telegram_webhook():
 
 
 def initialize() -> None:
-    """Initialize persistence, integrations, and background jobs."""
-    scalping_storage.init_db()
-    execution_alerts.init_db()
-    resolve_retired_static_risk_alerts()
-    runtime_controls.init_db()
-    knowledge.init_db()
+    """Initialize persistence, integrations, and background jobs.
+
+    A database outage must not stop the web process: /health keeps reporting it,
+    jobs fail closed, and the operator is told directly through Telegram.
+    """
+    try:
+        scalping_storage.init_db()
+        execution_alerts.init_db()
+        resolve_retired_static_risk_alerts()
+        runtime_controls.init_db()
+        knowledge.init_db()
+    except RuntimeError as exc:
+        if "Turso query failed" not in str(exc):
+            raise
+        logger.error("database unavailable at startup: %s", exc)
+        _database_outage_alert("startup", exc)
     if os.environ.get("TELEGRAM_BOT_TOKEN", "").strip():
         if configure_webhook():
             logger.info("Telegram webhook and command menu configured")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -14,6 +15,7 @@ from forex_ai_analyst.trading.infrastructure import signal_repository as scalpin
 from forex_ai_analyst.operations import incidents as execution_alerts
 from forex_ai_analyst.trading.domain.models import CandidateStatus
 from forex_ai_analyst.trading.infrastructure.market_data import MarketDataProvider
+from forex_ai_analyst.shared.notifier import send_telegram_message
 
 logger = logging.getLogger(__name__)
 
@@ -318,27 +320,65 @@ def housekeeping() -> None:
         logger.info("housekeeping resolved %s orphaned incidents", closed)
 
 
+_DB_ALERT: dict = {"last_sent": 0.0}
+_DB_ALERT_EVERY_SECONDS = 6 * 3600
+
+
+def _database_outage_alert(job_name: str, exc: Exception) -> None:
+    """Tell the operator straight through Telegram when the database itself fails.
+
+    Incidents are stored in the database, so a database outage (for example the
+    Turso read quota being exhausted) would otherwise stop every alert silently.
+    """
+    now = time.monotonic()
+    if _DB_ALERT["last_sent"] and now - _DB_ALERT["last_sent"] < _DB_ALERT_EVERY_SECONDS:
+        return
+    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(), os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat:
+        return
+    quota = "BLOCKED" in str(exc) or "forbidden" in str(exc).lower()
+    reason = ("Turso oylik o‘qish limiti tugagan (reads are blocked)" if quota
+              else f"ma'lumotlar bazasi xatosi: {type(exc).__name__}")
+    text = (f"🔴 Ma'lumotlar bazasi ishlamayapti — {reason}.\n"
+            "Yangi orderlar ochilmaydi va kanal chiqishlari bajarilmaydi; birjadagi stoplar ishlashda davom etadi.\n"
+            f"Birinchi to'xtagan job: {job_name}. Turso dashboard'da Usage'ni tekshiring.")
+    for chat_id in (c.strip() for c in chat.split(",") if c.strip()):
+        send_telegram_message(text, token, chat_id)
+    _DB_ALERT["last_sent"] = now
+
+
+def _guarded(job: Callable, name: str) -> Callable:
+    def run(*args, **kwargs):
+        try:
+            return job(*args, **kwargs)
+        except RuntimeError as exc:
+            if "Turso query failed" in str(exc):
+                logger.error("%s: database unavailable: %s", name, exc)
+                _database_outage_alert(name, exc)
+                return None
+            raise
+    run.__name__ = name
+    return run
+
+
 def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: MarketDataProvider,
                     interval_seconds: int) -> BackgroundScheduler:
     if interval_seconds < 300:
         raise ValueError("MULTI_STRATEGY_SCAN_INTERVAL_SECONDS must be at least 300")
     scheduler = BackgroundScheduler(timezone="UTC")
-    recover_open_vst_orders()
-    scheduler.add_job(scan, "interval", seconds=interval_seconds, args=[provider], id="multi-strategy-scan",
-                      max_instances=1, coalesce=True, next_run_time=datetime.now(timezone.utc))
-    scheduler.add_job(resolve_open_paper_signals, "interval", seconds=interval_seconds, args=[provider],
-                      id="multi-strategy-resolve", max_instances=1, coalesce=True,
-                      next_run_time=datetime.now(timezone.utc))
-    scheduler.add_job(reconcile_closed_vst_orders, "interval", seconds=interval_seconds,
-                      id="bingx-vst-reconcile", max_instances=1, coalesce=True,
-                      next_run_time=datetime.now(timezone.utc))
-    scheduler.add_job(recover_open_vst_orders, "interval", seconds=interval_seconds,
-                      id="bingx-vst-recovery", max_instances=1, coalesce=True,
-                      next_run_time=datetime.now(timezone.utc))
-    scheduler.add_job(housekeeping, "interval", hours=6, id="incident-housekeeping", max_instances=1,
-                      coalesce=True, next_run_time=datetime.now(timezone.utc))
-    scheduler.add_job(degradation.check, "interval", hours=1, id="strategy-degradation", max_instances=1,
-                      coalesce=True, next_run_time=datetime.now(timezone.utc))
+    _guarded(recover_open_vst_orders, "recover_open_vst_orders")()
+    now = datetime.now(timezone.utc)
+    every = {"seconds": interval_seconds}
+    for job, name, job_id, trigger, args in (
+        (scan, "scan_configured_pairs", "multi-strategy-scan", every, [provider]),
+        (resolve_open_paper_signals, "resolve_open_paper_signals", "multi-strategy-resolve", every, [provider]),
+        (reconcile_closed_vst_orders, "reconcile_closed_vst_orders", "bingx-vst-reconcile", every, None),
+        (recover_open_vst_orders, "recover_open_vst_orders", "bingx-vst-recovery", every, None),
+        (housekeeping, "housekeeping", "incident-housekeeping", {"hours": 6}, None),
+        (degradation.check, "degradation_check", "strategy-degradation", {"hours": 1}, None),
+    ):
+        scheduler.add_job(_guarded(job, name), "interval", args=args, id=job_id, max_instances=1, coalesce=True,
+                          next_run_time=now, **trigger)
     scheduler.start()
     logger.info("Multi-strategy scheduler started: scan and resolver every %s seconds", interval_seconds)
     return scheduler
