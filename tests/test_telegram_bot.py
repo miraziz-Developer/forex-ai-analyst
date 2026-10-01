@@ -215,5 +215,47 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in send.call_args_list], ["x" * 4000, "x" * 4000, "x"])
 
 
+class OrphanPositionTests(unittest.TestCase):
+    POSITIONS = [{"symbol": "LINK-USDT", "side": "LONG", "quantity": 727.9, "entry": 14.165, "mark": 15.1,
+                  "unrealized_usdt": 680.5},
+                 {"symbol": "SOL-USDT", "side": "LONG", "quantity": 2.0, "entry": 124.0, "mark": 120.0,
+                  "unrealized_usdt": -8.0}]
+    JOURNAL = [{"pair": "SOL-USDT", "direction": "BUY", "broker_order_id": "o1"}]
+
+    def setUp(self):
+        telegram_bot._ORPHAN_PENDING.clear()
+
+    @patch("forex_ai_analyst.interfaces.telegram_bot.scalping_storage.open_paper_signals")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.list_positions")
+    def test_broker_view_marks_untracked_positions(self, positions, journal):
+        positions.return_value, journal.return_value = self.POSITIONS, self.JOURNAL
+        text = telegram_bot._broker_positions_text()
+        self.assertIn("LINK-USDT LONG: +680.50 USDT ⚠️ eski", text)
+        self.assertNotIn("SOL-USDT LONG: -8.00 USDT ⚠️", text)
+        self.assertIn("ESKILARNI YOP", text)
+
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.cancel_stop_orders")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.close_position", return_value={"fill_price": 15.1})
+    @patch("forex_ai_analyst.interfaces.telegram_bot.scalping_storage.open_paper_signals")
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.list_positions")
+    def test_only_confirmed_orphans_are_closed_once(self, positions, journal, close, cancel):
+        positions.return_value, journal.return_value = self.POSITIONS, self.JOURNAL
+        preview = telegram_bot._preview_orphan_close("42")
+        code = preview.rsplit(" ", 1)[1]
+        self.assertIn("LINK-USDT LONG", preview)
+        result = telegram_bot._confirm_orphan_close("42", code)
+        close.assert_called_once_with("LINK-USDT", "BUY", 727.9)
+        cancel.assert_called_once_with("LINK-USDT", "LONG")
+        self.assertIn("✅ LINK-USDT LONG yopildi", result)
+        self.assertIn("muddati tugagan", telegram_bot._confirm_orphan_close("42", code))   # one-shot
+        close.assert_called_once()
+
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker.close_position")
+    def test_wrong_code_closes_nothing(self, close):
+        telegram_bot._ORPHAN_PENDING["42"] = ("ABC123", datetime.now(timezone.utc))
+        self.assertIn("noto‘g‘ri", telegram_bot._confirm_orphan_close("42", "FFFFFF"))
+        close.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

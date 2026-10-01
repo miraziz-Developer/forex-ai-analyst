@@ -260,6 +260,24 @@ def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
                                     details={"fingerprint": signal["fingerprint"], "error": type(exc).__name__})
 
 
+def report_orphan_positions() -> None:
+    """Alert when BingX holds a position the journal does not track (left over from an earlier
+    database or opened by hand); the strategy will never manage its exit."""
+    if not (os.environ.get("BINGX_API_KEY", "").strip() and os.environ.get("BINGX_SECRET", "").strip()):
+        return
+    tracked = {(str(r["pair"]).upper(), "LONG" if r["direction"] == "BUY" else "SHORT")
+               for r in scalping_storage.open_paper_signals() if r.get("broker_order_id")}
+    orphans = [p for p in broker.list_positions() if (p["symbol"], p["side"]) not in tracked]
+    if not orphans:
+        execution_alerts.resolve("orphan-positions", note="every broker position is tracked")
+        return
+    names = ", ".join(f"{p['symbol']} {p['side']}" for p in orphans)
+    execution_alerts.report("orphan-positions",
+                            f"BingX'da jurnalda yo‘q {len(orphans)} ta pozitsiya bor: {names}. Strategiya ularni "
+                            "boshqarmaydi. Ko‘rish: 🏦 BingX pozitsiyalar; yopish: ESKILARNI YOP.",
+                            details={"positions": orphans}, remind_after_minutes=24 * 60)
+
+
 def reconcile_closed_vst_orders() -> None:
     """Verify strategy orders with immutable order IDs, never account income.
 
@@ -398,6 +416,7 @@ def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: Mar
         (housekeeping, "housekeeping", "incident-housekeeping", {"hours": 6}, None),
         (degradation.check, "degradation_check", "strategy-degradation", {"hours": 1}, None),
         (database_budget_check, "database_budget_check", "database-budget", {"minutes": 15}, None),
+        (report_orphan_positions, "report_orphan_positions", "orphan-positions", {"minutes": 30}, None),
     ):
         scheduler.add_job(_guarded(job, name), "interval", args=args, id=job_id, max_instances=1, coalesce=True,
                           next_run_time=now, **trigger)
