@@ -221,6 +221,16 @@ class RoundQuantityTests(unittest.TestCase):
             self.assertIn(pair, broker.MIN_QUANTITY)
 
 
+class ListPositionsTests(unittest.TestCase):
+    @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request", return_value={"code": 0, "data": [
+        {"symbol": "LINK-USDT", "positionSide": "LONG", "positionAmt": "727.9", "avgPrice": "14.165",
+         "unrealizedProfit": "680.5", "markPrice": "15.1"},
+        {"symbol": "BTC-USDT", "positionSide": "LONG", "positionAmt": "0"}]})
+    def test_only_non_zero_positions_are_returned_normalized(self, signed):
+        self.assertEqual(broker.list_positions(), [{"symbol": "LINK-USDT", "side": "LONG", "quantity": 727.9,
+                                                    "entry": 14.165, "mark": 15.1, "unrealized_usdt": 680.5}])
+
+
 class CancelStopOrderTests(unittest.TestCase):
     @patch("forex_ai_analyst.trading.infrastructure.bingx_broker._signed_request")
     def test_only_stop_orders_on_the_closed_side_are_cancelled(self, signed_request):

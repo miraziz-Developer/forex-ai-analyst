@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import requests
@@ -17,7 +18,8 @@ _AWAITING_KNOWLEDGE_SEARCH: set[str] = set()
 _MENU = {"inline_keyboard": [
     [{"text": "📊 Umumiy holat", "callback_data": "status"}, {"text": "💰 Foyda / zarar", "callback_data": "performance"}],
     [{"text": "📌 Ochiq orderlar", "callback_data": "positions"}, {"text": "✅ Yopiq orderlar", "callback_data": "closed_orders"}],
-    [{"text": "📈 So‘nggi signallar", "callback_data": "signals"}, {"text": "🔄 Panelni yangilash", "callback_data": "menu"}],
+    [{"text": "📈 So‘nggi signallar", "callback_data": "signals"}, {"text": "🏦 BingX pozitsiyalar", "callback_data": "broker_positions"}],
+    [{"text": "🔄 Panelni yangilash", "callback_data": "menu"}],
     [{"text": "📚 Bilim bazasi", "callback_data": "knowledge"}, {"text": "🔎 Bilimdan qidirish", "callback_data": "search"}],
     [{"text": "📤 PDF yuklash", "callback_data": "upload"}, {"text": "❓ Yordam", "callback_data": "help"}],
 ]}
@@ -266,6 +268,81 @@ def _positions_text() -> str:
     return "\n".join(lines)
 
 
+_ORPHAN_PENDING: dict[str, tuple[str, datetime]] = {}
+
+
+def _orphan_positions() -> tuple[list[dict], list[dict]]:
+    """(all broker positions, those the journal does not track) — orphans are left over
+    from an earlier database or opened by hand; the strategy will never manage them."""
+    from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
+    positions = broker.list_positions()
+    tracked = {(str(r["pair"]).upper(), "LONG" if r["direction"] == "BUY" else "SHORT")
+               for r in scalping_storage.open_paper_signals() if r.get("broker_order_id")}
+    return positions, [p for p in positions if (p["symbol"], p["side"]) not in tracked]
+
+
+def _broker_positions_text() -> str:
+    try:
+        positions, orphans = _orphan_positions()
+    except Exception as exc:
+        return f"🏦 BingX pozitsiyalari olinmadi: {type(exc).__name__}."
+    if not positions:
+        return "🏦 BingX VST'da ochiq pozitsiya yo‘q."
+    orphan_keys = {(p["symbol"], p["side"]) for p in orphans}
+    lines, total = [f"🏦 BingX VST pozitsiyalari: {len(positions)} ta"], 0.0
+    for p in positions:
+        pnl = p["unrealized_usdt"]
+        total += pnl or 0.0
+        icon = "🟢" if (pnl or 0) > 0 else "🔴" if (pnl or 0) < 0 else "⚪"
+        tag = " ⚠️ eski (jurnalda yo‘q)" if (p["symbol"], p["side"]) in orphan_keys else ""
+        pnl_text = f"{pnl:+.2f} USDT" if pnl is not None else "P&L —"
+        entry = f"{p['entry']:.6g}" if p["entry"] else "—"
+        lines.append(f"{icon} {p['symbol']} {p['side']}: {pnl_text}{tag}\n  Miqdor {p['quantity']:.8g} | kirish {entry}")
+    lines.append(f"\nJami realizatsiya qilinmagan: {total:+.2f} USDT")
+    if orphans:
+        lines.append(f"Eski pozitsiyalar: {len(orphans)} ta. Yopish uchun yozing: ESKILARNI YOP")
+    return "\n".join(lines)
+
+
+def _preview_orphan_close(chat_id: str) -> str:
+    try:
+        _, orphans = _orphan_positions()
+    except Exception as exc:
+        return f"BingX pozitsiyalari olinmadi: {type(exc).__name__}."
+    if not orphans:
+        return "✅ Jurnalda yo‘q eski pozitsiya topilmadi."
+    code = secrets.token_hex(3).upper()
+    _ORPHAN_PENDING[chat_id] = (code, datetime.now(timezone.utc) + timedelta(minutes=10))
+    listing = "\n".join(f"• {p['symbol']} {p['side']} {p['quantity']:.8g} "
+                        f"({p['unrealized_usdt']:+.2f} USDT)" if p["unrealized_usdt"] is not None
+                        else f"• {p['symbol']} {p['side']} {p['quantity']:.8g}" for p in orphans)
+    return ("⚠️ Quyidagi eski pozitsiyalar market narxda yopiladi va ularning stop orderlari bekor qilinadi:\n"
+            f"{listing}\n\nTasdiqlash uchun 10 daqiqa ichida yozing: YOPAMAN {code}")
+
+
+def _confirm_orphan_close(chat_id: str, code: str) -> str:
+    from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
+    pending = _ORPHAN_PENDING.pop(chat_id, None)   # pop first: a retried webhook cannot close twice
+    if not pending or pending[0] != code.upper() or pending[1] < datetime.now(timezone.utc):
+        return "❌ Kod noto‘g‘ri yoki muddati tugagan. Qaytadan yozing: ESKILARNI YOP"
+    try:
+        _, orphans = _orphan_positions()        # re-read: only what is still an orphan right now
+    except Exception as exc:
+        return f"BingX pozitsiyalari olinmadi, hech narsa yopilmadi: {type(exc).__name__}."
+    lines = ["🧹 Eski pozitsiyalarni yopish natijasi:"]
+    for p in orphans:
+        try:
+            order = broker.close_position(p["symbol"], "BUY" if p["side"] == "LONG" else "SELL", p["quantity"])
+            try:
+                broker.cancel_stop_orders(p["symbol"], p["side"])
+            except Exception:
+                pass
+            lines.append(f"✅ {p['symbol']} {p['side']} yopildi, narx {float(order['fill_price']):.6g}")
+        except Exception as exc:
+            lines.append(f"❌ {p['symbol']} {p['side']} yopilmadi: {type(exc).__name__}")
+    return "\n".join(lines)
+
+
 def _performance_text() -> str:
     try:
         summary = scalping_storage.performance_summary()
@@ -331,6 +408,8 @@ def _handle_callback(callback: dict) -> None:
         _reply(chat_id, _positions_text(), menu=True)
     elif action == "closed_orders":
         _reply(chat_id, _closed_orders_text(), menu=True)
+    elif action == "broker_positions":
+        _reply(chat_id, _broker_positions_text(), menu=True)
     elif action == "menu":
         _menu(chat_id)
     elif action == "knowledge":
@@ -341,7 +420,7 @@ def _handle_callback(callback: dict) -> None:
     elif action == "upload":
         _reply(chat_id, "📤 Endi PDF faylni shu chatga yuboring. Text-based PDF avtomatik bilim bazasiga qo‘shiladi.", menu=True)
     elif action == "help":
-        _reply(chat_id, "Holatni tugmalar orqali ko‘ring. Runtime control misollari: STOP, START DEMO, BLOCK BTC-USDT, UNBLOCK BTC-USDT, RISK PCT 1.5, DAILY LOSS PCT 5, MARGIN PCT 25. Har biri preview va TASDIQLAYMAN kodi talab qiladi. Live trading, kod, credential va broker endpointi o‘zgarmaydi.", menu=True)
+        _reply(chat_id, "Holatni tugmalar orqali ko‘ring. Runtime control misollari: STOP, START DEMO, BLOCK BTC-USDT, UNBLOCK BTC-USDT, RISK PCT 1.5, DAILY LOSS PCT 5, MARGIN PCT 25. Har biri preview va TASDIQLAYMAN kodi talab qiladi. Jurnalda yo‘q eski BingX pozitsiyalarini yopish: ESKILARNI YOP (YOPAMAN kodi bilan tasdiqlanadi). Live trading, kod, credential va broker endpointi o‘zgarmaydi.", menu=True)
 
 
 def handle_update(update: dict) -> None:
@@ -392,6 +471,13 @@ def handle_update(update: dict) -> None:
     if chat_id in _AWAITING_KNOWLEDGE_SEARCH and text:
         _AWAITING_KNOWLEDGE_SEARCH.discard(chat_id)
         _reply(chat_id, _search_text(text), menu=True)
+        return
+    if " ".join(text.upper().split()) in {"ESKILARNI YOP", "CLOSE ORPHANS"}:
+        _reply(chat_id, _preview_orphan_close(chat_id), menu=True)
+        return
+    close_confirmation = re.fullmatch(r"YOPAMAN\s+([A-Fa-f0-9]{6})", text, flags=re.IGNORECASE)
+    if close_confirmation:
+        _reply(chat_id, _confirm_orphan_close(chat_id, close_confirmation.group(1)), menu=True)
         return
     confirmation = re.fullmatch(r"TASDIQLAYMAN\s+([A-Fa-f0-9]{6})", text, flags=re.IGNORECASE)
     if confirmation:

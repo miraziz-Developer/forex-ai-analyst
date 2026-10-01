@@ -247,6 +247,29 @@ def get_position(symbol: str, position_side: str) -> dict | None:
     return None
 
 
+def list_positions() -> list[dict]:
+    """Every open VST position, normalized: symbol, side (LONG/SHORT), quantity, entry, unrealized P&L."""
+    data = _signed_request("GET", "/openApi/swap/v2/user/positions", {})
+    out = []
+    for position in data.get("data") or []:
+        try:
+            amount = abs(float(position.get("positionAmt") or 0))
+        except (TypeError, ValueError):
+            continue
+        if not amount:
+            continue
+
+        def number(name):
+            try:
+                return float(position[name])
+            except (KeyError, TypeError, ValueError):
+                return None
+        out.append({"symbol": str(position.get("symbol", "")).upper(), "side": position.get("positionSide"),
+                    "quantity": amount, "entry": number("avgPrice"), "mark": number("markPrice"),
+                    "unrealized_usdt": number("unrealizedProfit")})
+    return out
+
+
 def close_position(symbol: str, direction: str, quantity: float) -> dict:
     """direction is the ORIGINAL entry direction (e.g. 'BUY' for a LONG we're now closing).
     In hedge mode, closing means an opposite-side order on the same positionSide, no
