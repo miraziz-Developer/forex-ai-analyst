@@ -105,7 +105,12 @@ def evaluate(trades: list[dict]) -> dict:
     return {**s, "passes": not reasons, "reasons": reasons}
 
 
+def jobs() -> list[tuple[str, date]]:
+    return [(pair, d) for end in month_ends() for d in (end, next_weekday(end)) for pair in PAIRS]
+
+
 def main() -> None:
+    dukascopy.prefetch(jobs())
     trades = []
     for d in month_ends():
         for pair in PAIRS:

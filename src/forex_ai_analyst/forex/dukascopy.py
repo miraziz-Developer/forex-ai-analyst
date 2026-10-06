@@ -19,6 +19,7 @@ from forex_ai_analyst.forex.data import CACHE_DIR
 URL = "https://datafeed.dukascopy.com/datafeed/{pair}/{y}/{m:02d}/{d:02d}/{side}_candles_min_1.bi5"
 POINT = {"USDJPY": 1e-3, "EURJPY": 1e-3, "GBPJPY": 1e-3, "XAUUSD": 1e-3}
 RECORD = struct.Struct(">5If")
+PAUSE = 0.5                             # seconds between requests: bursts get the IP blocked
 _SESSION = requests.Session()          # keep-alive: a new TLS connection costs ~20 s, a reused one ~0.3 s
 _SESSION.headers["User-Agent"] = "Mozilla/5.0"
 
@@ -29,16 +30,40 @@ def _raw(pair: str, day: date, side: str) -> bytes:
         return path.read_bytes()
     url = URL.format(pair=pair, y=day.year, m=day.month - 1, d=day.day, side=side)
     for attempt in range(6):
-        response = _SESSION.get(url, timeout=60)
+        time.sleep(PAUSE)
+        try:
+            response = _SESSION.get(url, timeout=60)
+        except requests.RequestException:
+            time.sleep(30 * (attempt + 1))         # the feed blocks bursts for a while; back off
+            continue
         if response.status_code == 200:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(response.content)
             return response.content
         if response.status_code == 404:
             return b""
-        time.sleep(2 * (attempt + 1))
-    response.raise_for_status()
-    raise RuntimeError(f"Dukascopy unavailable for {pair} {day}")
+        time.sleep(10 * (attempt + 1))
+    raise RuntimeError(f"Dukascopy unavailable for {pair} {day} {side}")
+
+
+def prefetch(jobs: list[tuple[str, date]], log=print) -> int:
+    """Download every (pair, day) bid and ask file not cached yet; survives outages (retries forever)."""
+    pending = [(p, d, s) for p, d in jobs for s in ("BID", "ASK")
+               if not (CACHE_DIR / "dukascopy" / p / f"{d.isoformat()}-{s}.bi5").exists()]
+    done = 0
+    while pending:
+        pair, day, side = pending[0]
+        try:
+            _raw(pair, day, side)
+        except RuntimeError:
+            log(f"feed unavailable at {pair} {day}; waiting 5 minutes ({len(pending)} files left)")
+            time.sleep(300)
+            continue
+        pending.pop(0)
+        done += 1
+        if done % 100 == 0:
+            log(f"{done} downloaded, {len(pending)} left")
+    return done
 
 
 def decode(blob: bytes, day: date, point: float) -> list[tuple]:
