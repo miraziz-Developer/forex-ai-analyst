@@ -21,3 +21,14 @@ out of it. Never tested here. Real Dukascopy hourly bid/ask, 2010-2026.
 P(mean > 0) >= 0.95 (day bootstrap), PF >= 1.2, mean > 0 in 2010-2017 and in
 2018-2026, and both pairs positive; and on the other eight pairs pooled
 (replication) the mean is > 0 with at least 5 of 8 positive.
+
+## Result (2026-10-06) — FAIL
+
+| Sample | Trades | Win | Mean | Mean R | PF | P | 2010-17 / 2018-26 | Positive |
+|---|---|---|---|---|---|---|---|---|
+| EURUSD + GBPUSD | 8305 | 51.4% | +0.23 bp | +0.03 | 1.02 | 0.78 | -0.10 / +0.54 bp | 2/2 |
+| other eight | 32891 | 50.0% | -0.17 bp | +0.01 | 0.99 | 0.24 | -0.24 / -0.10 bp | 4/8 |
+
+The breakout wins about as often as it loses at 1:1, so after the real spread
+it is a coin flip on EURUSD and GBPUSD (+0.23 bp a trade) and slightly negative
+on the other pairs. Not adopted.
