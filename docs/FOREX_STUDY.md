@@ -63,3 +63,19 @@ No parameter is tuned after seeing results; any change is a new study.
 **Decision.** Nothing is approved; the MT5 trader has nothing to trade. Any
 follow-up (for example trend following on gold, indices and crypto CFDs) is a
 new pre-registered study that also pays for these six trials.
+
+## Addendum (2026-10-06): the live crypto rule, long only — pre-registration
+
+Written before running. The owner asked to test the exact live BingX rule
+(Donchian 4h, 100/20, 3 ATR stop, **long only**) on the same eleven markets,
+same data, costs and gates as above. Going long a currency pair has no
+economic reason to differ from going short, so this is a seventh trial, not a
+fix of donchian_h4.
+
+### Result — FAIL
+
+269 trades (8.2/month), win 35%, mean -0.04R, PF 0.92, P(mean > 0) 0.31, halves
+-0.09 / +0.01, 4 of 11 markets positive. Currency pairs: GBPJPY -12.0R,
+GBPUSD -6.2, NZDUSD -5.9, USDJPY -4.1, AUDUSD -3.8, EURJPY -3.1, USDCHF -2.7,
+EURUSD +0.4, USDCAD +9.2. Gold +16.3R (17 trades), BTC +0.6R (2.8 years of H1
+data). The rule that works on crypto does not work on currency pairs.
