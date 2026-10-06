@@ -1,6 +1,6 @@
 import unittest
 
-from forex_ai_analyst.forex.ml_exits import replay
+from forex_ai_analyst.forex.ml_exits import replay, replay_smart, swing_levels
 
 
 def bar(o, h, l, c):
@@ -32,6 +32,36 @@ class ReplayTests(unittest.TestCase):
     def test_gap_through_stop_fills_at_open(self):
         bars = FLAT + [bar(100, 100, 100, 100), bar(95, 96, 94, 95)] + [bar(95, 95, 95, 95)] * 3
         self.assertAlmostEqual(replay(bars, 0, 1, 1.0), -0.05)
+
+
+
+def climb():
+    """Prior context with a swing low at 99 (index 2), then a long that rises and later fails."""
+    pre = [bar(101, 102, 100, 101), bar(100.5, 101, 99.5, 100), bar(99.5, 100, 99, 99.5),
+           bar(99.5, 100.5, 99.5, 100), bar(100, 101, 99.8, 100)]
+    return pre
+
+
+class SmartTrailTests(unittest.TestCase):
+    def test_swing_low_known_only_two_bars_later(self):
+        bars = climb()
+        levels = swing_levels(bars, 1)
+        self.assertEqual(levels[3], None)
+        self.assertEqual(levels[4], 99)
+
+    def test_wick_through_level_that_closes_back_does_not_exit(self):
+        bars = climb() + [bar(100, 100.5, 97.5, 100.2)] + [bar(100.2, 100.4, 100, 100.3)] * 4
+        # soft stop 99 - 0.5 = 98.5; the 97.5 wick sweeps it but closes at 100.2: held to the time exit
+        self.assertAlmostEqual(replay_smart(bars, 4, 1, 1.0), 100.3 / 100 - 1)
+
+    def test_close_below_structure_exits_at_that_close(self):
+        bars = climb() + [bar(100, 100.5, 98, 98.2)] + [bar(98.2, 99, 98, 99)] * 4
+        self.assertAlmostEqual(replay_smart(bars, 4, 1, 1.0), 98.2 / 100 - 1)
+
+    def test_profit_lock_moves_soft_stop_to_breakeven_after_one_atr(self):
+        bars = climb() + [bar(100, 101.5, 99.8, 101.2), bar(101.2, 101.3, 99.6, 99.7)] + [bar(99.7, 99.7, 99.7, 99.7)] * 3
+        self.assertAlmostEqual(replay_smart(bars, 4, 1, 1.0, arm=1.0), 99.7 / 100 - 1)
+        self.assertAlmostEqual(replay_smart(bars, 4, 1, 1.0), 99.7 / 100 - 1)      # SM1: 98.5 never closed below
 
 
 if __name__ == "__main__":
