@@ -190,8 +190,8 @@ class Mt5BotTests(unittest.TestCase):
                 patch.dict(mt5_bot.ml_model.FAMILIES, {"fx_logistic_cot_c01": {"uses_cot": True, "c": 0.1,
                                                                                "tp_atr": 3.0}}):
             mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
-        v1_orders = [r for r in mt5.sent if r["comment"].endswith("fx_logistic_test")]
-        v2c_orders = [r for r in mt5.sent if r["comment"].endswith("cot_c01_test")]
+        v1_orders = [r for r in mt5.sent if r["comment"] == "ml v1"]
+        v2c_orders = [r for r in mt5.sent if r["comment"] == "ml v2c"]
         self.assertTrue(v1_orders and v2c_orders)
         self.assertFalse(any("tp" in r for r in v1_orders))
         for r in v2c_orders:
@@ -299,6 +299,30 @@ class Mt5BotTests(unittest.TestCase):
         with patch.dict("os.environ", {"FX_BOT_MAX_STRESS_PCT": "15"}):
             self.assertFalse(g.stress_room(self.db, 10_000, 200))
             self.assertTrue(g.stress_room(self.db, 10_000, 100))
+
+    def test_orders_have_short_comments_and_stops_rounded_to_symbol_digits(self):
+        mt5 = FakeMT5()
+        jpy = SimpleNamespace(trade_tick_size=0.001, point=0.001, trade_tick_value=0.7, volume_step=0.01,
+                              volume_min=0.01, volume_max=100.0, filling_mode=1, digits=3)
+        with patch.object(FakeMT5, "symbol_info", return_value=jpy):
+            mt5_bot._send(mt5, "EURJPY", 1, 0.1, 174.123456789, "fx-ml fx_logistic_cot_c01_2026 extra", tp=180.98765)
+        r = mt5.sent[-1]
+        self.assertEqual((r["sl"], r["tp"]), (174.123, 180.988))
+        self.assertLessEqual(len(r["comment"]), 16)
+
+    def test_rejected_order_is_reported_once_not_every_cycle(self):
+        mt5 = FakeMT5()
+        days = weekday_days("2026-10-05", 12)
+        rejected = SimpleNamespace(retcode=10016, order=0, price=0.0, comment="Invalid stops")
+        with patch.object(mt5_bot, "load_context", return_value=context(days)), \
+                patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]), \
+                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62), \
+                patch.object(FakeMT5, "order_send", return_value=rejected):
+            first = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+            again = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 15, tzinfo=timezone.utc))
+        self.assertEqual(len([m for m in first if "rad etildi" in m]), len(FX_ONLY))
+        self.assertEqual(again, [])
 
     def test_nth_weekday_after_skips_weekends(self):
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-05", 5), "2026-10-12")

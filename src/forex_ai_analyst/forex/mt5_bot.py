@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -135,15 +136,20 @@ def _filling(mt5, symbol: str) -> int:
 def _send(mt5, symbol: str, side: int, volume: float, sl: float | None, comment: str, position: int | None = None,
           tp: float | None = None):
     tick = mt5.symbol_info_tick(symbol)
+    digits = getattr(mt5.symbol_info(symbol), "digits", None)
+    def norm(price: float) -> float:        # brokers reject stops not rounded to the symbol's digits ("Invalid stops")
+        return round(price, digits) if isinstance(digits, int) else price
     buy = side > 0
+    # MT5 limits comments to a few short ASCII characters ("Invalid comment argument" otherwise)
+    comment = re.sub(r"[^A-Za-z0-9 _-]", "", comment)[:16]
     request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": volume,
                "type": mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL, "price": tick.ask if buy else tick.bid,
                "deviation": 20, "magic": MAGIC, "comment": comment, "type_time": mt5.ORDER_TIME_GTC,
                "type_filling": _filling(mt5, symbol)}
     if sl is not None:
-        request["sl"] = sl
+        request["sl"] = norm(sl)
     if tp is not None:
-        request["tp"] = tp
+        request["tp"] = norm(tp)
     if position is not None:
         request["position"] = position
     return mt5.order_send(request)
@@ -304,9 +310,14 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
         stop = price - side * stop_distance
         tp_atr = ml_model.FAMILIES.get(model.get("family", ""), {}).get("tp_atr")
         target = price + side * tp_atr * c.f["atr"][i] if tp_atr else None
-        result = _send(mt5, symbol, side, volume, stop, f"fx-ml {model['version']}", tp=target)
+        result = _send(mt5, symbol, side, volume, stop, f"ml {LABELS.get(model.get('family', ''), 'x')}", tp=target)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            messages.append(f"❌ {market.name}: order rad etildi ({getattr(result, 'comment', mt5.last_error())})")
+            why = getattr(result, "comment", None) or str(mt5.last_error())
+            # journalled as skipped (not retryable), so a rejected order is reported once, not every 15 minutes
+            db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
+                       "created_at, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, 'SKIPPED', ?)",
+                       base + [f"order rejected: {why}"[:120]])
+            messages.append(f"❌ {market.name}: order rad etildi ({why})")
             continue
         db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, symbol, side, prob, ticket, "
                    "volume, entry_price, stop, exit_day, created_at, status, risk_money, requested_price, slippage, stress_money) "

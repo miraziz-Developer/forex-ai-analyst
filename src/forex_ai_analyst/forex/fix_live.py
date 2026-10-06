@@ -86,7 +86,7 @@ def enter(mt5, db, now, account, paused, bot, pair, symbol, key) -> list[str]:
         db.commit()
         return [f"⏸ [fix] {pair}: {blocked}"]
     stop = price - side * stop_distance
-    result = bot._send(mt5, symbol, side, volume, stop, f"fx-fix {VERSION}")
+    result = bot._send(mt5, symbol, side, volume, stop, "fix")
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
         return [f"❌ [fix] {pair}: order rad etildi ({getattr(result, 'comment', mt5.last_error())})"]
     db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, symbol, side, prob, ticket, volume, "
@@ -115,7 +115,7 @@ def close_due(mt5, db, now: datetime, bot) -> list[str]:
             messages.append(f"⛔ [fix] {row['market']}: favqulodda stop yopgan")
             continue
         position = positions[0]
-        result = bot._send(mt5, row["symbol"], -row["side"], position.volume, None, "fx-fix exit",
+        result = bot._send(mt5, row["symbol"], -row["side"], position.volume, None, "fix exit",
                            position=position.ticket)
         if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
             db.execute("UPDATE trades SET status = 'CLOSED', exit_price = ?, profit = ? WHERE id = ?",
