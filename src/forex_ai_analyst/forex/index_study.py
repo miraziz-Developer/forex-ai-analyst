@@ -16,6 +16,8 @@ from forex_ai_analyst.lab.strategies import atr
 INDICES = (("US500", "^GSPC"), ("USTEC", "^NDX"), ("US30", "^DJI"), ("DE40", "^GDAXI"), ("UK100", "^FTSE"),
            ("JP225", "^N225"))
 INFO_ONLY = (("XAUUSD", "GC=F"),)
+REPLICATION = (("AUS200", "^AXJO"), ("HK50", "^HSI"), ("FRA40", "^FCHI"), ("EU50", "^STOXX50E"),
+               ("ESP35", "^IBEX"), ("NL25", "^AEX"), ("SWI20", "^SSMI"), ("CAN60", "^GSPTSE"))
 COST, SWAP_PER_YEAR, STOP_ATR, MAX_HOLD = 0.0003, 0.06, 3.0, 10
 SPLIT = "2015-01-01"
 GATE = {"min_trades": 300, "min_p": 0.95, "min_pf": 1.3, "min_positive": 5, "min_drift_multiple": 2.0}
@@ -115,7 +117,7 @@ def bootstrap_p(trades: list[dict], runs: int = 4000, seed: int = 11) -> float:
     return sum(sum(x for _ in days for x in by_day[rng.choice(days)]) > 0 for _ in range(runs)) / runs
 
 
-def evaluate(trades: list[dict], drift_per_bar: float) -> dict:
+def evaluate(trades: list[dict], drift_per_bar: float, min_positive: int | None = None, n_markets: int = 6) -> dict:
     net = [t["net"] for t in trades]
     gains, losses = sum(x for x in net if x > 0), -sum(x for x in net if x < 0)
     first = [t["net"] for t in trades if t["entry_day"] < SPLIT]
@@ -141,14 +143,29 @@ def evaluate(trades: list[dict], drift_per_bar: float) -> dict:
         reasons.append(f"PF {s['profit_factor']} < {GATE['min_pf']}")
     if not first or not second or min(sum(first), sum(second)) <= 0:
         reasons.append("not positive in both periods")
-    if s["markets_positive"] < GATE["min_positive"]:
-        reasons.append(f"only {s['markets_positive']}/6 indices positive")
+    if s["markets_positive"] < (min_positive or GATE["min_positive"]):
+        reasons.append(f"only {s['markets_positive']}/{n_markets} indices positive")
     if per_bar < GATE["min_drift_multiple"] * drift_per_bar:
         reasons.append("does not beat 2x the drift baseline per day held")
     return {**s, "passes": not reasons, "reasons": reasons}
 
 
+def main_replication() -> None:
+    data = {name: load_yahoo(Market(name, symbol, COST, pct=True), "1d") for name, symbol in REPLICATION}
+    drift = sum(drift_baseline(b) for b in data.values()) / len(data)
+    trades = [t for name, b in data.items() for t in backtest(b, "IDX1", name)]
+    r = evaluate(trades, drift, min_positive=6, n_markets=8)
+    print(f"IDX1 replication: {json.dumps(r)}")
+    Path("research_output").mkdir(exist_ok=True)
+    Path("research_output/index_replication.json").write_text(json.dumps(
+        {"generated_at": datetime.now(timezone.utc).isoformat(), "report": r}, indent=2) + "\n")
+
+
 def main() -> None:
+    import sys
+    if "--replicate" in sys.argv:
+        main_replication()
+        return
     data = {name: load_yahoo(Market(name, symbol, COST, pct=True), "1d") for name, symbol in INDICES + INFO_ONLY}
     drift = [drift_baseline(data[name]) for name, _ in INDICES]
     drift_per_bar = sum(drift) / len(drift)

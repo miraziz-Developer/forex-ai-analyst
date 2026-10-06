@@ -98,3 +98,20 @@ after a close above the 5-day average or 10 bars. Risk 0.5% per trade
 indices are the worst documented one-day falls (12-16%). Journalled as
 `index_pullback_v1`. Graduation, fixed now: 60 closed forward trades, mean > 0,
 bootstrap P >= 0.90, PF >= 1.2.
+
+## Replication on eight unseen indices — pre-registration
+
+Written and committed, with its code (`index_study.py --replicate`), **before**
+it is run.
+
+IDX1 exactly as above on eight stock indices never used with this rule:
+AUS200 (^AXJO), HK50 (^HSI), FRA40 (^FCHI), EU50 (^STOXX50E, from 2007),
+ESP35 (^IBEX), NL25 (^AEX), SWI20 (^SSMI), CAN60 (^GSPTSE). Data check before
+running (counts only): no malformed open==close bars beyond a handful;
+^AXJO opens equal the previous close in 2680 bars, as UK100's did, which the
+earlier check showed does not drive the result. Same costs and swap.
+
+**Passes only if, pooled over the eight:** at least 300 trades;
+P(mean > 0) >= 0.95; PF >= 1.3; mean > 0 in 2004-2014 and 2015-2026; at least
+6 of 8 indices positive; net per day held >= 2x the drift baseline. A pass adds
+these markets to the index engine where the broker offers them.
