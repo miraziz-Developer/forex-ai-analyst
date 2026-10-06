@@ -66,3 +66,26 @@ class TrendLiveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarketClosedTests(unittest.TestCase):
+    def test_signal_on_a_closed_market_waits_quietly_and_is_taken_when_it_reopens(self):
+        db = mt5_bot.open_db(":memory:")
+        bot = sys.modules["forex_ai_analyst.forex.mt5_bot"]
+        mt5 = Market([100.0] * 100 + [103.0])
+        closed = SimpleNamespace(retcode=10018, order=0, price=0.0, comment="Market closed")
+        real_send = mt5.order_send
+        mt5.order_send = lambda request: closed
+        now = datetime(2026, 10, 10, 23, tzinfo=timezone.utc)
+        self.assertEqual(trend_live.cycle(mt5, db, now, mt5.account_info(), False, bot), [])     # silent
+        self.assertIsNone(db.execute("SELECT 1 FROM trades").fetchone())                          # not journalled
+        mt5.order_send = real_send                                                               # market reopens
+        out = trend_live.cycle(mt5, db, now, mt5.account_info(), False, bot)
+        self.assertEqual(len([m for m in out if "📌" in m]), 2)
+
+    def test_netting_account_is_flagged_at_start(self):
+        mt5 = Market([1.0] * 5)
+        mt5.account_info = lambda: SimpleNamespace(trade_mode=0, equity=10_000.0, margin_mode=0)
+        self.assertIn("NETTING", mt5_bot.startup_report(mt5))
+        mt5.account_info = lambda: SimpleNamespace(trade_mode=0, equity=10_000.0, margin_mode=2)
+        self.assertNotIn("NETTING", mt5_bot.startup_report(mt5))

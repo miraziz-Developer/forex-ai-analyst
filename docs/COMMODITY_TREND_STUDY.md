@@ -133,3 +133,10 @@ raised and no real money is used until the forward test passes its own bar.
   small for the risk. The forward test continues at 0.5%; the risk level for
   any real money must come from forward results, and 2% is not justified by
   this history.
+
+**Correction (2026-10-06): the broker's actual basket is not weak.** The weak
+2012-2026 basket above includes copper, platinum and palladium, which FBS does
+not offer (the bot found only gold, silver, WTI and Brent). On those four since
+2012: 125 trades, 36% win, mean +0.45R, PF 1.77, bootstrap P 0.93; at 0.5% risk
+CAGR +1.9%, max drawdown -10.6%, 5 losing years of 14 (few trades a year, so
+small returns, but good trades). No change to the rule.

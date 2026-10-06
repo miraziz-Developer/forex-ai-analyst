@@ -91,6 +91,8 @@ def close_if(mt5, db, row, due: bool, bot) -> list[str]:
     position = positions[0]
     result = bot._send(mt5, row["symbol"], -1, position.volume, None, "index exit", position=position.ticket)
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+        if guards.market_closed(mt5, result):
+            return []                                       # retried when the market reopens
         return [f"❌ [index] {row['market']} yopilmadi: {getattr(result, 'comment', mt5.last_error())}"]
     db.execute("UPDATE trades SET status = 'CLOSED', exit_price = ?, profit = ? WHERE id = ?",
                [result.price, position.profit, row["id"]])
@@ -122,6 +124,8 @@ def enter(mt5, db, now, account, paused, bot, market, symbol, day, stop_distance
     stop = tick.ask - stop_distance
     result = bot._send(mt5, symbol, 1, volume, stop, "index")
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+        if guards.market_closed(mt5, result):
+            return []                                       # no journal row: retried when the market reopens
         why = getattr(result, "comment", None) or str(mt5.last_error())
         db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
                    "created_at, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, 'SKIPPED', ?)",

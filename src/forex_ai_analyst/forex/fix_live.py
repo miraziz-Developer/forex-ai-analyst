@@ -4,7 +4,7 @@ The backtest (2016-2026) pointed the right way but missed the evidence bar (P 0.
 honest way to get more evidence is data nobody has seen: this runs the exact pre-registered rule live.
 On the last weekday of each month (London date): mid at 15:00 and at 15:55 London, enter against the
 move at 16:03, exit at 12:00 London on the next weekday. Every trade is journalled as FIX1; those with
-|move| >= 0.10% also count for FIX2. Sizing: a 1% emergency stop that costs FX_FIX_RISK_PCT (0.5) of
+|move| >= 0.10% also count for FIX2. Sizing: a 1% emergency stop that costs FX_FIX_RISK_PCT (0.25) of
 equity. The portfolio, stress and drawdown guards apply; the news filter does not (the rule trades
 through the fix by design).
 """
@@ -67,7 +67,7 @@ def enter(mt5, db, now, account, paused, bot, pair, symbol, key) -> list[str]:
     tick = mt5.symbol_info_tick(symbol)
     price = tick.ask if side > 0 else tick.bid
     stop_distance = STOP_FRACTION * price
-    volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * guards.engine_risk_pct(db, VERSION, guards.env_float("FX_FIX_RISK_PCT", 0.5)) / 100)
+    volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * guards.engine_risk_pct(db, VERSION, guards.env_float("FX_FIX_RISK_PCT", 0.25)) / 100)
     info = mt5.symbol_info(symbol)
     mpp = info.trade_tick_value / (info.trade_tick_size or info.point)
     volume = guards.stress_volume(pair, volume, mpp, price, account.equity, info.volume_step, info.volume_min) \

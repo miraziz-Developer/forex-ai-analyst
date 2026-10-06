@@ -53,6 +53,12 @@ above the 55-day high with a 2 ATR stop, sell on a close below the 20-day low
 (`[trend]` in Telegram, 0.5% risk via `FX_TREND_RISK_PCT`). If a commodity is
 named differently at the broker, map it, e.g. `FX_SYMBOL_MAP=WTI=USOil,BRENT=UKOil`.
 
+**Account type:** use a **hedge** account (several engines may hold the same
+symbol). On a netting account positions merge and the bot cannot manage them;
+the start-up message warns if the account is netting. Orders refused only
+because the market is closed (weekends, session breaks) are retried quietly
+when it reopens.
+
 **On start** the bot sends a Telegram message listing the engines it runs and
 which commodity and FX symbols it found at the broker (a missing one is named,
 with the hint to map it via `FX_SYMBOL_MAP`).
@@ -75,7 +81,7 @@ Telegram, 0.75% risk via `FX_GOLD_RISK_PCT`.
 
 **Default risk per engine** (docs/PORTFOLIO_STUDY.md; engines are nearly
 uncorrelated): crypto 0.3%, gold/silver 4h 0.75%, index 1.0%, commodity 0.5%,
-fix 0.5%; at most 6% open risk in total. Adaptive allocation then moves each
+fix 0.25% (weakest evidence); at most 6% open risk in total. Adaptive allocation then moves each
 engine with its own live results.
 
 **Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,ml` (default).
