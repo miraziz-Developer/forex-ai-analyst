@@ -82,7 +82,7 @@ def run(bars: list[dict], signals: Signals, funding: list[tuple[int, float]] | N
         result.trades.append({
             "entry_time": pos.entry_time, "exit_time": bars[i]["datetime"], "direction": pos.direction,
             "entry": pos.entry, "exit": price, "qty": pos.qty, "net": net, "fees": pos.fees + exit_fee,
-            "funding": pos.funding, "r": net / pos.initial_risk if pos.initial_risk else 0.0,
+            "funding": pos.funding, "risk": pos.initial_risk, "r": net / pos.initial_risk if pos.initial_risk else 0.0,
             "bars": i - pos.entry_index + 1, "reason": reason})
         pos = None
 
