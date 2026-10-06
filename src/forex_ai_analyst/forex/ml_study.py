@@ -26,8 +26,8 @@ LONG_T, SHORT_T = 0.55, 0.45
 GATE = {"min_trades": 200, "min_bootstrap_p": 0.90, "min_profit_factor": 1.2, "min_market_share_positive": 0.6}
 
 
-def build_dataset() -> tuple[np.ndarray, np.ndarray, list[dict], list[str]]:
-    ctx = load_context(FX_ONLY)
+def build_dataset(with_cot: bool = False) -> tuple[np.ndarray, np.ndarray, list[dict], list[str]]:
+    ctx = load_context(FX_ONLY, with_cot=with_cot)
     rows, labels, meta = [], [], []
     feature_names: list[str] = []
     for market in FX_ONLY:
@@ -122,6 +122,18 @@ def evaluate(trades) -> dict:
     return {**s, "passes": not reasons, "reasons": reasons}
 
 
+def main_v2() -> None:
+    """Model v2 = v1 features + CFTC COT positioning; logistic only (docs/ML_COT_STUDY.md)."""
+    X, y, meta, names = build_dataset(with_cot=True)
+    print(f"dataset v2: {len(y)} samples, {len(names)} features, base rate up {y.mean():.3f}")
+    r = evaluate(walk_forward(X, y, meta, models()["logistic"]))
+    print(f"logistic_cot: {json.dumps({k: v for k, v in r.items() if k != 'per_market_total_pct'})}")
+    out = Path("research_output")
+    out.mkdir(exist_ok=True)
+    (out / "ml_cot_study.json").write_text(json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(),
+                                                       "gate": GATE, "features": names, "report": r}, indent=2) + "\n")
+
+
 def main() -> None:
     X, y, meta, names = build_dataset()
     print(f"dataset: {len(y)} samples, {len(names)} features, base rate up {y.mean():.3f}")
@@ -137,4 +149,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main_v2() if "--cot" in sys.argv else main()
