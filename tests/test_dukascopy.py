@@ -15,7 +15,7 @@ class DukascopyTests(unittest.TestCase):
     def test_decode_uses_open_close_low_high_order_and_points(self):
         out = dukascopy.decode(blob([(3600, 108800, 108793, 108786, 108802, 1.5)]), date(2024, 1, 31), 1e-5)
         ms, o, h, lo, c = out[0]
-        self.assertEqual(ms, 1706662800000 + 3600 * 1000)
+        self.assertEqual(ms, 1706659200000 + 3600 * 1000)        # 2024-01-31 00:00 UTC + 1 h
         self.assertEqual((o, h, lo, c), (1.088, 1.08802, 1.08786, 1.08793))
 
     def test_hours_join_bid_and_ask(self):
