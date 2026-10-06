@@ -4,6 +4,8 @@ All limits come from .env with conservative defaults:
   FX_BOT_MAX_TOTAL_RISK_PCT (5.0)  open risk of all positions together, % of equity
   FX_BOT_MAX_DD_PCT (10.0)         pause new trades when equity is this far below its peak
   FX_BOT_MAX_SPREAD_FRAC (0.10)    skip an entry while the spread exceeds this share of the stop distance
+  FX_BOT_MAX_CCY_RISK_PCT (2.5)    open risk in one direction of one currency (e.g. short USD), % of equity
+  FX_BOT_NEWS_MINUTES (30)         no entry this close to a high-impact release for either currency
   FX_BOT_NO_AUTO_DISABLE (unset)   set to 1 to keep trading a model that failed its health check
 A model is disabled for new trades once it has >= 30 closed trades with a profit factor below 0.7,
 far below anything its backtest produced; open positions are still managed and closed.
@@ -114,3 +116,61 @@ def weekly_report(db: sqlite3.Connection, equity: float, now: datetime) -> str |
                      + (f", o'rtacha slippage {slip:+.5g}" if slip is not None else "")
                      + (" ⛔ avtomatik o'chirilgan" if model_disabled(db, version) else ""))
     return "\n".join(lines)
+
+
+# --- news blackout -------------------------------------------------------------------------------------------
+# Live economic calendar of the current week (ForexFactory export). High-impact releases move prices in
+# jumps and widen spreads, so no new position is opened in a currency within FX_BOT_NEWS_MINUTES (30) of one.
+CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+_calendar: dict = {"fetched": 0.0, "events": []}
+
+
+def calendar_events(now_ts: float, fetch=None) -> list[tuple[float, str, str]]:
+    """[(utc timestamp, currency, title)] of high-impact events; refreshed every 6 hours, [] if unreachable."""
+    if now_ts - _calendar["fetched"] > 6 * 3600:
+        try:
+            if fetch is None:
+                import requests
+                rows = requests.get(CALENDAR_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=20).json()
+            else:
+                rows = fetch()
+            _calendar["events"] = [(datetime.fromisoformat(r["date"]).timestamp(), r["country"], r["title"])
+                                   for r in rows if r.get("impact") == "High"]
+            _calendar["fetched"] = now_ts
+        except Exception:                        # a missing calendar must never stop trading
+            _calendar["fetched"] = now_ts - 5 * 3600      # retry in about an hour
+    return _calendar["events"]
+
+
+def news_blackout(market: str, now: datetime, fetch=None) -> str | None:
+    """Title of a high-impact event for either currency of `market` within the blackout window, else None."""
+    window = env_float("FX_BOT_NEWS_MINUTES", 30.0) * 60
+    currencies = {market[:3], market[3:6]}
+    now_ts = now.timestamp()
+    for ts, currency, title in calendar_events(now_ts, fetch):
+        if currency in currencies and abs(ts - now_ts) <= window:
+            return f"{currency} {title}"
+    return None
+
+
+# --- currency concentration -----------------------------------------------------------------------------------
+def currency_legs(market: str, side: int) -> dict[str, int]:
+    """+1 = long that currency. XAUUSD counts as long/short USD only (gold is its own asset)."""
+    base, quote = market[:3], market[3:6]
+    legs = {quote: -side}
+    if base != "XAU":
+        legs[base] = side
+    return legs
+
+
+def currency_room(db: sqlite3.Connection, equity: float, market: str, side: int, new_risk: float) -> str | None:
+    """Currency whose one-directional open risk would exceed FX_BOT_MAX_CCY_RISK_PCT (2.5) of equity, else None."""
+    limit = equity * env_float("FX_BOT_MAX_CCY_RISK_PCT", 2.5) / 100
+    exposure: dict[tuple[str, int], float] = {}
+    for row in db.execute("SELECT market, side, COALESCE(risk_money, 0) FROM trades WHERE status = 'OPEN'"):
+        for ccy, direction in currency_legs(row[0], row[1]).items():
+            exposure[(ccy, direction)] = exposure.get((ccy, direction), 0.0) + row[2]
+    for ccy, direction in currency_legs(market, side).items():
+        if exposure.get((ccy, direction), 0.0) + new_risk > limit + 1e-9:
+            return ccy
+    return None

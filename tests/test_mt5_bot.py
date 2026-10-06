@@ -69,9 +69,12 @@ class Mt5BotTests(unittest.TestCase):
     def setUp(self):
         self.db = mt5_bot.open_db(":memory:")
         # these tests open a signal on every market at once; the portfolio cap has its own tests
-        env = patch.dict("os.environ", {"FX_BOT_MAX_TOTAL_RISK_PCT": "100"})
+        env = patch.dict("os.environ", {"FX_BOT_MAX_TOTAL_RISK_PCT": "100", "FX_BOT_MAX_CCY_RISK_PCT": "100"})
         env.start()
         self.addCleanup(env.stop)
+        news = patch.object(mt5_bot.guards, "calendar_events", return_value=[])     # no network in tests
+        news.start()
+        self.addCleanup(news.stop)
 
     def test_refuses_a_real_account(self):
         with self.assertRaises(SystemExit):
@@ -270,9 +273,35 @@ class Mt5BotTests(unittest.TestCase):
         with patch.dict("os.environ", {"FX_BOT_NO_AUTO_DISABLE": "1"}):
             self.assertFalse(mt5_bot.guards.model_disabled(self.db, "m"))
 
+    def test_currency_cap_stops_piling_into_one_dollar_bet(self):
+        db = self.db
+        for k, market in enumerate(("EURUSD", "GBPUSD")):          # two open short-USD trades, 100 risk each
+            db.execute("INSERT INTO trades (model_version, decision_day, market, side, prob, ticket, exit_day, "
+                       "created_at, status, risk_money) VALUES ('m', '2026-10-05', ?, 1, 0.6, ?, '2026-10-12', 'x', "
+                       "'OPEN', 100)", [market, k])
+        with patch.dict("os.environ", {"FX_BOT_MAX_CCY_RISK_PCT": "2.5"}):
+            self.assertEqual(mt5_bot.guards.currency_room(db, 10_000, "AUDUSD", 1, 100), "USD")   # 300 > 250
+            self.assertIsNone(mt5_bot.guards.currency_room(db, 10_000, "USDJPY", 1, 100))      # long USD is fine
+            self.assertIsNone(mt5_bot.guards.currency_room(db, 10_000, "AUDUSD", 1, 40))
+        self.assertEqual(mt5_bot.guards.currency_legs("XAUUSD", 1), {"USD": -1})
+
     def test_nth_weekday_after_skips_weekends(self):
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-05", 5), "2026-10-12")
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-09", 1), "2026-10-12")
+
+
+
+class NewsBlackoutTests(unittest.TestCase):
+    def test_news_blackout_window_and_failure_tolerance(self):
+        from forex_ai_analyst.forex import mt5_guards
+        now = datetime(2026, 10, 7, 18, 0, tzinfo=timezone.utc)
+        events = [{"date": "2026-10-07T14:10:00-04:00", "country": "USD", "impact": "High", "title": "FOMC Minutes"},
+                  {"date": "2026-10-07T14:10:00-04:00", "country": "CAD", "impact": "Low", "title": "x"}]
+        mt5_guards._calendar.update(fetched=0.0, events=[])
+        self.assertEqual(mt5_guards.news_blackout("EURUSD", now, fetch=lambda: events), "USD FOMC Minutes")
+        self.assertIsNone(mt5_guards.news_blackout("EURJPY", now))
+        mt5_guards._calendar.update(fetched=0.0, events=[])
+        self.assertIsNone(mt5_guards.news_blackout("EURUSD", now, fetch=lambda: 1 / 0))   # unreachable: trade
 
 
 if __name__ == "__main__":

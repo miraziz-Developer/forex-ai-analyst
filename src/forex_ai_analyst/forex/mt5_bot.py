@@ -37,7 +37,7 @@ logger = logging.getLogger("fx_ml_demo")
 MAGIC = 742026
 STOP_ATR = 3.0
 _SUFFIXES = ("", "m", ".", "#", "-ECN", ".r", "c", "pro", ".a")
-RETRYABLE = ("symbol not found", "below minimum volume", "spread too wide")
+RETRYABLE = ("symbol not found", "below minimum volume", "spread too wide", "news blackout")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS trades (
  id INTEGER PRIMARY KEY AUTOINCREMENT, model_version TEXT NOT NULL, decision_day TEXT NOT NULL, market TEXT NOT NULL,
@@ -275,14 +275,20 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
             continue
         risk = risk_of(mt5, symbol, volume, stop_distance)
         tick = mt5.symbol_info_tick(symbol)
+        crowded = guards.currency_room(db, account.equity, market.name, side, risk)
+        news = guards.news_blackout(market.name, now)
         blocked = ("drawdown pause" if paused else
                    "portfolio risk limit" if not guards.risk_room(db, account.equity, risk) else
+                   "currency risk limit" if crowded else
+                   "news blackout" if news else
                    "spread too wide" if not guards.spread_ok(tick.ask, tick.bid, stop_distance) else None)
         if blocked:
             db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
                        "created_at, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, 'SKIPPED', ?)", base + [blocked])
             why = {"drawdown pause": "hisob cho'qqidan limitdan ko'p tushgan",
                    "portfolio risk limit": "umumiy ochiq risk limiti to'lgan",
+                   "currency risk limit": f"{crowded} bo'yicha bir tomonlama risk limiti to'lgan",
+                   "news blackout": f"muhim yangilik yaqin ({news}), keyinroq qayta uriniladi",
                    "spread too wide": "spread juda keng, keyinroq qayta uriniladi"}[blocked]
             messages.append(f"⏸ {market.name} {'BUY' if side > 0 else 'SELL'} signali kutib turibdi: {why}")
             continue

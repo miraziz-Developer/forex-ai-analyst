@@ -48,6 +48,12 @@ USDCHF, USDJPY, EURJPY, GBPJPY and XAUUSD, each with a 3 ATR emergency stop and
 - `FX_BOT_MAX_SPREAD_FRAC=0.10` — no entry while the spread is wider than 10% of
   the stop distance (e.g. at the daily rollover); retried until the end of the
   next day.
+- `FX_BOT_MAX_CCY_RISK_PCT=2.5` — at most 2.5% of equity at risk in one
+  direction of one currency (long EURUSD + GBPUSD + AUDUSD is three bets on a
+  weaker dollar, so the third is skipped).
+- `FX_BOT_NEWS_MINUTES=30` — no entry within 30 minutes of a high-impact
+  release for either currency (live ForexFactory calendar; if the calendar is
+  unreachable, trading continues); retried later.
 - A model with 30+ closed trades and profit factor below 0.7 stops opening
   trades (`FX_BOT_NO_AUTO_DISABLE=1` overrides).
 - Every Monday a weekly report: balance, drawdown, open risk, and per model
