@@ -18,8 +18,8 @@ from pathlib import Path
 MODEL_DIR = Path(__file__).parent / "models"
 FAMILIES = {
     "fx_logistic": {"uses_cot": False, "c": 1.0, "tp_atr": None},         # v1, docs/ML_STUDY.md
-    # v2 + regularisation, docs/ML_IMPROVEMENTS_STUDY.md (C); 3 ATR take-profit, docs/ML_EXITS_STUDY.md (T3)
-    "fx_logistic_cot_c01": {"uses_cot": True, "c": 0.1, "tp_atr": 3.0},
+    # v2 + regularisation, docs/ML_IMPROVEMENTS_STUDY.md (C); no take-profit (T3 fails on corrected data)
+    "fx_logistic_cot_c01": {"uses_cot": True, "c": 0.1, "tp_atr": None},
 }
 
 

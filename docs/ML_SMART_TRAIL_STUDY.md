@@ -48,3 +48,9 @@ mean is a worse strategy. Trials on this data: 2 more.
   and come back to entry would mostly have closed in profit at day 5.
 - With a 5-day time exit and a 3 ATR take-profit already in place, there is
   little left for a trailing stop to capture.
+
+
+## Rerun on corrected data (2026-10-06)
+
+T3 -0.023%, SM1 -0.019% (P better than T3 0.73), SM2 -0.023% (P 0.55). Still no
+pass.

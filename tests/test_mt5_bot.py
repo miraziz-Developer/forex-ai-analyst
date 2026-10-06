@@ -168,7 +168,7 @@ class Mt5BotTests(unittest.TestCase):
         versions = {r[0] for r in self.db.execute("SELECT model_version FROM trades")}
         self.assertEqual(versions, {"fx_logistic_test"})
 
-    def test_v2c_orders_carry_a_3_atr_take_profit_and_v1_orders_do_not(self):
+    def test_family_take_profit_is_sent_only_for_that_family(self):
         mt5 = FakeMT5()
         days = weekday_days("2026-10-05", 12)
         v2c = {**MODEL, "version": "fx_logistic_cot_c01_test", "family": "fx_logistic_cot_c01", "uses_cot": True}
@@ -177,7 +177,9 @@ class Mt5BotTests(unittest.TestCase):
         with patch.object(mt5_bot, "load_context", return_value=ctx), \
                 patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
                 patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL, v2c]), \
-                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62):
+                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62), \
+                patch.dict(mt5_bot.ml_model.FAMILIES, {"fx_logistic_cot_c01": {"uses_cot": True, "c": 0.1,
+                                                                               "tp_atr": 3.0}}):
             mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
         v1_orders = [r for r in mt5.sent if r["comment"].endswith("fx_logistic_test")]
         v2c_orders = [r for r in mt5.sent if r["comment"].endswith("cot_c01_test")]

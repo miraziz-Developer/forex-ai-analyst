@@ -94,9 +94,26 @@ the model graduates to an MT5 demo only if mean net > 0 with bootstrap
 P(mean > 0) >= 0.90 and profit factor >= 1.2. Otherwise it stays on paper or is
 dropped. First signal (decision day 2026-10-05): XAUUSD BUY, P = 0.60.
 
-**Data fix (2026-10-06).** Yahoo's EURJPY bar for Monday 2026-10-05 had its close
-0.013 above its high; the loader dropped such bars, so the bot never evaluated
-EURJPY that week (v2c would have bought at P 0.55). Bars are now kept with the
-range widened to include open and close, and a market that was never evaluated
-on a decision day is retried like a skipped signal. Historical studies used the
-old loader; the few affected bars do not change any verdict.
+**Data fix (2026-10-06) — the edge does not survive it.** Yahoo's EURJPY bar for
+Monday 2026-10-05 had its close 0.013 above its high; the loader dropped such
+bars, so the bot never evaluated EURJPY that week. A count showed the loader had
+dropped **2027 daily bars (3.5%)**: on the currency pairs the close was only
+about 2% of the bar's range outside it (harmless rounding), on gold 386 bars of
+2004-2011 were broken. Bars are now kept with the range widened to include open
+and close, and a market never evaluated on a decision day is retried.
+
+Rerun on the corrected data (same code, same walk-forward):
+
+| Model | Trades | Hit | Mean net | PF | P(mean>0) | 2010-17 / 2018+ | Markets + |
+|---|---|---|---|---|---|---|---|
+| v1 logistic | 2510 | 51.5% | +0.004% | 1.01 | 0.55 | -0.025% / +0.063% | 4/10 |
+| v1 gradient boosting | 3037 | 51.1% | +0.011% | 1.02 | 0.65 | +0.025% / -0.017% | 4/10 |
+| v2 (COT) | 2840 | 51.1% | -0.013% | 0.98 | 0.34 | -0.036% / +0.027% | 4/10 |
+| v2c (COT, C = 0.1) | 2764 | 51.0% | -0.015% | 0.97 | 0.33 | -0.041% / +0.033% | 3/10 |
+
+Gold went from the largest contributor (+44% / +61%) to slightly negative, and
+USDJPY from +19% to -14% for v2c. A result that flips when 3.5% of bars are
+handled differently is not an edge: **the FX ML models have no demonstrated
+edge.** The 2026 models were retrained on the corrected data so live features
+and training match; the MT5 demo keeps running only as a free forward
+experiment, with the graduation criteria above unchanged.

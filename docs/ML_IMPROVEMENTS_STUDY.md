@@ -50,3 +50,10 @@ also runs on the MT5 **demo**, next to v1, although it did not pass its gate.
 This is a forward comparison only: both models are judged by the same forward
 criteria in `docs/ML_STUDY.md`, each on its own journal rows (model version),
 and neither may trade real money on the strength of this study.
+
+
+## Rerun on corrected data (2026-10-06)
+
+After the loader fix (docs/ML_STUDY.md, "Data fix"): A -0.263% (P 0.00), B PF 0.91
+(P 0.06), C -0.015% (PF 0.97, P 0.33). All still fail; C's earlier P 0.90 was
+an artefact of dropped bars.

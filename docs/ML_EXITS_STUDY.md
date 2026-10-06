@@ -46,3 +46,12 @@ reports how much the 3 ATR stop itself changes the original study result.
   exit so the two forward tests stay comparable. The gain is small (about
   +0.01% per trade); the model is still well below the PF 1.2 graduation bar.
 - Trials on this data: 3 more (T15, T3, TR).
+
+
+## Rerun on corrected data (2026-10-06) — T3 no longer passes; take-profit removed
+
+After the loader fix (docs/ML_STUDY.md, "Data fix") every variant is negative:
+S -0.026%, T15 -0.006% (P better than S 0.97), T3 -0.023% (P 0.85), TR -0.034%
+(P 0.005). T3 fails the 0.95 bar, so v2c goes back to the time exit only
+(`tp_atr` None). T15 beats S but on a model with no edge; it is not adopted,
+since an exit rule cannot create an edge the entries do not have.
