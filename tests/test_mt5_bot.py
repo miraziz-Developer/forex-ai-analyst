@@ -101,6 +101,10 @@ class Mt5BotTests(unittest.TestCase):
         statuses = {r[0] for r in self.db.execute("SELECT status FROM trades WHERE ticket IS NOT NULL")}
         self.assertEqual(statuses, {"CLOSED"})
 
+    def test_min_equity_explains_skipped_signals(self):
+        # 0.01 lot * 0.015 stop * 100,000 per price unit = 15 money; at 0.5% that needs 3,000 equity
+        self.assertAlmostEqual(mt5_bot.min_equity_for(FakeMT5(), "EURUSD", 0.015, 0.5), 3000.0)
+
     def test_nth_weekday_after_skips_weekends(self):
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-05", 5), "2026-10-12")
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-09", 1), "2026-10-12")

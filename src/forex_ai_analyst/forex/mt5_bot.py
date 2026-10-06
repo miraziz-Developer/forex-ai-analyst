@@ -104,6 +104,13 @@ def volume_for(mt5, symbol: str, stop_distance: float, risk_money: float) -> flo
     return min(volume, info.volume_max) if volume >= info.volume_min else 0.0
 
 
+def min_equity_for(mt5, symbol: str, stop_distance: float, risk_pct: float) -> float:
+    """Equity needed for the broker's minimum volume to fit the risk budget."""
+    info = mt5.symbol_info(symbol)
+    money_per_price_per_lot = info.trade_tick_value / (info.trade_tick_size or info.point)
+    return info.volume_min * stop_distance * money_per_price_per_lot / (risk_pct / 100)
+
+
 def _filling(mt5, symbol: str) -> int:
     mode = mt5.symbol_info(symbol).filling_mode
     if mode & 1:
@@ -187,7 +194,13 @@ def decide(mt5, db: sqlite3.Connection, now: datetime, account) -> list[str]:
             reason = "symbol not found" if not symbol else "below minimum volume"
             db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
                        "created_at, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, 'SKIPPED', ?)", base + [reason])
-            messages.append(f"⚠️ {market.name}: {'simvol topilmadi' if not symbol else 'hajm minimaldan kichik'}")
+            if not symbol:
+                messages.append(f"⚠️ {market.name} {'BUY' if side > 0 else 'SELL'} signali: brokerda simvol topilmadi "
+                                "(FX_SYMBOL_MAP bilan ko'rsating)")
+            else:
+                need = min_equity_for(mt5, symbol, stop_distance, env_float("FX_BOT_RISK_PCT", 0.5))
+                messages.append(f"⚠️ {market.name} {'BUY' if side > 0 else 'SELL'} signali o'tkazildi: minimal lot ham "
+                                f"risk chegarasidan katta. Kerakli balans ≈ ${need:,.0f} (hozir ${account.equity:,.0f})")
             continue
         tick = mt5.symbol_info_tick(symbol)
         stop = (tick.ask if side > 0 else tick.bid) - side * stop_distance
