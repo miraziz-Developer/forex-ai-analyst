@@ -24,3 +24,13 @@ at least two thirds of its indices positive; and mean return per day in the
 market at least 2x the index's average daily drift over the same years (so the
 rule earns more than simply holding). If both pass, it becomes the fourth
 engine on the MT5 demo.
+
+## Result (2026-10-06) — fails in both samples
+
+| Sample | Trades | Win | Mean | PF | P | 2004-14 / 2015-26 | Positive | Net/day vs drift/day |
+|---|---|---|---|---|---|---|---|---|
+| main (6) | 1638 | 53.8% | +0.062% | 1.07 | 0.70 | +0.088% / +0.038% | 5/6 | 0.016% vs 0.041% |
+| replication (8) | 2144 | 53.4% | +0.052% | 1.06 | 0.67 | +0.158% / -0.044% | 5/8 | 0.013% vs 0.024% |
+
+The turn of the month earns less per day than simply holding the indices: the
+effect documented up to the 2000s is gone after costs. Not adopted.
