@@ -36,6 +36,22 @@ bootstrap P(mean R > 0) >= 0.90; profit factor >= 1.2; mean R > 0 in both
 halves; at least 60% of markets with positive total R. Each module is reported
 with the same metrics. If it passes, an MT5 trader is built for it.
 
-## Result
+## Result (2026-10-06) — the system fails on D1 and H4
 
-(pending)
+| TF | Module | Trades | Per month | Win | Mean R | PF | P | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| D1 | trend | 255 | 1.0 | 33% | -0.08 | 0.85 | 0.20 | 4/10 | FAIL |
+| D1 | range | 297 | 1.1 | **63%** | -0.01 | 0.97 | 0.40 | 5/10 | FAIL |
+| D1 | breakout | 16 | 0.1 | 25% | -0.25 | 0.56 | 0.14 | 0/4 | FAIL |
+| D1 | **combined** | 568 | 2.2 | 48% | **-0.05** | **0.88** | 0.15 | 5/10 | **FAIL** |
+| H4 | combined | 538 | 16.9 | 42% | -0.05 | 0.89 | 0.19 | 4/10 | FAIL |
+
+- The range module is the "sniper" the owner asked for: about 63% of its
+  trades win. It still loses slightly, because its winners (back to the middle
+  band) are smaller than its losers. Precision alone does not make money.
+- The regime filter did not turn losing modules into winning ones: trend
+  entries filtered by ADX/efficiency still lose on currencies, and breakouts
+  after compression are rare and negative.
+
+**Decision.** Not approved; no MT5 trader is built. Tuning thresholds until a
+backtest looks good is exactly what this study design forbids.
