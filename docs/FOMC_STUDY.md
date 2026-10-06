@@ -35,3 +35,17 @@ statement (the basket's mean return).
 2. mean net > 0 with event bootstrap P(mean > 0) >= **0.95**;
 3. profit factor over events >= 1.2;
 4. mean net > 0 in 2010-2017 and in 2018-2026.
+
+## Result (2026-10-06) — neither variant passes
+
+137 policy statements 2010-2026.
+
+| Variant | Events | Hit | Mean net | PF | P(mean>0) | 2010-17 / 2018-26 | Verdict |
+|---|---|---|---|---|---|---|---|
+| FT1 tone change | 90 | 52.2% | +0.3 bp | 1.01 | 0.54 | -13.4 / +18.1 bp | FAIL |
+| FT2 reaction drift | 136 | 56.6% | +3.7 bp | 1.14 | 0.73 | +11.6 / -3.4 bp | FAIL |
+
+FT1 traded only 90 statements (identical tone to the previous statement, or
+no scorable sentence, means no trade). Neither the dictionary tone nor the
+first hours' reaction predicts the dollar over the next two days in a way that
+survives this test. Nothing is built.
