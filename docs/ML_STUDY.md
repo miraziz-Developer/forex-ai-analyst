@@ -121,3 +121,19 @@ experiment, with the graduation criteria above unchanged.
 All earlier forex studies were rerun on the corrected loader the same day
 (forex rules, CFD trend, FX factors, forced flows, regime system, development):
 every verdict is unchanged (all FAIL).
+
+**Root cause found the same day: Yahoo's FX daily bars are malformed in some
+years.** Cross-checking against Dukascopy hourly bid/ask: in many Yahoo FX daily
+bars the open equals the close, and both are a snapshot of the price at London
+midnight (the start of the bar), while high and low cover the following day.
+Share of bars with open == close (EURUSD=X; USDJPY=X is the same): about 0-3%
+before 2013, 7-20% in 2013-2019, **78% in 2022, 98% in 2024, 86% in 2025**, 3% in
+2026. GC=F has the same defect in 2004-2010; ^GSPC never. So a "close outside
+the range" was not a rounding error but a close from a different moment, and in
+those years every close-based feature was one day stale (no look-ahead: stale,
+not future). The earlier "widen the range" fix treated a symptom only.
+
+Consequence: Yahoo is not a reliable source for daily FX bars. Next step (a
+data correction, not a new model): rebuild daily FX bars from Dukascopy hourly
+bid/ask with the standard New York 17:00 day, rerun v1/v2c unchanged on them, and
+have the live bot compute features from the broker's own MT5 daily bars.
