@@ -74,6 +74,12 @@ The logistic model is not proven, so it is followed forward with paper trades
 only (`src/forex_ai_analyst/forex/ml_shadow.py`, daily job at 00:45 UTC in the
 live service). No order is ever sent.
 
+**Update (2026-10-06):** at the owner's request the forward test runs on an MT5
+**demo** account on a Windows VM instead of on Render (`forex/mt5_bot.py`,
+`docs/MT5_DEMO_SETUP.md`); same decisions, executed with demo orders, a 3 ATR
+emergency stop and 0.5% risk. The Render job and `ml_shadow.py` were removed. The
+evaluation criteria below are unchanged and are measured on the demo journal.
+
 - Model `fx_logistic_2026`: trained on every sample whose label ended before
   2026-01-01 (corrected dates), exported to JSON and applied with the same
   feature code as in training (pure Python; identical to scikit-learn to 1e-16).
