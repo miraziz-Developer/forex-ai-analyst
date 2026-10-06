@@ -176,7 +176,7 @@ def close_due(mt5, db: sqlite3.Connection, today: str) -> list[str]:
                        [result.price, position.profit, row["id"]])
             messages.append(f"{'🟢' if position.profit > 0 else '🔴'} {row['market']} "
                             f"{'BUY' if row['side'] > 0 else 'SELL'} yopildi: {position.profit:+.2f}")
-        else:
+        elif not guards.market_closed(mt5, result):                   # a shut market is retried quietly
             messages.append(f"❌ {row['market']} yopilmadi: {getattr(result, 'comment', mt5.last_error())}")
     db.commit()
     return messages
@@ -313,6 +313,8 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
         target = price + side * tp_atr * c.f["atr"][i] if tp_atr else None
         result = _send(mt5, symbol, side, volume, stop, f"ml {LABELS.get(model.get('family', ''), 'x')}", tp=target)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            if guards.market_closed(mt5, result):
+                continue                                    # no journal row: retried within the window
             why = getattr(result, "comment", None) or str(mt5.last_error())
             # journalled as skipped (not retryable), so a rejected order is reported once, not every 15 minutes
             db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
@@ -377,6 +379,10 @@ def enabled_engines() -> set[str]:
 def startup_report(mt5) -> str:
     """Which markets each engine found at this broker, so a differently named symbol is never skipped silently."""
     lines = [f"Dvigatellar: {', '.join(sorted(enabled_engines()))}"]
+    mode = getattr(mt5.account_info(), "margin_mode", None)
+    if mode is not None and mode != getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2):
+        lines.append("⚠️ Hisob NETTING turida: bir simvoldagi pozitsiyalar birlashib ketadi va bot ularni to'g'ri "
+                     "boshqara olmaydi. HEDGE turidagi hisob oching.")
     found, missing = [], []
     for market in trend_live.CANDIDATES:
         symbol = trend_live.resolve(mt5, market)

@@ -238,3 +238,12 @@ def risk_multiplier(db: sqlite3.Connection, version: str) -> float:
 
 def engine_risk_pct(db: sqlite3.Connection, version: str, base_pct: float) -> float:
     return min(base_pct * risk_multiplier(db, version), env_float("FX_BOT_MAX_TRADE_RISK_PCT", 2.0))
+
+
+def market_closed(mt5, result) -> bool:
+    """True when an order failed only because the market is shut (weekend, session break, holiday): such an
+    order is retried quietly on the next cycle instead of being journalled as rejected or reported every cycle."""
+    if result is None:
+        return False
+    closed = getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018)
+    return result.retcode == closed or "market closed" in str(getattr(result, "comment", "")).lower()
