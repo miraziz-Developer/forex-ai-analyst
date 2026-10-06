@@ -49,7 +49,7 @@ class PrefetchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as cache, patch.object(dukascopy, "CACHE_DIR", Path(cache)), \
                 patch.object(dukascopy, "_raw", side_effect=fake_raw), patch.object(dukascopy.time, "sleep"):
             done = dukascopy.prefetch([("BAD", date(2024, 1, 2)), ("EURUSD", date(2024, 1, 2))], log=lambda m: None)
+            self.assertTrue((Path(cache) / "dukascopy" / "BAD" / "2024-01-02-BID.missing").exists())
         self.assertEqual(done, 2)                                   # EURUSD bid and ask
         self.assertEqual(calls.count(("BAD", "BID")), 3)
-            self.assertTrue((Path(cache) / "dukascopy" / "BAD" / "2024-01-02-BID.missing").exists())
         self.assertEqual(calls[1], ("BAD", "ASK"))                  # moved on instead of waiting
