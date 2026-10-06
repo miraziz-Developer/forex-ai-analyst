@@ -38,6 +38,28 @@ Passing rules, with their positive markets, go to
 `research_output/approved_strategies.json`; the MT5 trader trades nothing else.
 No parameter is tuned after seeing results; any change is a new study.
 
-## Result
+## Result (2026-10-06) — no rule passes; approved list is empty
 
-(pending)
+| Rule | Trades | Per month | Win rate | Avg win | Avg loss | Mean R | PF | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| ema_pullback_h1 (bot 1) | 6693 | 202 | 32% | +1.91R | -1.10R | **-0.13** | 0.82 | 0/11 | FAIL |
+| pinbar_snr_h1 (bot 2) | 10143 | 302 | 28% | +2.30R | -1.22R | **-0.23** | 0.74 | 0/11 | FAIL |
+| ict_fvg_h1 (bot 3) | 3080 | 92 | 26% | +2.91R | -1.09R | -0.04 | 0.95 | 3/11 | FAIL |
+| donchian_h4 | 494 | 15 | 33% | | | -0.08 | 0.86 | 3/11 | FAIL |
+| donchian_d1 | 828 | 3.1 | 28% | +3.13R | -0.91R | +0.23 | 1.35 | 6/11 | FAIL (breadth 55% < 60%) |
+| ema_cross_d1 | 381 | 1.4 | 34% | | | -0.02 | 0.94 | 4/11 | FAIL |
+
+- The owner's three bots lose on every one of the eleven markets (bot 1 and 2)
+  or nearly all (bot 3). Their ~30% live win rate matches the backtest; the
+  wins are not large enough to pay for the losses and the costs of 90-300
+  trades a month. Losses are not an M15-vs-H1 artefact: costs weigh even more
+  on M15.
+- donchian_d1 misses only the breadth gate, but its profit is concentrated:
+  BTC +148.7R and gold +42.8R; the nine currency pairs together total about
+  -4R (USDJPY +19, GBPUSD +8, EURUSD +4.5, USDCAD +4; NZD, CHF, EURJPY, GBPJPY,
+  AUD negative). Daily trend following on currency pairs is about break-even
+  after costs in 2004-2026; gold and BTC trend.
+
+**Decision.** Nothing is approved; the MT5 trader has nothing to trade. Any
+follow-up (for example trend following on gold, indices and crypto CFDs) is a
+new pre-registered study that also pays for these six trials.
