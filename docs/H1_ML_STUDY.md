@@ -48,3 +48,22 @@ strong signal from a weak one.
 
 A passing model becomes an MT5 demo candidate with retraining built in. If
 neither passes, the result is recorded.
+
+## Result (2026-10-06) — neither model passes
+
+250,374 decision rows (10 markets, every 4 hours, 2010-2026), test 2014-2026,
+real Dukascopy bid/ask both ways.
+
+| Model | Trades | Hit | Mean net | PF | P(mean>0) | 2014-19 / 2020-26 | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| logistic | 7923 | 50.8% | -0.54 bp | 0.95 | 0.16 | -0.38 / -0.89 bp | 3/10 | FAIL |
+| gradient boosting | 12356 | 51.1% | +0.24 bp | 1.03 | 0.78 | +0.81 / -0.43 bp | 5/10 | FAIL |
+
+Confidence bands (diagnostic): gradient boosting's hit rate rises a little with
+confidence (50.7% at 0.55-0.57, 51.6% at 0.57-0.60, 53.4% at 0.60-0.65) but the
+mean stays within about 1-2 bp of zero and the most confident band (0.65+, 109
+trades) loses 11 bp. The logistic model shows no usable gradient.
+
+With daily (clean data) and hourly models both failing, the FX ML line is
+closed on price, rate, positioning and calendar features: there is no
+predictive signal on currency pairs that survives the real spread.

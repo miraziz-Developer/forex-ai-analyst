@@ -66,3 +66,22 @@ class EndToEndTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SwitchAndStartupTests(unittest.TestCase):
+    def test_ml_engine_can_be_switched_off_but_closing_still_runs(self):
+        db = mt5_bot.open_db(":memory:")
+        mt5 = Broker()
+        calls = []
+        with patch.dict("os.environ", {"FX_BOT_ENGINES": "trend,fix"}), \
+                patch.object(mt5_bot, "decide", side_effect=lambda *a, **k: calls.append("ml") or []), \
+                patch.object(mt5_bot, "close_due", side_effect=lambda *a, **k: calls.append("close") or []), \
+                patch.object(mt5_bot.guards, "calendar_events", return_value=[]):
+            mt5_bot.tick(mt5, db, datetime(2026, 10, 7, 12, tzinfo=timezone.utc), slow=True, alerts={})
+        self.assertEqual(calls, ["close"])
+
+    def test_startup_report_names_found_and_missing_markets(self):
+        text = mt5_bot.startup_report(Broker())
+        self.assertIn("XAUUSD=XAUUSD", text)
+        self.assertIn("WTI=USOIL", text)
+        self.assertIn("topilmadi: XAGUSD", text)

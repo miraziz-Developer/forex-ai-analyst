@@ -67,7 +67,7 @@ def enter(mt5, db, now, account, paused, bot, pair, symbol, key) -> list[str]:
     tick = mt5.symbol_info_tick(symbol)
     price = tick.ask if side > 0 else tick.bid
     stop_distance = STOP_FRACTION * price
-    volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * guards.env_float("FX_FIX_RISK_PCT", 0.25) / 100)
+    volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * guards.engine_risk_pct(db, VERSION, guards.env_float("FX_FIX_RISK_PCT", 0.25)) / 100)
     info = mt5.symbol_info(symbol)
     mpp = info.trade_tick_value / (info.trade_tick_size or info.point)
     volume = guards.stress_volume(pair, volume, mpp, price, account.equity, info.volume_step, info.volume_min) \

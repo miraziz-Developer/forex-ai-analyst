@@ -53,6 +53,14 @@ above the 55-day high with a 2 ATR stop, sell on a close below the 20-day low
 (`[trend]` in Telegram, 0.5% risk via `FX_TREND_RISK_PCT`). If a commodity is
 named differently at the broker, map it, e.g. `FX_SYMBOL_MAP=WTI=USOil,BRENT=UKOil`.
 
+**On start** the bot sends a Telegram message listing the engines it runs and
+which commodity and FX symbols it found at the broker (a missing one is named,
+with the hint to map it via `FX_SYMBOL_MAP`).
+
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,ml` (default). The weekly ML
+models have no demonstrated edge (docs/ML_STUDY.md); `FX_BOT_ENGINES=trend,fix`
+switches them off. Open trades are always closed on schedule either way.
+
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
   of equity; when the budget is full the strongest signals have been placed
@@ -73,6 +81,11 @@ named differently at the broker, map it, e.g. `FX_SYMBOL_MAP=WTI=USOil,BRENT=UKO
   repeat of its market's worst documented day (USDCHF 30% for the 2015 SNB
   shock, GBPJPY 16% for Brexit, ..., EURUSD 5%) costs at most 4% of equity
   (the volume is cut), and all open positions together at most 15%.
+- **Adaptive allocation:** each engine (ML, fix, trend) starts at its base
+  risk; its own closed trades then move it: 20+ trades with PF >= 1.3 -> 1.5x,
+  40+ with PF >= 1.6 -> 2x, PF < 0.9 or a net loss -> 0.5x. One trade never
+  risks more than `FX_BOT_MAX_TRADE_RISK_PCT=2`. The weekly report shows each
+  engine's current multiplier.
 - A model with 30+ closed trades and profit factor below 0.7 stops opening
   trades (`FX_BOT_NO_AUTO_DISABLE=1` overrides).
 - Every Monday a weekly report: balance, drawdown, open risk, and per model

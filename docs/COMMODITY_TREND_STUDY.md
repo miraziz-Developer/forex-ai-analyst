@@ -108,3 +108,28 @@ and +0.29R per trade with profit factors 1.35 and 1.40, positive in all four
 half-periods. That is the most consistent evidence in this project outside
 crypto, and it is why the rule is in forward test on the demo. Risk is not
 raised and no real money is used until the forward test passes its own bar.
+
+## Robustness and portfolio reality check (2026-10-06, diagnostics only)
+
+- **Neighbouring parameters** (entry 40/55/80 x exit 10/20/30 x stop 1.5/2/3, long
+  only, the twelve unseen markets): all 27 positive, PF 1.21-1.56, 8-11 of 12
+  markets positive. The chosen 55/20/2 sits in the middle. Not a knife-edge.
+- **Pooled twelve unseen markets** (both pre-registered samples together):
+  600 trades, mean +0.28R, PF 1.38, bootstrap P 0.971.
+- **But the tradable MT5 basket since 2012 is weak.** Gold, silver, WTI, Brent,
+  copper, platinum and palladium, 2012-2026: 249 trades, mean +0.14R, PF 1.19
+  (gold +0.81R, Brent +0.34R, silver +0.36R, WTI +0.23R, copper +0.02R,
+  platinum -0.35R, palladium -0.19R). Returns come in bursts (2019-2021, 2025)
+  between long flat-to-losing stretches (2012-2015, 2022-2024).
+  Compounded, all positions sized at entry:
+
+  | Risk per trade | CAGR | Max drawdown | Worst year | Losing years |
+  |---|---|---|---|---|
+  | 1% | +1.5% | -33% | -11.6% | 9/15 |
+  | 2% | +1.8% | -56% | -22% | 9/15 |
+
+  At 2% risk this basket would have halved the account, for almost no return.
+  The edge is real across commodities but on this basket since 2012 it is too
+  small for the risk. The forward test continues at 0.5%; the risk level for
+  any real money must come from forward results, and 2% is not justified by
+  this history.

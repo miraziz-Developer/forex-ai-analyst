@@ -345,3 +345,26 @@ class NewsBlackoutTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AllocationTests(unittest.TestCase):
+    def closed(self, db, version, profits):
+        for k, p in enumerate(profits):
+            db.execute("INSERT INTO trades (model_version, decision_day, market, side, prob, ticket, exit_day, "
+                       "created_at, status, profit) VALUES (?, ?, 'EURUSD', 1, 0.6, ?, 'e', 'x', 'CLOSED', ?)",
+                       [version, f"d{k}", k, p])
+
+    def test_risk_follows_live_evidence_within_the_ceiling(self):
+        g = mt5_bot.guards
+        db = mt5_bot.open_db(":memory:")
+        self.closed(db, "probation", [10.0] * 10)
+        self.assertEqual(g.risk_multiplier(db, "probation"), 1.0)                 # < 20 trades
+        self.closed(db, "good", [30.0, -10.0] * 12)                               # 24 trades, PF 3
+        self.assertEqual(g.risk_multiplier(db, "good"), 1.5)
+        self.closed(db, "great", [30.0, -10.0] * 21)                              # 42 trades, PF 3
+        self.assertEqual(g.risk_multiplier(db, "great"), 2.0)
+        self.closed(db, "weak", [10.0, -12.0] * 12)                               # PF 0.83
+        self.assertEqual(g.risk_multiplier(db, "weak"), 0.5)
+        with patch.dict("os.environ", {"FX_BOT_MAX_TRADE_RISK_PCT": "1.5"}):
+            self.assertEqual(g.engine_risk_pct(db, "great", 1.0), 1.5)             # 2.0 capped at 1.5
+        self.assertEqual(g.engine_risk_pct(db, "weak", 0.6), 0.3)

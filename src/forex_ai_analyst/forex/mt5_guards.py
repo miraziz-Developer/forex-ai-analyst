@@ -8,6 +8,7 @@ All limits come from .env with conservative defaults:
   FX_BOT_NEWS_MINUTES (30)         no entry this close to a high-impact release for either currency
   FX_BOT_MAX_STRESS_TRADE_PCT (4)  one position's loss in a repeat of its market's worst day (volume is cut)
   FX_BOT_MAX_STRESS_PCT (15)       the same for all open positions together
+  FX_BOT_MAX_TRADE_RISK_PCT (2.0)  ceiling for one trade's risk after adaptive allocation
   FX_BOT_NO_AUTO_DISABLE (unset)   set to 1 to keep trading a model that failed its health check
 A model is disabled for new trades once it has >= 30 closed trades with a profit factor below 0.7,
 far below anything its backtest produced; open positions are still managed and closed.
@@ -114,6 +115,7 @@ def weekly_report(db: sqlite3.Connection, equity: float, now: datetime) -> str |
         slip = db.execute("SELECT AVG(slippage) FROM trades WHERE model_version = ? AND slippage IS NOT NULL",
                           [version]).fetchone()[0]
         lines.append(f"• {version}: {s['trades']} trade (kerak 60+), win {s['wins'] / s['trades']:.0%}, "
+                     f"risk x{risk_multiplier(db, version):g}, "
                      f"PF {pf} (kerak 1.2+), natija {s['profit']:+,.2f}"
                      + (f", o'rtacha slippage {slip:+.5g}" if slip is not None else "")
                      + (" ⛔ avtomatik o'chirilgan" if model_disabled(db, version) else ""))
@@ -213,3 +215,26 @@ def stress_volume(market: str, volume: float, money_per_price_per_lot: float, pr
 def stress_room(db: sqlite3.Connection, equity: float, new_loss: float) -> bool:
     row = db.execute("SELECT COALESCE(SUM(stress_money), 0) FROM trades WHERE status = 'OPEN'").fetchone()
     return float(row[0] or 0.0) + new_loss <= equity * env_float("FX_BOT_MAX_STRESS_PCT", 15.0) / 100 + 1e-9
+
+
+# --- adaptive allocation ---------------------------------------------------------------------------------------
+# Capital follows live evidence: every engine starts at its base risk, and its own closed demo/live trades
+# (never the backtest) move it up or down. The cap FX_BOT_MAX_TRADE_RISK_PCT (2.0) is never exceeded.
+ALLOCATION_STEPS = ((40, 1.6, 2.0), (20, 1.3, 1.5))     # (min closed trades, min profit factor, multiplier)
+DEMOTE_PF = 0.9
+
+
+def risk_multiplier(db: sqlite3.Connection, version: str) -> float:
+    s = model_stats(db, version)
+    if s["trades"] < 20:
+        return 1.0                                          # probation: not enough live evidence yet
+    if s["pf"] < DEMOTE_PF or s["profit"] <= 0:
+        return 0.5
+    for min_trades, min_pf, multiplier in ALLOCATION_STEPS:
+        if s["trades"] >= min_trades and s["pf"] >= min_pf:
+            return multiplier
+    return 1.0
+
+
+def engine_risk_pct(db: sqlite3.Connection, version: str, base_pct: float) -> float:
+    return min(base_pct * risk_multiplier(db, version), env_float("FX_BOT_MAX_TRADE_RISK_PCT", 2.0))
