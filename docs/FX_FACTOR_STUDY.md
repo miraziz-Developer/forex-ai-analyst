@@ -35,6 +35,24 @@ weight traded.
 The three components are reported with the same metrics. Only the combined
 portfolio is the decision; if it passes, an MT5 rebalancer is built for it.
 
-## Result
+## Result (2026-10-06) — the portfolio fails; nothing approved
 
-(pending)
+After costs, each scaled to 10% volatility:
+
+| | From | CAGR | Sharpe | Max DD | Halves (annual) | P(mean>0) | Verdict |
+|---|---|---|---|---|---|---|---|
+| carry | 2007-06 | -2.6% | -0.20 | -56% | -4.7% / +0.5% | 0.14 | FAIL |
+| trend | 2008-06 | -2.2% | -0.15 | -42% | -0.8% / -2.4% | 0.16 | FAIL |
+| value | 2012-06 | -3.8% | -0.31 | -50% | -2.3% / -4.2% | 0.08 | FAIL |
+| **combined** | 2013-06 | **-6.4%** | **-0.54** | -64% | -8.2% / -3.8% | 0.02 | **FAIL** |
+
+**Diagnostic, not part of the verdict (no costs, unscaled):** carry +1.0%/year
+(2008 -21.5%, 2009 +23.9%, matching the known carry crash and rebound), trend
+-0.2%/year, value 0.0%/year. Holding long AUD / short JPY earned +3.7%/year
+with large drawdowns. Interest rates and signs were checked by hand.
+
+**Reading.** Since 2006 the classic currency premia have been about zero even
+before costs, in line with their well-documented weakening after the 2008
+crisis and a decade of near-zero rates. A retail swap markup (about 2%/year
+on the 2x gross of the long-short books) turns that into a loss. With these
+data and costs there is no systematic forex rule here worth trading.
