@@ -72,6 +72,10 @@ same data, costs and gates as above. Going long a currency pair has no
 economic reason to differ from going short, so this is a seventh trial, not a
 fix of donchian_h4.
 
-### Result
+### Result — FAIL
 
-(pending)
+269 trades (8.2/month), win 35%, mean -0.04R, PF 0.92, P(mean > 0) 0.31, halves
+-0.09 / +0.01, 4 of 11 markets positive. Currency pairs: GBPJPY -12.0R,
+GBPUSD -6.2, NZDUSD -5.9, USDJPY -4.1, AUDUSD -3.8, EURJPY -3.1, USDCHF -2.7,
+EURUSD +0.4, USDCAD +9.2. Gold +16.3R (17 trades), BTC +0.6R (2.8 years of H1
+data). The rule that works on crypto does not work on currency pairs.
