@@ -35,3 +35,22 @@ plus 5%/year swap on notional for every day held (conservative, both sides).
 
 If both pass, the higher unseen mean R is adopted and traded on all seven
 markets (no picking) on the MT5 demo, next to the other engines.
+
+## Result (2026-10-06) — neither variant passes; long-only is the closest result so far
+
+| Variant | Unseen trades | Win | Mean R | PF | P(mean R>0) | Halves | Unseen + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| both directions | 439 | 25.5% | +0.13 | 1.16 | 0.79 | +0.37 / -0.10 | 4/5 | FAIL |
+| **long only** | 234 | 27.4% | **+0.27** | **1.35** | 0.87 | **+0.37 / +0.17** | **5/5** | FAIL (P < 0.95) |
+
+Long only, per market (total R / PF): WTI +7.1 / 1.25, Brent +8.4 / 1.78,
+copper +0.7 / 1.03, platinum +27.6 / 1.57, palladium +18.8 / 1.31; seen: gold
++46.6 / 2.36, silver +21.9 / 1.59.
+
+Every unseen commodity is positive and both halves are positive, but 234 trades
+are not enough evidence for the 0.95 bar set for this many trials. Together
+with the earlier unseen silver result and gold, the pattern is consistent:
+long trend pays in commodities and crypto, not in currency pairs or stock
+indices. Not adopted; the honest next step is a forward test of this exact
+rule (long only, 55/20, 2 ATR) on the demo, with the graduation bar fixed in
+advance.
