@@ -112,9 +112,14 @@ def enter(mt5, db, now, account, paused, bot, market, symbol, day, stop_distance
             db.commit()
         return [f"⏸ [trend] {market} BUY signali: {blocked}"]
     stop = tick.ask - stop_distance
-    result = bot._send(mt5, symbol, 1, volume, stop, f"trend {VERSION}")
+    result = bot._send(mt5, symbol, 1, volume, stop, "trend")
     if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-        return [f"❌ [trend] {market}: order rad etildi ({getattr(result, 'comment', mt5.last_error())})"]
+        why = getattr(result, "comment", None) or str(mt5.last_error())
+        db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
+                   "created_at, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, 'SKIPPED', ?)",
+                   base + [f"order rejected: {why}"[:120]])
+        db.commit()
+        return [f"❌ [trend] {market}: order rad etildi ({why})"]
     db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, symbol, side, prob, ticket, volume, "
                "entry_price, stop, exit_day, created_at, status, risk_money, requested_price, slippage, stress_money) "
                "VALUES (?, ?, ?, ?, 1, 0.0, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)",
