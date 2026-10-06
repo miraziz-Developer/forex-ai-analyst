@@ -57,12 +57,19 @@ def prefetch(jobs: list[tuple[str, date]], log=print, hourly: bool = False) -> i
         name = f"{d.isoformat()[:7]}-{s}-H1.bi5" if hourly else f"{d.isoformat()}-{s}.bi5"
         return (CACHE_DIR / "dukascopy" / p / name).exists()
     pending = [(p, d, s) for p, d in jobs for s in ("BID", "ASK") if not cached(p, d, s)]
-    done = 0
+    done, failures = 0, 0
     while pending:
         pair, day, side = pending[0]
         try:
             _raw(pair, day, side, hourly)
+            failures = 0
         except RuntimeError:
+            failures += 1
+            if failures >= 3:                      # this file is not served at all: skip it, the study sees a gap
+                log(f"skipping {pair} {day} {side}: not served after 3 rounds")
+                pending.pop(0)
+                failures = 0
+                continue
             log(f"feed unavailable at {pair} {day}; waiting 5 minutes ({len(pending)} files left)")
             time.sleep(300)
             continue
@@ -87,10 +94,13 @@ def decode(blob: bytes, day: date, point: float) -> list[tuple]:
 
 
 def hours(pair: str, year: int, month: int) -> list[dict]:
-    """Hourly candles of one month with bid and ask OHLC, UTC."""
+    """Hourly candles of one month with bid and ask OHLC, UTC; empty if the month was never served."""
     point, first = POINT.get(pair, 1e-5), date(year, month, 1)
-    bid = decode(_raw(pair, first, "BID", hourly=True), first, point)
-    ask = {r[0]: r for r in decode(_raw(pair, first, "ASK", hourly=True), first, point)}
+    try:
+        bid = decode(_raw(pair, first, "BID", hourly=True), first, point)
+        ask = {r[0]: r for r in decode(_raw(pair, first, "ASK", hourly=True), first, point)}
+    except RuntimeError:
+        return []
     return [{"datetime": b[0], "bid_open": b[1], "bid_high": b[2], "bid_low": b[3], "bid_close": b[4],
              "ask_open": ask[b[0]][1], "ask_high": ask[b[0]][2], "ask_low": ask[b[0]][3], "ask_close": ask[b[0]][4]}
             for b in bid if b[0] in ask]
