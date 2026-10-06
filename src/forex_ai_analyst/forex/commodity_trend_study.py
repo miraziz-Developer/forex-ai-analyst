@@ -40,6 +40,11 @@ MARKETS = (
 )
 
 
+REPLICATION = tuple(Commodity(n, f"yahoo:{s}", 0.0005, True) for n, s in (
+    ("CORN", "ZC=F"), ("WHEAT", "ZW=F"), ("SOYBEAN", "ZS=F"), ("SOYOIL", "ZL=F"), ("SOYMEAL", "ZM=F"),
+    ("SUGAR", "SB=F"), ("HEATOIL", "HO=F")))
+
+
 def bars(market: Commodity) -> list[dict]:
     kind, symbol = market.source.split(":", 1)
     if kind == "yahoo":
@@ -59,9 +64,9 @@ def run_market(market: Commodity, params: dict) -> list[dict]:
     return out
 
 
-def evaluate(name: str, params: dict) -> dict:
+def evaluate(name: str, params: dict, markets=MARKETS, min_positive: int | None = None) -> dict:
     per_market, unseen = {}, []
-    for market in MARKETS:
+    for market in markets:
         trades = run_market(market, params)
         per_market[market.name] = {**summarize(trades), "unseen": market.unseen}
         if market.unseen:
@@ -71,7 +76,8 @@ def evaluate(name: str, params: dict) -> dict:
     halves = [summarize([t for t in unseen if t["exit_time"] < mid]),
               summarize([t for t in unseen if t["exit_time"] >= mid])]
     pooled, p = summarize(unseen), bootstrap_p_mean_positive(unseen)
-    positive = sum(1 for m in MARKETS if m.unseen and per_market[m.name].get("total_r", 0) > 0)
+    positive = sum(1 for m in markets if m.unseen and per_market[m.name].get("total_r", 0) > 0)
+    need = min_positive or GATE["min_unseen_positive"]
     reasons = []
     if pooled["trades"] < GATE["min_trades"]:
         reasons.append(f"{pooled['trades']} trades < {GATE['min_trades']}")
@@ -81,14 +87,32 @@ def evaluate(name: str, params: dict) -> dict:
         reasons.append(f"profit factor {pooled.get('profit_factor')} < {GATE['min_profit_factor']}")
     if any(h.get("mean_r", 0) <= 0 for h in halves):
         reasons.append("not positive in both halves")
-    if positive < GATE["min_unseen_positive"]:
-        reasons.append(f"only {positive}/5 unseen markets positive")
+    if positive < need:
+        reasons.append(f"only {positive}/{sum(m.unseen for m in markets)} unseen markets positive")
     return {"name": name, "params": params, "unseen_pooled": pooled, "p_mean_positive": round(p, 3),
             "halves": halves, "unseen_positive": positive, "per_market": per_market,
             "passes": not reasons, "reasons": reasons}
 
 
+def main_replication() -> None:
+    r = evaluate("donchian_d1_long", VARIANTS["donchian_d1_long"], REPLICATION, min_positive=5)
+    Path("research_output").mkdir(exist_ok=True)
+    Path("research_output/commodity_trend_replication.json").write_text(json.dumps(
+        {"generated_at": datetime.now(timezone.utc).isoformat(), "result": r}, indent=2) + "\n")
+    s = r["unseen_pooled"]
+    print(f"replication: trades {s['trades']} win {s['win_rate']} meanR {s['mean_r']} PF {s['profit_factor']} "
+          f"P {r['p_mean_positive']} halves {r['halves'][0].get('mean_r')}/{r['halves'][1].get('mean_r')} "
+          f"positive {r['unseen_positive']}/7 -> {'PASS' if r['passes'] else 'FAIL: ' + '; '.join(r['reasons'])}")
+    for m, v in r["per_market"].items():
+        print(f"    {m:9s} trades {v.get('trades')} win {v.get('win_rate')} totalR {v.get('total_r')} "
+              f"PF {v.get('profit_factor')}")
+
+
 def main() -> None:
+    import sys
+    if "--replicate" in sys.argv:
+        main_replication()
+        return
     results = [evaluate(name, params) for name, params in VARIANTS.items()]
     Path("research_output").mkdir(exist_ok=True)
     Path("research_output/commodity_trend_study.json").write_text(json.dumps(

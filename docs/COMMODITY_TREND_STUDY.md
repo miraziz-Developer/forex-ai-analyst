@@ -67,3 +67,26 @@ guards. Journalled as `commodity_trend_long_v1`.
 **Evaluation, fixed now:** after 60 closed forward trades or 24 months,
 whichever is later, with nothing from the backtest: graduates only with mean
 R > 0, bootstrap P(mean R > 0) >= 0.90 and profit factor >= 1.2.
+
+## Replication on seven more unseen commodities — pre-registration
+
+Written and committed, with its code (`commodity_trend_study.py --replicate`),
+**before** it is run.
+
+If long trend in commodities is a real premium, it must also appear in
+commodities never used here. Candidates: 17 Yahoo continuous futures. Data
+filter, fixed from data-quality counts only (no strategy result was looked
+at): keep a market only with at most 90 opening gaps above 3% and at most 400
+bars with open == close over 2004-2026 (roll jumps and malformed bars create
+false breakouts). Kept: corn ZC=F (56 gaps / 137 flat), wheat ZW=F (86/214),
+soybeans ZS=F (34/105), soybean oil ZL=F (52/331), soybean meal ZM=F (78/226),
+sugar SB=F (53/96), heating oil HO=F (53/4). Dropped: coffee, cocoa, cotton,
+live cattle, feeder cattle, lean hogs, gasoline, oats, orange juice, rough rice
+(and lumber, unavailable).
+
+Rule: the long-only variant above, unchanged (55/20, 2 ATR). Costs: 0.05% round
+trip, 5%/year swap. **Passes only if**, pooled over the seven: at least 100
+trades; P(mean R > 0) >= 0.95; profit factor >= 1.2; mean R > 0 in both halves;
+at least 5 of 7 markets positive. A pass supports the commodity-trend engine
+already in forward test; it does not add these markets to the bot (most are not
+offered by the broker).
