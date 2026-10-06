@@ -37,6 +37,18 @@ mean R > 0 and profit factor >= 1.10.
 only validation and holdout count. A module that passes both is eligible for an
 MT5 demo trader.
 
-## Result
+## Result (2026-10-06) — both modules fail validation; holdout not opened
 
-(pending)
+| Module | Chosen on discovery | Discovery 2004-2014 | Validation 2015-2020 | Verdict |
+|---|---|---|---|---|
+| Range | ADX < 25, RSI(2) 5/95, far-band target, 1.0 ATR stop, no SMC filter | 132 trades, win 46%, +0.08R, PF 1.17 | 74 trades, win 47%, -0.06R, PF 0.88, P 0.32 | FAIL |
+| Trend | ADX > 20, pullback 1.0 ATR, 3.0 ATR stop, 2R target, no ICT filter | 164 trades, win 45%, **+0.30R, PF 1.51, +49R** | 78 trades, win 32%, **-0.06R, PF 0.92** | FAIL |
+
+- This is what optimisation on history looks like: the best of 72 trend
+  configurations made +49R with PF 1.51 in 2004-2014 and lost in the next six
+  years. Had all 22 years been optimised at once, the same luck would have
+  looked like a finished strategy.
+- Neither the SMC liquidity-sweep nor the ICT fair-value-gap filter was
+  selected: on discovery they did not improve the modules.
+- The holdout (2021 onward) stays unread and can still be used for a future,
+  separately pre-registered idea.
