@@ -83,3 +83,7 @@ held about 4 days. Compounded, chronological, after costs and swaps:
 Return / drawdown is about 0.24 whatever the sizing: a genuine edge, but alone
 it is a weak system (the crypto Donchian backtest is about 1.6). Its value is
 as a second, independent return stream next to crypto.
+
+**Owner decision (2026-10-06): shelved.** The edge is real but the return is too
+small to be worth a separate bot for now; no MT5 bot is built. Kept in reserve
+as a possible second return stream next to crypto.
