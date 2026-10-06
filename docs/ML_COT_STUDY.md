@@ -26,6 +26,14 @@ same costs). Samples without a year of COT history are dropped.
 of markets positive. If v2 passes, it joins the MT5 demo next to v1 under its own
 model version; if not, v1 continues alone.
 
-## Result
+## Result (2026-10-06) — v2 does not pass; v1 continues alone on the demo
 
-(pending)
+| Model | Samples | Trades | Hit | Mean net / trade | PF | P(mean>0) | 2010-17 / 2018+ | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| v1 (reference, corrected data) | 10852 | 2209 | 52.6% | +0.028% | 1.05 | 0.76 | -0.011% / +0.146% | 8/10 | FAIL |
+| **v2 = v1 + COT** | 10791 | 2528 | 52.1% | **+0.038%** | **1.07** | **0.86** | -0.010% / +0.140% | 8/10 | **FAIL** |
+
+COT positioning improves the model a little (higher mean, profit factor and
+confidence, more confident trades) but not enough: P 0.86 < 0.90, PF 1.07 < 1.2,
+and 2010-2017 is still slightly negative. Per the pre-registration, v2 does not
+join the demo.
