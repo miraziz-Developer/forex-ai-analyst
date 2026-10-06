@@ -343,33 +343,47 @@ def main() -> None:
     require_demo(mt5)
     db = open_db()
     notify("🧪 FX ML demo bot ishga tushdi (faqat DEMO hisob)")
-    last_error_alert, last_ml = 0.0, 0.0
+    alerts: dict[str, float] = {}
+    last_slow = -1e9
     while True:
+        slow = time.monotonic() - last_slow >= 15 * 60
+        if slow:
+            last_slow = time.monotonic()        # set first, so a failing engine is not retried every minute
+        messages = tick(mt5, db, datetime.now(timezone.utc), slow, alerts)
+        if messages:
+            notify("🧪 FX demo\n" + "\n".join(messages))
+        time.sleep(60)
+
+
+def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[str, float]) -> list[str]:
+    """One minute of the bot. slow=True also runs the 15-minute engines (risk state, weekly closes, ML,
+    trend, report). Every engine is isolated: one failing never stops the others (the month-end fix
+    must not be missed because a data source for the ML model is down)."""
+    me = sys.modules[__name__]
+    engines = []
+    if slow:
+        engines += [("risk", lambda: [m for m in [guards.drawdown_pause(db, require_demo(mt5).equity)[1]] if m]),
+                    ("close", lambda: close_due(mt5, db, now.date().isoformat())),
+                    ("ml", lambda: decide(mt5, db, now, require_demo(mt5), _paused(db))),
+                    ("trend", lambda: trend_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
+                    ("report", lambda: [r] if (r := guards.weekly_report(db, mt5.account_info().equity, now))
+                     else [])]
+    engines.append(("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)))
+    messages: list[str] = []
+    for name, run in engines:
         try:
-            now = datetime.now(timezone.utc)
-            messages = []
-            if time.monotonic() - last_ml >= 15 * 60:          # weekly ML models and daily trend: every 15 minutes
-                messages += cycle(mt5, db, now)
-                messages += trend_live.cycle(mt5, db, now, require_demo(mt5),
-                                             guards.get(db, "dd_paused", "0") == "1", sys.modules[__name__])
-                last_ml = time.monotonic()
-                report = guards.weekly_report(db, mt5.account_info().equity, now)
-                if report:
-                    notify(report)
-            account = require_demo(mt5)                       # the month-end fix rule: every minute
-            paused = guards.get(db, "dd_paused", "0") == "1"
-            messages += fix_live.cycle(mt5, db, now, account, paused, sys.modules[__name__])
-            if messages:
-                notify("🧪 FX demo\n" + "\n".join(messages))
+            messages += run()
         except SystemExit:
             raise
         except Exception as exc:
-            logger.exception("cycle failed")
-            if time.monotonic() - last_error_alert > 6 * 3600:
-                notify(f"⚠️ FX demo bot xatosi: {type(exc).__name__}: {exc}")
-                last_error_alert = time.monotonic()
-        time.sleep(60)
+            logger.exception("%s engine failed", name)
+            if time.monotonic() - alerts.get(name, -1e9) > 6 * 3600:
+                messages.append(f"⚠️ {name} xatosi: {type(exc).__name__}: {exc}")
+                alerts[name] = time.monotonic()
+    return messages
 
+def _paused(db: sqlite3.Connection) -> bool:
+    return guards.get(db, "dd_paused", "0") == "1"
 
 if __name__ == "__main__":
     main()

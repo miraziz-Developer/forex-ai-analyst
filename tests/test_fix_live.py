@@ -2,7 +2,6 @@ import sys
 import unittest
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from forex_ai_analyst.forex import fix_live, mt5_bot
