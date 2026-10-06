@@ -1,0 +1,49 @@
+# FX ML demo bot on a Windows VM (MetaTrader 5)
+
+Runs the forward test of the FX logistic model (`docs/ML_STUDY.md`) on a broker
+**demo** account. The bot refuses any account that is not a demo account.
+
+## One-time setup
+
+1. Install MetaTrader 5 from your broker (FBS), log in to the **demo** account and
+   keep the terminal open. In *Tools > Options > Expert Advisors* allow algorithmic trading.
+2. Install Python 3.11+ (tick "Add python.exe to PATH").
+3. In PowerShell:
+   ```powershell
+   git clone https://github.com/miraziz-Developer/forex-ai-analyst.git
+   cd forex-ai-analyst
+   pip install . MetaTrader5
+   ```
+4. Optional `.env` in that folder (Telegram messages; never commit it):
+   ```
+   TELEGRAM_BOT_TOKEN=...
+   TELEGRAM_CHAT_ID=...
+   FX_BOT_RISK_PCT=0.5
+   ```
+   If the broker uses suffixed names (e.g. `EURUSD.` or `GOLD`), add
+   `FX_SYMBOL_MAP=EURUSD=EURUSD.,XAUUSD=GOLD`; common suffixes are found automatically.
+
+## Run
+
+```powershell
+deploy\windows\run_fx_ml_demo.bat
+```
+The bot checks every 15 minutes. After each Monday close it may open positions
+(P(up) >= 55% BUY, <= 45% SELL) on EURUSD, GBPUSD, AUDUSD, NZDUSD, USDCAD,
+USDCHF, USDJPY, EURJPY, GBPJPY and XAUUSD, each with a 3 ATR emergency stop and
+0.5% of equity at risk, and closes them after the fifth trading day's close.
+Signals, closes and errors go to Telegram; the journal is `fx_ml_demo.sqlite`.
+
+## Export broker history for research
+
+```powershell
+python -m forex_ai_analyst.forex.mt5_export --years 10 --timeframes M15 H1 D1
+```
+Writes `mt5_data/*.csv` (with the broker's spread). Send the folder for the
+next study; it contains prices only, no account data.
+
+## Rules
+- Demo only until the forward-test criteria in `docs/ML_STUDY.md` are met.
+- Do not change thresholds or close trades by hand; that invalidates the test.
+- Each January: `pip install .[research]` and `python -m forex_ai_analyst.forex.ml_model <year>`,
+  or pull the new model file from the repository.

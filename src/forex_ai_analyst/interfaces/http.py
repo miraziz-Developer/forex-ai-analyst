@@ -384,8 +384,6 @@ def initialize() -> None:
         resolve_retired_static_risk_alerts()
         runtime_controls.init_db()
         knowledge.init_db()
-        from forex_ai_analyst.forex import ml_shadow
-        ml_shadow.init_db()
     except RuntimeError as exc:
         if "Turso query failed" not in str(exc):
             raise

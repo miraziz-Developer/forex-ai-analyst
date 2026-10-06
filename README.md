@@ -96,9 +96,10 @@ forced flows, a regime-switching system, SMC/ICT filters and a walk-forward ML m
 pre-registered and recorded in `docs/` (`FOREX_STUDY.md`, `TREND_CFD_STUDY.md`,
 `FX_FACTOR_STUDY.md`, `FORCED_FLOWS_STUDY.md`, `REGIME_SYSTEM_STUDY.md`,
 `DEVELOPMENT_STUDY.md`, `ML_STUDY.md`). None passed. The best candidate, a logistic model,
-runs as a **paper-only forward test** inside the service: every Monday close it scores ten
-markets and posts confident signals and their 5-day results to Telegram; it never trades.
-Research needs `pip install .[research]` (numpy, scikit-learn); the live service does not.
+runs as a forward test on a MetaTrader 5 **demo** account on a Windows VM
+(`docs/MT5_DEMO_SETUP.md`; the bot refuses real accounts): every Monday close it scores ten
+markets and trades confident signals for five days. Research needs `pip install .[research]`
+(numpy, scikit-learn); neither the live service nor the VM bot does.
 
 ## Telegram
 

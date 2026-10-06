@@ -400,15 +400,6 @@ def _guarded(job: Callable, name: str) -> Callable:
     return run
 
 
-def fx_ml_shadow_job() -> None:
-    """Forward paper test of the FX ML model; it never trades and must never disturb trading."""
-    try:
-        from forex_ai_analyst.forex import ml_shadow
-        ml_shadow.run()
-    except Exception as exc:
-        logger.warning("FX ML shadow run failed: %s: %s", type(exc).__name__, exc)
-
-
 def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: MarketDataProvider,
                     interval_seconds: int) -> BackgroundScheduler:
     if interval_seconds < 300:
@@ -429,8 +420,6 @@ def start_scheduler(*, scan: Callable[[MarketDataProvider], None], provider: Mar
     ):
         scheduler.add_job(_guarded(job, name), "interval", args=args, id=job_id, max_instances=1, coalesce=True,
                           next_run_time=now, **trigger)
-    scheduler.add_job(fx_ml_shadow_job, "cron", hour=0, minute=45, id="fx-ml-shadow", max_instances=1, coalesce=True)
-    scheduler.add_job(fx_ml_shadow_job, "date", run_date=now + timedelta(minutes=2), id="fx-ml-shadow-catch-up")
     scheduler.start()
     logger.info("Multi-strategy scheduler started: scan and resolver every %s seconds", interval_seconds)
     return scheduler
