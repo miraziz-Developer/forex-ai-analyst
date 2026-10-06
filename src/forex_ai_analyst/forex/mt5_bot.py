@@ -360,7 +360,8 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
     trend, report). Every engine is isolated: one failing never stops the others (the month-end fix
     must not be missed because a data source for the ML model is down)."""
     me = sys.modules[__name__]
-    engines = []
+    # the fix rule is time-critical (3-minute windows), so it runs before the slower engines
+    engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
     if slow:
         engines += [("risk", lambda: [m for m in [guards.drawdown_pause(db, require_demo(mt5).equity)[1]] if m]),
                     ("close", lambda: close_due(mt5, db, now.date().isoformat())),
@@ -368,7 +369,6 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                     ("trend", lambda: trend_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                     ("report", lambda: [r] if (r := guards.weekly_report(db, mt5.account_info().equity, now))
                      else [])]
-    engines.append(("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)))
     messages: list[str] = []
     for name, run in engines:
         try:
