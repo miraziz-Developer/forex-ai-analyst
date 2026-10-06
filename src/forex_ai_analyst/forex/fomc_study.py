@@ -54,14 +54,17 @@ def _get(url: str) -> str:
 def statement_urls() -> list[str]:
     pages = [f"{BASE}/monetarypolicy/fomchistorical{y}.htm" for y in range(FIRST_YEAR, 2021)]
     pages.append(f"{BASE}/monetarypolicy/fomccalendars.htm")
-    found = set()
+    found: dict[str, str] = {}                 # date -> url; two link formats (old pages use /press/monetary/)
     for page in pages:
         try:
-            found |= set(re.findall(r"/newsevents/pressreleases/monetary(\d{8})a\.htm", _get(page)))
+            text = _get(page)
         except RuntimeError:
             continue
-    return [f"{BASE}/newsevents/pressreleases/monetary{d}a.htm" for d in sorted(found)
-            if f"{d[:4]}-{d[4:6]}-{d[6:]}" <= LAST_DAY and int(d[:4]) >= FIRST_YEAR]
+        for d in re.findall(r"/newsevents/pressreleases/monetary(\d{8})a\.htm", text):
+            found[d] = f"{BASE}/newsevents/pressreleases/monetary{d}a.htm"
+        for d in re.findall(r"/newsevents/press/monetary/(\d{8})a\.htm", text):
+            found.setdefault(d, f"{BASE}/newsevents/press/monetary/{d}a.htm")
+    return [found[d] for d in sorted(found) if f"{d[:4]}-{d[4:6]}-{d[6:]}" <= LAST_DAY and int(d[:4]) >= FIRST_YEAR]
 
 
 def statement_text(page: str) -> str:
@@ -163,7 +166,7 @@ def main() -> None:
     for url in statement_urls():
         text = statement_text(_get(url))
         if is_policy_statement(text):
-            d = re.search(r"monetary(\d{8})a", url).group(1)
+            d = re.search(r"(\d{8})a\.htm", url).group(1)
             statements.append({"day": f"{d[:4]}-{d[4:6]}-{d[6:]}", "tone": tone(text)})
     ft1, ft2, prev = [], [], None
     for s in statements:
