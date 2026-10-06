@@ -16,6 +16,9 @@ dependencies = [
     "requests==2.32.3",
 ]
 
+[project.optional-dependencies]
+research = ["numpy>=2.0", "scikit-learn>=1.5"]
+
 [project.scripts]
 forex-production-backtest = "forex_ai_analyst.research.production_backtest:main"
 forex-edge-lab = "forex_ai_analyst.research.edge_lab.cli:main"
