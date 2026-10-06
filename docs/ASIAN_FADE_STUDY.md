@@ -33,3 +33,14 @@ Costs: the real spread both ways plus 0.3 basis points.
 3. profit factor >= 1.2;
 4. mean net > 0 in 2014-2019 and in 2020-2026;
 5. at least 6 of the 10 markets positive.
+
+## Result (2026-10-06) — both fail
+
+| Variant | Trades | Hit | Mean net | PF | P(mean>0) | 2014-19 / 2020-26 | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| AF1 k = 2.0 | 4382 | 49.1% | -1.3 bp | 0.85 | 0.01 | -0.4 / -2.1 bp | 1/10 | FAIL |
+| AF2 k = 2.5 | 1783 | 48.6% | -1.9 bp | 0.80 | 0.02 | -1.5 / -2.2 bp | 2/10 | FAIL |
+
+With the real spread at those hours, fading Asian-session stretches loses on
+nine of ten markets, and the hit rate is under 50%, not the 60-70% the idea
+promises. Nothing is built.
