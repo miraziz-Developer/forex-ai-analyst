@@ -37,6 +37,25 @@ Three tests are run; a pass at P >= 0.90 can happen by chance about once in
 ten, so a passing flow still needs confirmation on longer MT5 data before any
 trading.
 
-## Result
+## Result (2026-10-06) — no flow passes
 
-(pending)
+| Flow | Events | Mean net / event | Win | P(mean>0) | Halves | Verdict |
+|---|---|---|---|---|---|---|
+| Gotobi USDJPY | 190 | -0.016% (gross -0.006%; other days +0.008%) | 46% | 0.10 | -0.013% / -0.018% | FAIL |
+| Month-end USD | 232 | +0.061% | 53% | 0.88 | -0.053% / +0.175% | FAIL |
+| Risk-off AUDJPY | 95 | +0.010% | 45% | 0.51 | -0.043% / +0.062% | FAIL |
+
+- Gotobi: in 2023-2026 USDJPY did not rise into the Tokyo fix on gotobi days
+  (it did slightly better on other days); the flow is either absent or traded
+  ahead of by banks.
+- Month-end: the only promising flow. Positive overall and clearly positive in
+  the later half (about 2015-2026), negative in 2004-2015. It misses both the
+  P >= 0.90 and the both-halves gate, so it is not proven; it could have
+  strengthened as foreign holdings of US stocks and hedge ratios grew, or it
+  could be luck.
+- Risk-off: no reliable follow-through after VIX spikes; the move happens on
+  the spike day itself.
+
+**Decision.** Nothing is tradable. The month-end flow is a candidate only for a
+new, pre-registered test on data not used here (for example a forward test from
+2026-11, about 12 events a year).
