@@ -34,6 +34,23 @@ adopted variant is traded on **all ten markets** (no picking of individual
 markets) and written to `research_output/approved_strategies.json`, which is
 the only list the MT5 trader may trade. If neither passes, nothing is approved.
 
-## Result
+## Result (2026-10-06) — neither variant passes; nothing approved
 
-(pending)
+Unseen markets, after costs and swaps:
+
+| Variant | Trades | Win | Mean R | PF | P(mean>0) | Halves | Unseen + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| both directions | 737 | 25% | -0.17 | 0.78 | 0.06 | -0.12 / -0.21 | 2/7 | FAIL |
+| long only | 432 | 31% | +0.12 | 1.18 | 0.80 | +0.15 / +0.10 | 3/7 | FAIL |
+
+Long only, per market (total R): silver +50, Nasdaq 100 +22, Nikkei +34;
+S&P 500 -10, Dow -12, DAX -10, FTSE -20. Seen markets: gold +41, BTC +127,
+ETH +69.
+
+- Stock indices do not trend cleanly enough on daily bars to pay for false
+  breakouts and swaps; shorts lose heavily.
+- Crypto (BTC, ETH) and gold remain strongly positive, but they were already
+  seen and are not the test. The crypto trend edge is established separately
+  (crypto lab, two out-of-sample market tests) and is already traded on BingX.
+
+**Decision.** No MT5 strategy is approved.
