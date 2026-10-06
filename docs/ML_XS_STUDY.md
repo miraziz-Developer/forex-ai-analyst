@@ -50,3 +50,16 @@ leg costs nothing. Swap is charged at 1% a year on gross exposure.
 A passing model becomes model family `fx_xs` on the MT5 demo next to v1/v2c
 (after an independent re-implementation check). If neither passes, the result
 is recorded and v1/v2c continue unchanged.
+
+## Result (2026-10-06) — neither model passes
+
+| Model | Weeks | Hit | Gross / week | Net / week | PF | Sharpe | P(mean>0) | 2010-17 / 2018+ | Ccys + | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| XS1 ridge | 716 | 45% | -0.006% | -0.074% | 0.81 | -0.58 | 0.02 | -0.104% / -0.057% | 4/8 | FAIL |
+| XS2 boosting | 716 | 46% | +0.014% | -0.052% | 0.84 | -0.45 | 0.05 | -0.112% / -0.018% | 4/8 | FAIL |
+
+Before costs the ranking earns nothing (within ±0.015% a week); four legs of
+spread and swap (about 0.07% a week) make it lose. Positioning, carry and
+momentum, combined by a model and with the common dollar move removed, still
+do not predict the next week's relative currency returns on this data. v1/v2c
+continue unchanged on the demo.
