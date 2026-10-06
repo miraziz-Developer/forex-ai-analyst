@@ -28,7 +28,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import fix_live, ml_model
+from forex_ai_analyst.forex import fix_live, ml_model, trend_live
 from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.ml_features import feature_row, load_context
 from forex_ai_analyst.forex.regime_system_study import FX_ONLY
@@ -348,8 +348,10 @@ def main() -> None:
         try:
             now = datetime.now(timezone.utc)
             messages = []
-            if time.monotonic() - last_ml >= 15 * 60:          # the weekly ML models: every 15 minutes
+            if time.monotonic() - last_ml >= 15 * 60:          # weekly ML models and daily trend: every 15 minutes
                 messages += cycle(mt5, db, now)
+                messages += trend_live.cycle(mt5, db, now, require_demo(mt5),
+                                             guards.get(db, "dd_paused", "0") == "1", sys.modules[__name__])
                 last_ml = time.monotonic()
                 report = guards.weekly_report(db, mt5.account_info().equity, now)
                 if report:

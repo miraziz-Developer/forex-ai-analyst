@@ -46,6 +46,13 @@ against the move at 16:03 and exits at 12:00 London the next weekday
 (`[fix]` in Telegram, 0.25% risk per trade via `FX_FIX_RISK_PCT`). The bot
 must be running from before 15:00 London on that day.
 
+**Commodity trend forward test.** The bot also runs the long-only daily
+Donchian rule (docs/COMMODITY_TREND_STUDY.md) on gold, silver, WTI, Brent,
+copper, platinum and palladium, using the broker's own D1 bars: buy on a close
+above the 55-day high with a 2 ATR stop, sell on a close below the 20-day low
+(`[trend]` in Telegram, 0.5% risk via `FX_TREND_RISK_PCT`). If a commodity is
+named differently at the broker, map it, e.g. `FX_SYMBOL_MAP=WTI=USOil,BRENT=UKOil`.
+
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
   of equity; when the budget is full the strongest signals have been placed

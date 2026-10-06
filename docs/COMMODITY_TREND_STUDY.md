@@ -54,3 +54,16 @@ long trend pays in commodities and crypto, not in currency pairs or stock
 indices. Not adopted; the honest next step is a forward test of this exact
 rule (long only, 55/20, 2 ATR) on the demo, with the graduation bar fixed in
 advance.
+
+## Forward test on the MT5 demo (from October 2026)
+
+`trend_live.py` runs the long-only rule unchanged inside the demo bot (every
+15 minutes, on the broker's completed D1 bars) on gold, silver, WTI, Brent,
+copper, platinum and palladium — whichever the broker offers (symbol names are
+searched; `FX_SYMBOL_MAP=WTI=...` overrides). Risk 0.5% per trade at the 2 ATR
+stop (`FX_TREND_RISK_PCT`), with the stress, portfolio, spread and drawdown
+guards. Journalled as `commodity_trend_long_v1`.
+
+**Evaluation, fixed now:** after 60 closed forward trades or 24 months,
+whichever is later, with nothing from the backtest: graduates only with mean
+R > 0, bootstrap P(mean R > 0) >= 0.90 and profit factor >= 1.2.
