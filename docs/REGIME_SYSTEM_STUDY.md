@@ -55,3 +55,13 @@ with the same metrics. If it passes, an MT5 trader is built for it.
 
 **Decision.** Not approved; no MT5 trader is built. Tuning thresholds until a
 backtest looks good is exactly what this study design forbids.
+
+## Data correction rerun (2026-10-06)
+
+Yahoo stamps daily FX bars at London midnight (23:00 UTC in summer); the loader
+had labelled each such bar with the previous calendar day. This shifted dates
+(weekday, month boundaries, cross-asset alignment) but never let a rule see
+future data. After fixing it (`load_yahoo`, cache key `v2`) every daily FX study
+was rerun; hourly data was not affected.
+
+D1 results unchanged (combined PF 0.88, range win 63%); verdict unchanged.

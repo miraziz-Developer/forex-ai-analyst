@@ -26,5 +26,8 @@ forex-edge-lab = "forex_ai_analyst.research.edge_lab.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"forex_ai_analyst.forex" = ["models/*.json"]
+
 [tool.unittest]
 start-directory = "tests"

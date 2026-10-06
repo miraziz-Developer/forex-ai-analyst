@@ -56,3 +56,13 @@ before costs, in line with their well-documented weakening after the 2008
 crisis and a decade of near-zero rates. A retail swap markup (about 2%/year
 on the 2x gross of the long-short books) turns that into a loss. With these
 data and costs there is no systematic forex rule here worth trading.
+
+## Data correction rerun (2026-10-06)
+
+Yahoo stamps daily FX bars at London midnight (23:00 UTC in summer); the loader
+had labelled each such bar with the previous calendar day. This shifted dates
+(weekday, month boundaries, cross-asset alignment) but never let a rule see
+future data. After fixing it (`load_yahoo`, cache key `v2`) every daily FX study
+was rerun; hourly data was not affected.
+
+Combined Sharpe -0.55 (was -0.54), carry -0.19, trend -0.25, value -0.32; verdicts unchanged.

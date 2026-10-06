@@ -64,7 +64,7 @@ def load_yahoo(market: Market, interval: str) -> list[dict]:
     """interval '1h' (about 730 days) or '1d' (2004 onwards). Cached per day."""
     CACHE_DIR.mkdir(exist_ok=True)
     stamp = datetime.now(timezone.utc).date().isoformat()
-    path = CACHE_DIR / f"{market.yahoo.replace('=', '_')}-{interval}-{stamp}.json"
+    path = CACHE_DIR / f"{market.yahoo.replace('=', '_')}-{interval}-v2-{stamp}.json"
     if path.exists():
         return json.loads(path.read_text())
     params = {"interval": interval}
@@ -82,9 +82,12 @@ def load_yahoo(market: Market, interval: str) -> list[dict]:
             continue
         bars.append({"datetime": ts * 1000, "open": o, "high": h, "low": l, "close": c,
                      "volume": quote.get("volume", [0] * len(result["timestamp"]))[i] or 0})
-    if interval == "1d":   # Yahoo stamps daily FX bars at session start; align to the UTC date
+    if interval == "1d":
+        # Yahoo stamps a daily FX bar at London midnight, i.e. 23:00 UTC of the previous day in summer.
+        # Shift by 3 hours before taking the UTC date so every bar carries its own trading day
+        # (index/metal/crypto stamps at 00:00-13:30 UTC are unaffected).
         for bar in bars:
-            bar["datetime"] = bar["datetime"] // 86_400_000 * 86_400_000
+            bar["datetime"] = (bar["datetime"] + 3 * 3_600_000) // 86_400_000 * 86_400_000
     bars.sort(key=lambda b: b["datetime"])
     path.write_text(json.dumps(bars))
     return bars

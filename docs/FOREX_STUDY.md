@@ -79,3 +79,13 @@ fix of donchian_h4.
 GBPUSD -6.2, NZDUSD -5.9, USDJPY -4.1, AUDUSD -3.8, EURJPY -3.1, USDCHF -2.7,
 EURUSD +0.4, USDCAD +9.2. Gold +16.3R (17 trades), BTC +0.6R (2.8 years of H1
 data). The rule that works on crypto does not work on currency pairs.
+
+## Data correction rerun (2026-10-06)
+
+Yahoo stamps daily FX bars at London midnight (23:00 UTC in summer); the loader
+had labelled each such bar with the previous calendar day. This shifted dates
+(weekday, month boundaries, cross-asset alignment) but never let a rule see
+future data. After fixing it (`load_yahoo`, cache key `v2`) every daily FX study
+was rerun; hourly data was not affected.
+
+donchian_d1 and ema_cross_d1 unchanged to two decimals (P 0.977 / 0.35); verdicts unchanged.
