@@ -6,6 +6,8 @@ All limits come from .env with conservative defaults:
   FX_BOT_MAX_SPREAD_FRAC (0.10)    skip an entry while the spread exceeds this share of the stop distance
   FX_BOT_MAX_CCY_RISK_PCT (2.5)    open risk in one direction of one currency (e.g. short USD), % of equity
   FX_BOT_NEWS_MINUTES (30)         no entry this close to a high-impact release for either currency
+  FX_BOT_MAX_STRESS_TRADE_PCT (4)  one position's loss in a repeat of its market's worst day (volume is cut)
+  FX_BOT_MAX_STRESS_PCT (15)       the same for all open positions together
   FX_BOT_NO_AUTO_DISABLE (unset)   set to 1 to keep trading a model that failed its health check
 A model is disabled for new trades once it has >= 30 closed trades with a profit factor below 0.7,
 far below anything its backtest produced; open positions are still managed and closed.
@@ -16,7 +18,7 @@ import os
 import sqlite3
 from datetime import datetime
 
-EXTRA_COLUMNS = {"risk_money": "REAL", "requested_price": "REAL", "slippage": "REAL"}
+EXTRA_COLUMNS = {"risk_money": "REAL", "requested_price": "REAL", "slippage": "REAL", "stress_money": "REAL"}
 HEALTH_MIN_TRADES, HEALTH_MIN_PF = 30, 0.7
 
 
@@ -174,3 +176,40 @@ def currency_room(db: sqlite3.Connection, equity: float, market: str, side: int,
         if exposure.get((ccy, direction), 0.0) + new_risk > limit + 1e-9:
             return ccy
     return None
+
+
+# --- gap / stress risk ----------------------------------------------------------------------------------------
+# A stop does not protect against a jump through it. Each position is sized so that a repeat of the worst
+# documented one-day move in its market costs at most FX_BOT_MAX_STRESS_TRADE_PCT (4) of equity, and all open
+# positions together at most FX_BOT_MAX_STRESS_PCT (15). Moves are rounded up from known events (Yahoo's own
+# extreme prints contain bad ticks, e.g. EURUSD "17%" on 2008-12-08, so they are not used directly).
+STRESS_MOVE = {
+    "USDCHF": 0.30,   # SNB drops the EURCHF floor, 2015-01-15 (EURCHF about -30% intraday)
+    "GBPJPY": 0.16,   # Brexit vote, 2016-06-24
+    "GBPUSD": 0.12,   # Brexit vote, 2016-06-24 (1.50 -> 1.32 intraday)
+    "XAUUSD": 0.12,   # 2013-04-15 (-9%), 2026-01-30 (about -11% close to close)
+    "USDJPY": 0.10, "EURJPY": 0.10,   # 1998 and 2008 carry unwinds
+    "AUDUSD": 0.10, "NZDUSD": 0.10,   # October 2008
+    "USDCAD": 0.06,   # October 2008
+    "EURUSD": 0.05,   # 2008, March 2015
+}
+
+
+def stress_loss(market: str, volume: float, money_per_price_per_lot: float, price: float) -> float:
+    return volume * money_per_price_per_lot * price * STRESS_MOVE.get(market, 0.15)
+
+
+def stress_volume(market: str, volume: float, money_per_price_per_lot: float, price: float, equity: float,
+                  step: float, minimum: float) -> float:
+    """`volume` cut down so one position's stress loss fits FX_BOT_MAX_STRESS_TRADE_PCT; 0 if below the minimum."""
+    cap = equity * env_float("FX_BOT_MAX_STRESS_TRADE_PCT", 4.0) / 100
+    loss = stress_loss(market, volume, money_per_price_per_lot, price)
+    if loss <= cap:
+        return volume
+    cut = round(int(volume * cap / loss / step + 1e-9) * step, 8)
+    return cut if cut >= minimum else 0.0
+
+
+def stress_room(db: sqlite3.Connection, equity: float, new_loss: float) -> bool:
+    row = db.execute("SELECT COALESCE(SUM(stress_money), 0) FROM trades WHERE status = 'OPEN'").fetchone()
+    return float(row[0] or 0.0) + new_loss <= equity * env_float("FX_BOT_MAX_STRESS_PCT", 15.0) / 100 + 1e-9

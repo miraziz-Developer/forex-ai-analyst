@@ -69,7 +69,8 @@ class Mt5BotTests(unittest.TestCase):
     def setUp(self):
         self.db = mt5_bot.open_db(":memory:")
         # these tests open a signal on every market at once; the portfolio cap has its own tests
-        env = patch.dict("os.environ", {"FX_BOT_MAX_TOTAL_RISK_PCT": "100", "FX_BOT_MAX_CCY_RISK_PCT": "100"})
+        env = patch.dict("os.environ", {"FX_BOT_MAX_TOTAL_RISK_PCT": "100", "FX_BOT_MAX_CCY_RISK_PCT": "100",
+                                        "FX_BOT_MAX_STRESS_PCT": "1000", "FX_BOT_MAX_STRESS_TRADE_PCT": "100"})
         env.start()
         self.addCleanup(env.stop)
         news = patch.object(mt5_bot.guards, "calendar_events", return_value=[])     # no network in tests
@@ -284,6 +285,20 @@ class Mt5BotTests(unittest.TestCase):
             self.assertIsNone(mt5_bot.guards.currency_room(db, 10_000, "USDJPY", 1, 100))      # long USD is fine
             self.assertIsNone(mt5_bot.guards.currency_room(db, 10_000, "AUDUSD", 1, 40))
         self.assertEqual(mt5_bot.guards.currency_legs("XAUUSD", 1), {"USD": -1})
+
+    def test_stress_cap_cuts_a_chf_position_and_portfolio_stress_blocks(self):
+        g = mt5_bot.guards
+        with patch.dict("os.environ", {"FX_BOT_MAX_STRESS_TRADE_PCT": "4"}):
+            # 0.30 lot USDCHF at 0.80, 100,000 per price unit per lot: SNB-day loss 7,200 > 4% of 100,000
+            cut = g.stress_volume("USDCHF", 0.30, 100_000, 0.80, 100_000, 0.01, 0.01)
+            self.assertAlmostEqual(cut, 0.16)                       # 0.16 x 100,000 x 0.8 x 0.30 = 3,840
+            self.assertEqual(g.stress_volume("EURUSD", 0.30, 100_000, 1.1, 100_000, 0.01, 0.01), 0.30)
+            self.assertEqual(g.stress_volume("USDCHF", 0.30, 100_000, 0.80, 1_000, 0.01, 0.01), 0.0)
+        self.db.execute("INSERT INTO trades (model_version, decision_day, market, side, prob, ticket, exit_day, "
+                        "created_at, status, stress_money) VALUES ('m', 'd', 'GBPJPY', 1, 0.6, 1, 'e', 'x', 'OPEN', 1400)")
+        with patch.dict("os.environ", {"FX_BOT_MAX_STRESS_PCT": "15"}):
+            self.assertFalse(g.stress_room(self.db, 10_000, 200))
+            self.assertTrue(g.stress_room(self.db, 10_000, 100))
 
     def test_nth_weekday_after_skips_weekends(self):
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-05", 5), "2026-10-12")

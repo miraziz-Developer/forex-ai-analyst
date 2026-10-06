@@ -273,11 +273,17 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
                 messages.append(f"⚠️ {market.name} {'BUY' if side > 0 else 'SELL'} signali o'tkazildi: minimal lot ham "
                                 f"risk chegarasidan katta. Kerakli balans ≈ ${need:,.0f} (hozir ${account.equity:,.0f})")
             continue
-        risk = risk_of(mt5, symbol, volume, stop_distance)
         tick = mt5.symbol_info_tick(symbol)
+        info = mt5.symbol_info(symbol)
+        mpp = info.trade_tick_value / (info.trade_tick_size or info.point)
+        volume = guards.stress_volume(market.name, volume, mpp, tick.ask, account.equity, info.volume_step,
+                                      info.volume_min)
+        risk = risk_of(mt5, symbol, volume, stop_distance)
+        stress = guards.stress_loss(market.name, volume, mpp, tick.ask)
         crowded = guards.currency_room(db, account.equity, market.name, side, risk)
         news = guards.news_blackout(market.name, now)
         blocked = ("drawdown pause" if paused else
+                   "stress limit" if volume <= 0 or not guards.stress_room(db, account.equity, stress) else
                    "portfolio risk limit" if not guards.risk_room(db, account.equity, risk) else
                    "currency risk limit" if crowded else
                    "news blackout" if news else
@@ -286,6 +292,7 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
             db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
                        "created_at, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, 'SKIPPED', ?)", base + [blocked])
             why = {"drawdown pause": "hisob cho'qqidan limitdan ko'p tushgan",
+                   "stress limit": "tarixdagi eng yomon kun takrorlansa zarar limitdan oshadi",
                    "portfolio risk limit": "umumiy ochiq risk limiti to'lgan",
                    "currency risk limit": f"{crowded} bo'yicha bir tomonlama risk limiti to'lgan",
                    "news blackout": f"muhim yangilik yaqin ({news}), keyinroq qayta uriniladi",
@@ -301,10 +308,10 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
             messages.append(f"❌ {market.name}: order rad etildi ({getattr(result, 'comment', mt5.last_error())})")
             continue
         db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, symbol, side, prob, ticket, "
-                   "volume, entry_price, stop, exit_day, created_at, status, risk_money, requested_price, slippage) "
-                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)",
+                   "volume, entry_price, stop, exit_day, created_at, status, risk_money, requested_price, slippage, stress_money) "
+                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)",
                    [model["version"], decision_day, market.name, symbol, side, p, result.order, volume, result.price,
-                    stop, exit_day, now.isoformat(), risk, price, side * (result.price - price)])
+                    stop, exit_day, now.isoformat(), risk, price, side * (result.price - price), stress])
         messages.append(f"📌 {market.name} {'BUY' if side > 0 else 'SELL'} {volume} lot @ {result.price} "
                         f"(ehtimol {p:.0%}, stop {stop:.5g}{f', TP {target:.5g}' if target else ''}, "
                         f"{exit_day} yopilishidan keyin chiqadi)")

@@ -54,6 +54,11 @@ USDCHF, USDJPY, EURJPY, GBPJPY and XAUUSD, each with a 3 ATR emergency stop and
 - `FX_BOT_NEWS_MINUTES=30` — no entry within 30 minutes of a high-impact
   release for either currency (live ForexFactory calendar; if the calendar is
   unreachable, trading continues); retried later.
+- `FX_BOT_MAX_STRESS_TRADE_PCT=4` / `FX_BOT_MAX_STRESS_PCT=15` — a stop does
+  not help when the price jumps through it, so each position is sized so that a
+  repeat of its market's worst documented day (USDCHF 30% for the 2015 SNB
+  shock, GBPJPY 16% for Brexit, ..., EURUSD 5%) costs at most 4% of equity
+  (the volume is cut), and all open positions together at most 15%.
 - A model with 30+ closed trades and profit factor below 0.7 stops opening
   trades (`FX_BOT_NO_AUTO_DISABLE=1` overrides).
 - Every Monday a weekly report: balance, drawdown, open risk, and per model
