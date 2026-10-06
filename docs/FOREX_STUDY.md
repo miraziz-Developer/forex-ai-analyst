@@ -63,3 +63,15 @@ No parameter is tuned after seeing results; any change is a new study.
 **Decision.** Nothing is approved; the MT5 trader has nothing to trade. Any
 follow-up (for example trend following on gold, indices and crypto CFDs) is a
 new pre-registered study that also pays for these six trials.
+
+## Addendum (2026-10-06): the live crypto rule, long only — pre-registration
+
+Written before running. The owner asked to test the exact live BingX rule
+(Donchian 4h, 100/20, 3 ATR stop, **long only**) on the same eleven markets,
+same data, costs and gates as above. Going long a currency pair has no
+economic reason to differ from going short, so this is a seventh trial, not a
+fix of donchian_h4.
+
+### Result
+
+(pending)

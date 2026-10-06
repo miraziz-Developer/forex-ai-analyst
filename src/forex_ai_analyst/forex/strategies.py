@@ -88,6 +88,11 @@ def donchian_h4(bars: list[dict], point: float) -> Signals:
     return donchian(bars, entry_n=100, exit_n=20, stop_atr=3.0, sides="both")
 
 
+def donchian_h4_long(bars: list[dict], point: float) -> Signals:
+    """The live crypto rule exactly: 100-bar breakout, 20-bar exit, 3 ATR stop, long only."""
+    return donchian(bars, entry_n=100, exit_n=20, stop_atr=3.0, sides="long")
+
+
 def donchian_d1(bars: list[dict], point: float) -> Signals:
     """Turtle system 2: 55-day breakout, 20-day exit, 2 ATR stop, both directions."""
     return donchian(bars, entry_n=55, exit_n=20, stop_atr=2.0, sides="both")
@@ -104,6 +109,7 @@ STRATEGIES = {
     "pinbar_snr_h1": (pinbar_snr, "H1"),
     "ict_fvg_h1": (ict_fvg, "H1"),
     "donchian_h4": (donchian_h4, "H4"),
+    "donchian_h4_long": (donchian_h4_long, "H4"),
     "donchian_d1": (donchian_d1, "D1"),
     "ema_cross_d1": (ema_cross_d1, "D1"),
 }
