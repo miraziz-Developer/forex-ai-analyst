@@ -3,7 +3,7 @@
 On completed D1 bars of the broker's index CFDs: close above its 200-day average and RSI(2) below 10 buys
 at market with a 3 ATR(14) stop; the trade is closed after a close above the 5-day average or after 10
 completed bars. Markets: US500, US30, NAS100, GER40, UK100, JP225 (whichever the broker offers).
-Sizing: the 3 ATR stop costs FX_INDEX_RISK_PCT (0.5) of equity, with adaptive allocation and the stress,
+Sizing: the 3 ATR stop costs FX_INDEX_RISK_PCT (1.0) of equity, with adaptive allocation and the stress,
 portfolio, spread and drawdown guards. Journalled as `index_pullback_v1`.
 The study used cash-index daily bars; CFD D1 bars include the overnight session (stated, not adjusted).
 """
@@ -101,7 +101,7 @@ def close_if(mt5, db, row, due: bool, bot) -> list[str]:
 def enter(mt5, db, now, account, paused, bot, market, symbol, day, stop_distance) -> list[str]:
     tick = mt5.symbol_info_tick(symbol)
     info = mt5.symbol_info(symbol)
-    risk_pct = guards.engine_risk_pct(db, VERSION, guards.env_float("FX_INDEX_RISK_PCT", 0.5))
+    risk_pct = guards.engine_risk_pct(db, VERSION, guards.env_float("FX_INDEX_RISK_PCT", 1.0))
     volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * risk_pct / 100)
     mpp = info.trade_tick_value / (info.trade_tick_size or info.point)
     volume = guards.stress_volume(market, volume, mpp, tick.ask, account.equity, info.volume_step, info.volume_min) \

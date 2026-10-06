@@ -43,6 +43,7 @@ class DonchianEngine:
     candidates: dict
     timeframe: str                   # "D1" or "H4"
     risk_env: str
+    default_risk_pct: float = 0.5    # docs/PORTFOLIO_STUDY.md
     bar_count: int = 260
 
     def resolve(self, mt5, market: str) -> str | None:
@@ -106,7 +107,7 @@ class DonchianEngine:
     def enter(self, mt5, db, now, account, paused, bot, market, symbol, key, stop_distance) -> list[str]:
         tick = mt5.symbol_info_tick(symbol)
         info = mt5.symbol_info(symbol)
-        risk_pct = guards.engine_risk_pct(db, self.version, guards.env_float(self.risk_env, 0.5))
+        risk_pct = guards.engine_risk_pct(db, self.version, guards.env_float(self.risk_env, self.default_risk_pct))
         volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * risk_pct / 100)
         mpp = info.trade_tick_value / (info.trade_tick_size or info.point)
         volume = guards.stress_volume(market, volume, mpp, tick.ask, account.equity, info.volume_step,

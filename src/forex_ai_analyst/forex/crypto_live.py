@@ -1,7 +1,7 @@
 """Crypto Donchian 4h on MT5 CFDs, forward test on the demo (docs/CRYPTO_CFD_STUDY.md).
 
 The live BingX rule unchanged: H4, close above the previous 100-bar high buys with a 3 ATR stop, a close
-below the previous 20-bar low exits. Risk FX_CRYPTO_RISK_PCT (0.5). Crypto coins fall together, so a 40%
+below the previous 20-bar low exits. Risk FX_CRYPTO_RISK_PCT (0.3). Crypto coins fall together, so a 40%
 one-day stress move applies. Journalled as `crypto_donchian_h4_v1`.
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ CRYPTO = DonchianEngine(
         "LINKUSD": ["LINKUSD", "LNKUSD", "LINKUSDT"], "AVAXUSD": ["AVAXUSD", "AVAUSD", "AVAXUSDT"],
         "LTCUSD": ["LTCUSD", "LTCUSDT"],
     },
-    timeframe="H4", risk_env="FX_CRYPTO_RISK_PCT", bar_count=300)
+    timeframe="H4", risk_env="FX_CRYPTO_RISK_PCT", default_risk_pct=0.3, bar_count=300)
 guards.STRESS_MOVE.update({market: 0.40 for market in CRYPTO.candidates})
 
 cycle, resolve, CANDIDATES, VERSION = CRYPTO.cycle, CRYPTO.resolve, CRYPTO.candidates, CRYPTO.version
