@@ -18,6 +18,7 @@ from forex_ai_analyst.forex.data import CACHE_DIR
 
 URL = "https://datafeed.dukascopy.com/datafeed/{pair}/{y}/{m:02d}/{d:02d}/{side}_candles_min_1.bi5"
 HOUR_URL = "https://datafeed.dukascopy.com/datafeed/{pair}/{y}/{m:02d}/{side}_candles_hour_1.bi5"
+DAY_URL = "https://datafeed.dukascopy.com/datafeed/{pair}/{y}/{side}_candles_day_1.bi5"
 POINT = {"USDJPY": 1e-3, "EURJPY": 1e-3, "GBPJPY": 1e-3, "XAUUSD": 1e-3}
 RECORD = struct.Struct(">5If")
 PAUSE = 0.5                             # seconds between requests: bursts get the IP blocked
@@ -25,15 +26,22 @@ _SESSION = requests.Session()          # keep-alive: a new TLS connection costs 
 _SESSION.headers["User-Agent"] = "Mozilla/5.0"
 
 
-def _raw(pair: str, day: date, side: str, hourly: bool = False) -> bytes:
-    """Minute file of `day`, or with hourly=True the hour file of day's month (only current-month files change)."""
-    name = f"{day.isoformat()[:7]}-{side}-H1.bi5" if hourly else f"{day.isoformat()}-{side}.bi5"
+def _name(day: date, side: str, kind) -> str:
+    if kind == "day":
+        return f"{day.year}-{side}-D1.bi5"
+    return f"{day.isoformat()[:7]}-{side}-H1.bi5" if kind else f"{day.isoformat()}-{side}.bi5"
+
+
+def _raw(pair: str, day: date, side: str, hourly=False) -> bytes:
+    """Minute file of `day`; hourly=True: the hour file of day's month; hourly="day": the day file of day's year."""
+    name = _name(day, side, hourly)
     path = CACHE_DIR / "dukascopy" / pair / name
     if path.exists():
         return path.read_bytes()
     if path.with_suffix(".missing").exists():               # prefetch gave up on it: treat as no data
         return b""
-    url = (HOUR_URL.format(pair=pair, y=day.year, m=day.month - 1, side=side) if hourly
+    url = (DAY_URL.format(pair=pair, y=day.year, side=side) if hourly == "day"
+           else HOUR_URL.format(pair=pair, y=day.year, m=day.month - 1, side=side) if hourly
            else URL.format(pair=pair, y=day.year, m=day.month - 1, d=day.day, side=side))
     for attempt in range(6):
         time.sleep(PAUSE)
@@ -59,8 +67,7 @@ def prefetch(jobs: list[tuple[str, date]], log=print, hourly: bool = False) -> i
     from collections import deque
 
     def cached(p, d, s):
-        name = f"{d.isoformat()[:7]}-{s}-H1.bi5" if hourly else f"{d.isoformat()}-{s}.bi5"
-        return (CACHE_DIR / "dukascopy" / p / name).exists()
+        return (CACHE_DIR / "dukascopy" / p / _name(d, s, hourly)).exists()
     queue = deque((p, d, s) for p, d in jobs for s in ("BID", "ASK") if not cached(p, d, s))
     done, fails, in_a_row = 0, {}, 0
     while queue:
@@ -74,8 +81,7 @@ def prefetch(jobs: list[tuple[str, date]], log=print, hourly: bool = False) -> i
                 queue.append(item)
             else:
                 log(f"skipping {item[0]} {item[1]} {item[2]}: not served after 3 tries")
-                name = f"{item[1].isoformat()[:7]}-{item[2]}-H1" if hourly else f"{item[1].isoformat()}-{item[2]}"
-                marker = CACHE_DIR / "dukascopy" / item[0] / f"{name}.missing"
+                marker = (CACHE_DIR / "dukascopy" / item[0] / _name(item[1], item[2], hourly)).with_suffix(".missing")
                 marker.parent.mkdir(parents=True, exist_ok=True)
                 marker.touch()
             if in_a_row >= 3:
@@ -114,6 +120,24 @@ def hours(pair: str, year: int, month: int) -> list[dict]:
     return [{"datetime": b[0], "bid_open": b[1], "bid_high": b[2], "bid_low": b[3], "bid_close": b[4],
              "ask_open": ask[b[0]][1], "ask_high": ask[b[0]][2], "ask_low": ask[b[0]][3], "ask_close": ask[b[0]][4]}
             for b in bid if b[0] in ask]
+
+
+def days(pair: str, first_year: int, last_year: int) -> list[dict]:
+    """Daily bars (UTC days, Dukascopy's own day candles) with mid OHLC, the format of data.load_yahoo.
+    Weekend placeholder candles (no range) are dropped."""
+    point, out = POINT.get(pair, 1e-5), []
+    for year in range(first_year, last_year + 1):
+        first = date(year, 1, 1)
+        bid = decode(_raw(pair, first, "BID", hourly="day"), first, point)
+        ask = {r[0]: r for r in decode(_raw(pair, first, "ASK", hourly="day"), first, point)}
+        for b in bid:
+            a = ask.get(b[0])
+            if a is None or b[2] <= b[3]:
+                continue
+            out.append({"datetime": b[0], "open": (b[1] + a[1]) / 2, "high": (b[2] + a[2]) / 2,
+                        "low": (b[3] + a[3]) / 2, "close": (b[4] + a[4]) / 2, "volume": 0,
+                        "spread": (a[4] - b[4])})
+    return out
 
 
 def minutes(pair: str, day: date) -> list[dict]:

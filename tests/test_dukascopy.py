@@ -53,3 +53,15 @@ class PrefetchTests(unittest.TestCase):
         self.assertEqual(done, 2)                                   # EURUSD bid and ask
         self.assertEqual(calls.count(("BAD", "BID")), 3)
         self.assertEqual(calls[1], ("BAD", "ASK"))                  # moved on instead of waiting
+
+
+class DaysTests(unittest.TestCase):
+    def test_days_are_mid_prices_and_weekend_placeholders_are_dropped(self):
+        files = {"BID": blob([(0, 100000, 100100, 99900, 100200, 1.0), (86400, 100100, 100100, 100100, 100100, 0.0)]),
+                 "ASK": blob([(0, 100002, 100102, 99902, 100202, 1.0), (86400, 100102, 100102, 100102, 100102, 0.0)])}
+        with patch.object(dukascopy, "_raw", side_effect=lambda pair, day, side, hourly=False: files[side]):
+            bars = dukascopy.days("EURUSD", 2024, 2024)
+        self.assertEqual(len(bars), 1)
+        self.assertAlmostEqual(bars[0]["open"], 1.00001)
+        self.assertAlmostEqual(bars[0]["close"], 1.00101)
+        self.assertAlmostEqual(bars[0]["spread"], 0.00002)
