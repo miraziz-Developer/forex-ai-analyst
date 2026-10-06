@@ -53,6 +53,14 @@ above the 55-day high with a 2 ATR stop, sell on a close below the 20-day low
 (`[trend]` in Telegram, 0.5% risk via `FX_TREND_RISK_PCT`). If a commodity is
 named differently at the broker, map it, e.g. `FX_SYMBOL_MAP=WTI=USOil,BRENT=UKOil`.
 
+**On start** the bot sends a Telegram message listing the engines it runs and
+which commodity and FX symbols it found at the broker (a missing one is named,
+with the hint to map it via `FX_SYMBOL_MAP`).
+
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,ml` (default). The weekly ML
+models have no demonstrated edge (docs/ML_STUDY.md); `FX_BOT_ENGINES=trend,fix`
+switches them off. Open trades are always closed on schedule either way.
+
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
   of equity; when the budget is full the strongest signals have been placed

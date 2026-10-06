@@ -354,7 +354,7 @@ def main() -> None:
         raise SystemExit(f"MetaTrader 5 initialize failed: {mt5.last_error()}")
     require_demo(mt5)
     db = open_db()
-    notify("🧪 FX ML demo bot ishga tushdi (faqat DEMO hisob)")
+    notify("🧪 FX demo bot ishga tushdi (faqat DEMO hisob)\n" + startup_report(mt5))
     alerts: dict[str, float] = {}
     last_slow = -1e9
     while True:
@@ -365,6 +365,27 @@ def main() -> None:
         if messages:
             notify("🧪 FX demo\n" + "\n".join(messages))
         time.sleep(60)
+
+
+def enabled_engines() -> set[str]:
+    """FX_BOT_ENGINES, e.g. "trend,fix" to switch the weekly ML experiment off (default: trend,fix,ml).
+    Closing open trades, the risk state and the weekly report always run."""
+    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,ml")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def startup_report(mt5) -> str:
+    """Which markets each engine found at this broker, so a differently named symbol is never skipped silently."""
+    lines = [f"Dvigatellar: {', '.join(sorted(enabled_engines()))}"]
+    found, missing = [], []
+    for market in trend_live.CANDIDATES:
+        symbol = trend_live.resolve(mt5, market)
+        (found if symbol else missing).append(f"{market}={symbol}" if symbol else market)
+    lines.append("Trend bozorlari: " + (", ".join(found) or "yo'q")
+                 + (f" | topilmadi: {', '.join(missing)} (FX_SYMBOL_MAP bilan ko'rsating)" if missing else ""))
+    fx_missing = [m.name for m in FX_ONLY if not resolve_symbol(mt5, m.name)]
+    lines.append("FX juftliklar: " + ("hammasi topildi" if not fx_missing else f"topilmadi: {', '.join(fx_missing)}"))
+    return "\n".join(lines)
 
 
 def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[str, float]) -> list[str]:
@@ -381,6 +402,8 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                     ("trend", lambda: trend_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                     ("report", lambda: [r] if (r := guards.weekly_report(db, mt5.account_info().equity, now))
                      else [])]
+    switchable = {"fix", "ml", "trend"}
+    engines = [(n, r) for n, r in engines if n not in switchable or n in enabled_engines()]
     messages: list[str] = []
     for name, run in engines:
         try:
