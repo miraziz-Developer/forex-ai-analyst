@@ -64,7 +64,7 @@ def load_yahoo(market: Market, interval: str) -> list[dict]:
     """interval '1h' (about 730 days) or '1d' (2004 onwards). Cached per day."""
     CACHE_DIR.mkdir(exist_ok=True)
     stamp = datetime.now(timezone.utc).date().isoformat()
-    path = CACHE_DIR / f"{market.yahoo.replace('=', '_')}-{interval}-v2-{stamp}.json"
+    path = CACHE_DIR / f"{market.yahoo.replace('=', '_')}-{interval}-v3-{stamp}.json"
     if path.exists():
         return json.loads(path.read_text())
     params = {"interval": interval}
@@ -78,8 +78,11 @@ def load_yahoo(market: Market, interval: str) -> list[dict]:
     bars = []
     for i, ts in enumerate(result.get("timestamp") or []):
         o, h, l, c = (quote[k][i] for k in ("open", "high", "low", "close"))
-        if None in (o, h, l, c) or not (l <= min(o, c) <= max(o, c) <= h):
+        if None in (o, h, l, c) or min(o, h, l, c) <= 0:
             continue
+        # Yahoo sometimes prints a close a hair outside the bar's range (EURJPY 2026-10-05). Widen the range
+        # instead of dropping the bar: a dropped Monday silently removed that market from the weekly decision.
+        h, l = max(h, o, c), min(l, o, c)
         bars.append({"datetime": ts * 1000, "open": o, "high": h, "low": l, "close": c,
                      "volume": quote.get("volume", [0] * len(result["timestamp"]))[i] or 0})
     if interval == "1d":

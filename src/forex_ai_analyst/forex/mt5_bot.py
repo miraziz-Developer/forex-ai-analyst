@@ -210,6 +210,7 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
         if today > nth_weekday_after(decision_day, 1):
             return []
         retry = {r["market"] for r in existing if r["status"] == "SKIPPED" and r["note"] in RETRYABLE}
+        retry |= {m.name for m in FX_ONLY} - {r["market"] for r in existing}      # never evaluated (missing data)
         if not retry:
             return []
         db.execute(f"DELETE FROM trades WHERE model_version = ? AND decision_day = ? AND status = 'SKIPPED' "
@@ -224,6 +225,7 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
             continue
         c = ctx.caches[market.name]
         if decision_day not in c.days:
+            logger.warning("%s: no daily bar for %s; retried next cycle", market.name, decision_day)
             continue
         i = c.days.index(decision_day)
         feats = feature_row(ctx, market.name, i)

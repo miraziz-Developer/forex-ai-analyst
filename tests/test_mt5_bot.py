@@ -123,6 +123,24 @@ class Mt5BotTests(unittest.TestCase):
         mt5_bot.cycle(small, db2, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
         self.assertEqual(mt5_bot.cycle(late, db2, datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)), [])   # Wednesday: too late
 
+    def test_market_missing_its_decision_bar_is_evaluated_once_the_bar_arrives(self):
+        mt5 = FakeMT5()
+        days = weekday_days("2026-10-05", 12)
+        gap = context(days)
+        gap.caches["EURJPY"] = SimpleNamespace(days=[d for d in days if d != "2026-10-05"], f={"atr": [0.005] * 11})
+        with patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]), \
+                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62):
+            with patch.object(mt5_bot, "load_context", return_value=gap):
+                first = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+            with patch.object(mt5_bot, "load_context", return_value=context(days)):
+                later = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc))
+                again = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 9, 15, tzinfo=timezone.utc))
+        self.assertFalse([m for m in first if "EURJPY" in m])
+        self.assertTrue([m for m in later if "📌" in m and "EURJPY" in m])
+        self.assertEqual(len([m for m in later if "📌" in m]), 1)
+        self.assertEqual(again, [])
+
     def test_min_equity_explains_skipped_signals(self):
         # 0.01 lot * 0.015 stop * 100,000 per price unit = 15 money; at 0.5% that needs 3,000 equity
         self.assertAlmostEqual(mt5_bot.min_equity_for(FakeMT5(), "EURUSD", 0.015, 0.5), 3000.0)

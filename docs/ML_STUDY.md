@@ -93,3 +93,10 @@ evaluation criteria below are unchanged and are measured on the demo journal.
 the model graduates to an MT5 demo only if mean net > 0 with bootstrap
 P(mean > 0) >= 0.90 and profit factor >= 1.2. Otherwise it stays on paper or is
 dropped. First signal (decision day 2026-10-05): XAUUSD BUY, P = 0.60.
+
+**Data fix (2026-10-06).** Yahoo's EURJPY bar for Monday 2026-10-05 had its close
+0.013 above its high; the loader dropped such bars, so the bot never evaluated
+EURJPY that week (v2c would have bought at P 0.55). Bars are now kept with the
+range widened to include open and close, and a market that was never evaluated
+on a decision day is retried like a skipped signal. Historical studies used the
+old loader; the few affected bars do not change any verdict.
