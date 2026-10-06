@@ -89,3 +89,19 @@ future data. After fixing it (`load_yahoo`, cache key `v2`) every daily FX study
 was rerun; hourly data was not affected.
 
 donchian_d1 and ema_cross_d1 unchanged to two decimals (P 0.977 / 0.35); verdicts unchanged.
+
+## Daily rules rerun on clean Dukascopy bars (2026-10-06, data correction)
+
+Yahoo's FX daily bars are malformed in many years (docs/ML_STUDY.md), so the
+two daily rules were rerun with FX and gold bars from Dukascopy day candles
+(BTC keeps Yahoo). Same rules, same gate.
+
+| Rule | Trades | Win | Mean R | PF | P | Halves | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| donchian_d1 | 1187 | 28% | +0.13 | 1.20 | 0.94 | +0.07 / +0.19 | 5/11 | FAIL |
+| ema_cross_d1 | 416 | 36% | +0.01 | 1.03 | 0.57 | +0.05 / -0.02 | 6/11 | FAIL |
+
+Donchian's pooled result comes from BTC (+149R) and gold (+48R); the nine
+currency pairs together lose about -44R. Clean data confirms the earlier
+conclusion: daily trend following works on gold and crypto, not on currency
+pairs.
