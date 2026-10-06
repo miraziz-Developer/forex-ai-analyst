@@ -117,3 +117,7 @@ handled differently is not an edge: **the FX ML models have no demonstrated
 edge.** The 2026 models were retrained on the corrected data so live features
 and training match; the MT5 demo keeps running only as a free forward
 experiment, with the graduation criteria above unchanged.
+
+All earlier forex studies were rerun on the corrected loader the same day
+(forex rules, CFD trend, FX factors, forced flows, regime system, development):
+every verdict is unchanged (all FAIL).

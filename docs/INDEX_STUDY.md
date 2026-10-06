@@ -47,3 +47,39 @@ the market than that, or it adds nothing over just holding the index.
 If both pass, the one with the higher mean net per day held is adopted and an
 MT5 bot is built for it on the demo, with a forward test before any real money.
 If neither passes, nothing is built.
+
+## Result (2026-10-06) — IDX1 passes, IDX2 fails
+
+| Variant | Trades | Win | Mean net | PF | P(mean>0) | 2004-14 / 2015-26 | Indices + | Net/day vs drift | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| **IDX1 RSI(2)** | 1092 | 68% | **+0.199%** | **1.34** | **0.997** | +0.188% / +0.208% | **6/6** | 0.049% vs 0.012% (4.2x) | **PASS** |
+| IDX2 IBS | 2590 | 67% | +0.068% | 1.11 | 0.93 | +0.138% / +0.010% | 5/6 | 0.016% vs 0.012% | FAIL |
+
+Gold (information only): IDX1 +0.011% per trade over 155 trades, i.e. nothing.
+
+**Checks after the verdict (none changes the rule):**
+- *Independent re-implementation* reproduces 1092 trades, +0.199%, PF 1.34.
+- *Data.* No bar with a close outside its range. Yahoo's UK100 opens equal the
+  previous close (fake opens), and so do 798 US500 bars before 2022. On the three
+  indices with real opens (USTEC, DE40, JP225): next-open entry +0.181% (PF 1.25),
+  entry at the signal close +0.234% (PF 1.33); all six at the close +0.236%
+  (PF 1.42). The edge does not come from the fake opens; entering near the
+  close is, if anything, better.
+- *Neighbouring parameters* (not used for selection): RSI(2) < 5 / 15 / 20,
+  exit SMA 3 / 10, trend SMA 100 / 150: all positive on 6/6 indices, PF
+  1.22-1.54. Not a knife-edge.
+- *No decay after publication:* 2015-2026 is as good as 2004-2014.
+
+**Economics — real but small.** About 48 trades a year across six indices, each
+held about 4 days. Compounded, chronological, after costs and swaps:
+
+| Sizing | CAGR | Max drawdown | Losing years |
+|---|---|---|---|
+| risk 1% per trade (3 ATR stop) | 2.6% | -15% | 7 of 23 |
+| risk 2% per trade | 5.2% | -28% | 7 of 23 |
+| 50% of equity notional per trade | 4.7% | -20% | 7 of 23 |
+| 100% of equity notional per trade | 9.1% | -37% | 7 of 23 |
+
+Return / drawdown is about 0.24 whatever the sizing: a genuine edge, but alone
+it is a weak system (the crypto Donchian backtest is about 1.6). Its value is
+as a second, independent return stream next to crypto.
