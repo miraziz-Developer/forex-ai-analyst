@@ -22,6 +22,7 @@ import os
 import sqlite3
 import time
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -242,8 +243,13 @@ def cycle(mt5, db: sqlite3.Connection, now: datetime | None = None) -> list[str]
 def main() -> None:
     import MetaTrader5 as mt5
 
-    load_dotenv()
+    # The package is installed in site-packages, so look for .env in the folder the bot is started from.
+    env_file = Path.cwd() / ".env"
+    load_dotenv(env_file)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logger.info("settings: .env %s | risk %.2f%% | telegram %s", "found" if env_file.exists() else "NOT found",
+                env_float("FX_BOT_RISK_PCT", 0.5),
+                "on" if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID") else "off")
     if not mt5.initialize():
         raise SystemExit(f"MetaTrader 5 initialize failed: {mt5.last_error()}")
     require_demo(mt5)
