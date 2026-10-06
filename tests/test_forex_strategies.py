@@ -52,5 +52,21 @@ class RuleTests(unittest.TestCase):
         self.assertFalse(s.long_entry[10])
 
 
+class DailyStampTests(unittest.TestCase):
+    def test_fx_daily_bar_stamped_23utc_belongs_to_the_next_trading_day(self):
+        import tempfile
+        from datetime import datetime, timezone
+        from pathlib import Path
+        from unittest.mock import patch
+        from forex_ai_analyst.forex import data
+        payload = {"chart": {"result": [{"timestamp": [1759618800],        # Sun 2025-10-04 23:00 UTC = Mon London
+                                         "indicators": {"quote": [{"open": [1.1], "high": [1.2], "low": [1.0],
+                                                                   "close": [1.15], "volume": [0]}]}}]}}
+        with tempfile.TemporaryDirectory() as cache, patch.object(data, "_get", return_value=payload), \
+                patch.object(data, "CACHE_DIR", Path(cache)):
+            bars = data.load_yahoo(data.Market("T", "TEST=X", 0.0), "1d")
+        self.assertEqual(datetime.fromtimestamp(bars[0]["datetime"] / 1000, timezone.utc).date().isoformat(), "2025-10-05")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,17 @@ python3 app.py
 
 The app creates and migrates its own tables (signal journal, decisions, daily risk state, incidents, runtime controls, knowledge documents) in Turso. Render's disk is ephemeral, so all state lives in Turso.
 
+## Forex research and the FX ML paper test
+
+`forex_ai_analyst.forex` holds the forex work: the owner's MT5 bots, trend, carry/value,
+forced flows, a regime-switching system, SMC/ICT filters and a walk-forward ML model, each
+pre-registered and recorded in `docs/` (`FOREX_STUDY.md`, `TREND_CFD_STUDY.md`,
+`FX_FACTOR_STUDY.md`, `FORCED_FLOWS_STUDY.md`, `REGIME_SYSTEM_STUDY.md`,
+`DEVELOPMENT_STUDY.md`, `ML_STUDY.md`). None passed. The best candidate, a logistic model,
+runs as a **paper-only forward test** inside the service: every Monday close it scores ten
+markets and posts confident signals and their 5-day results to Telegram; it never trades.
+Research needs `pip install .[research]` (numpy, scikit-learn); the live service does not.
+
 ## Telegram
 
 Only the chat IDs in `TELEGRAM_CHAT_ID` are authorized. Send `/start` to open the button panel: status, recent signals, open VST positions, closed orders, P&L, knowledge base and PDF upload. **Foyda / zarar** shows the local journal separately from BingX's API-reported account income; account income can include manual activity, so it is never attributed to individual journal orders.

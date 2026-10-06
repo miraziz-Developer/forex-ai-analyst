@@ -59,3 +59,13 @@ trading.
 **Decision.** Nothing is tradable. The month-end flow is a candidate only for a
 new, pre-registered test on data not used here (for example a forward test from
 2026-11, about 12 events a year).
+
+## Data correction rerun (2026-10-06)
+
+Yahoo stamps daily FX bars at London midnight (23:00 UTC in summer); the loader
+had labelled each such bar with the previous calendar day. This shifted dates
+(weekday, month boundaries, cross-asset alignment) but never let a rule see
+future data. After fixing it (`load_yahoo`, cache key `v2`) every daily FX study
+was rerun; hourly data was not affected.
+
+Month-end flow is **weaker** with correct dates: 231 events, +0.022%/event, P 0.66 (was +0.061%, P 0.88), halves -0.083% / +0.127%. Part of its earlier promise came from misaligned month ends; it is no longer a strong candidate. Risk-off: -0.117%/event, P 0.34. Gotobi used hourly data and is unchanged. Verdicts unchanged.

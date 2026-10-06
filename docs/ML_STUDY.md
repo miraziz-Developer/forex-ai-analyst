@@ -57,3 +57,33 @@ candidate for a forward test (paper only), not for money.
 
 A deprecation-only change (`np.timedelta64(1, "D")` instead of `+ 1` in the
 calendar feature) was made after the run; it does not change any value.
+
+## Data correction rerun (2026-10-06)
+
+Yahoo stamps daily FX bars at London midnight (23:00 UTC in summer); the loader
+had labelled each such bar with the previous calendar day. This shifted dates
+(weekday, month boundaries, cross-asset alignment) but never let a rule see
+future data. After fixing it (`load_yahoo`, cache key `v2`) every daily FX study
+was rerun; hourly data was not affected.
+
+logistic: 2209 trades, hit 52.6%, +0.028%/trade, PF 1.05, P 0.76, halves -0.011% / +0.146%, 8/10 markets; gradient boosting: +0.010%, PF 1.02, P 0.62, 6/10. Verdicts unchanged. The forward-test model is trained on the corrected data.
+
+## Forward (paper) test — pre-registration (2026-10-06)
+
+The logistic model is not proven, so it is followed forward with paper trades
+only (`src/forex_ai_analyst/forex/ml_shadow.py`, daily job at 00:45 UTC in the
+live service). No order is ever sent.
+
+- Model `fx_logistic_2026`: trained on every sample whose label ended before
+  2026-01-01 (corrected dates), exported to JSON and applied with the same
+  feature code as in training (pure Python; identical to scikit-learn to 1e-16).
+- Each Monday close: score all ten markets, record P(up) >= 0.55 as BUY and
+  <= 0.45 as SELL. Entry = next open, exit = close five trading days later,
+  same cost model; results and running totals are sent to Telegram.
+- Every January the model is retrained the same way (`python3 -m
+  forex_ai_analyst.forex.ml_model <year>`) and committed; nothing else changes.
+
+**Evaluation, fixed now:** after at least 26 weeks and 60 closed paper trades,
+the model graduates to an MT5 demo only if mean net > 0 with bootstrap
+P(mean > 0) >= 0.90 and profit factor >= 1.2. Otherwise it stays on paper or is
+dropped. First signal (decision day 2026-10-05): XAUUSD BUY, P = 0.60.

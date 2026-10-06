@@ -52,3 +52,13 @@ MT5 demo trader.
   selected: on discovery they did not improve the modules.
 - The holdout (2021 onward) stays unread and can still be used for a future,
   separately pre-registered idea.
+
+## Data correction rerun (2026-10-06)
+
+Yahoo stamps daily FX bars at London midnight (23:00 UTC in summer); the loader
+had labelled each such bar with the previous calendar day. This shifted dates
+(weekday, month boundaries, cross-asset alignment) but never let a rule see
+future data. After fixing it (`load_yahoo`, cache key `v2`) every daily FX study
+was rerun; hourly data was not affected.
+
+Same configurations selected, identical discovery and validation figures; verdicts unchanged, holdout still unread.
