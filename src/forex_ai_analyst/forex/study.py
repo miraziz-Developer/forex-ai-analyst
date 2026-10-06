@@ -22,8 +22,14 @@ from forex_ai_analyst.lab.data import resample
 GATE = {"min_trades": 100, "min_bootstrap_p": 0.90, "min_profit_factor": 1.2, "min_market_share_positive": 0.6}
 
 
+CLEAN_DAILY = False      # --clean: daily FX bars from Dukascopy day candles instead of Yahoo (docs/ML_STUDY.md)
+
+
 def bars_for(market, timeframe: str) -> list[dict]:
     if timeframe == "D1":
+        if CLEAN_DAILY and not market.pct:            # crypto keeps Yahoo, whose daily bars are sound
+            from forex_ai_analyst.forex import dukascopy
+            return dukascopy.days(market.name, 2004, datetime.now(timezone.utc).year)
         return load_yahoo(market, "1d")
     hourly = load_yahoo(market, "1h")
     return hourly if timeframe == "H1" else resample(hourly, 4)
@@ -97,6 +103,21 @@ def evaluate(name: str) -> dict:
 
 
 def main() -> None:
+    global CLEAN_DAILY
+    import sys
+    if "--clean" in sys.argv:          # data correction rerun of the daily rules only
+        CLEAN_DAILY = True
+        results = [evaluate(name) for name, spec in STRATEGIES.items() if spec[1] == "D1"]
+        Path("research_output/forex_study_clean_daily.json").write_text(json.dumps(
+            {"generated_at": datetime.now(timezone.utc).isoformat(), "gate": GATE, "results": results}, indent=2) + "\n")
+        for r in results:
+            s = r["pooled"]
+            print(f"{r['name']:18s} trades {s.get('trades', 0):5d} win {s.get('win_rate')} meanR {s.get('mean_r')} "
+                  f"PF {s.get('profit_factor')} P {r['p_mean_positive']} halves {r['halves']['first'].get('mean_r')}/"
+                  f"{r['halves']['second'].get('mean_r')} markets+ {r['markets_positive']} per-market "
+                  f"{ {m: v.get('total_r') for m, v in r['per_market'].items()} } -> "
+                  f"{'PASS' if r['passes'] else 'FAIL: ' + '; '.join(r['reasons'])}")
+        return
     results = [evaluate(name) for name in STRATEGIES]
     out = Path("research_output") / "forex_study.json"
     out.parent.mkdir(parents=True, exist_ok=True)

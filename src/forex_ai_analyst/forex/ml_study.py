@@ -26,8 +26,8 @@ LONG_T, SHORT_T = 0.55, 0.45
 GATE = {"min_trades": 200, "min_bootstrap_p": 0.90, "min_profit_factor": 1.2, "min_market_share_positive": 0.6}
 
 
-def build_dataset(with_cot: bool = False, horizon: int = HORIZON) -> tuple[np.ndarray, np.ndarray, list[dict], list[str]]:
-    ctx = load_context(FX_ONLY, with_cot=with_cot)
+def build_dataset(with_cot: bool = False, horizon: int = HORIZON, source: str = "yahoo") -> tuple[np.ndarray, np.ndarray, list[dict], list[str]]:
+    ctx = load_context(FX_ONLY, with_cot=with_cot, source=source)
     rows, labels, meta = [], [], []
     feature_names: list[str] = []
     for market in FX_ONLY:
@@ -169,9 +169,29 @@ def main() -> None:
                                                    "features": names, "report": report}, indent=2) + "\n")
 
 
+def main_clean() -> None:
+    """Data correction (docs/ML_STUDY.md): v1, gradient boosting, v2 and v2c unchanged, on Dukascopy daily bars."""
+    report = {}
+    X, y, meta, _ = build_dataset(source="dukascopy")
+    print(f"dataset (dukascopy): {len(y)} samples, base rate up {y.mean():.3f}")
+    report["v1_logistic"] = evaluate(walk_forward(X, y, meta, models()["logistic"]))
+    report["v1_gradient_boosting"] = evaluate(walk_forward(X, y, meta, models()["gradient_boosting"]))
+    X, y, meta, _ = build_dataset(with_cot=True, source="dukascopy")
+    report["v2_cot"] = evaluate(walk_forward(X, y, meta, models()["logistic"]))
+    report["v2c_cot_c01"] = evaluate(walk_forward(X, y, meta, models(c=0.1)["logistic"]))
+    for name, r in report.items():
+        print(f"{name}: {json.dumps({k: v for k, v in r.items() if k != 'per_market_total_pct'})}")
+    out = Path("research_output")
+    out.mkdir(exist_ok=True)
+    (out / "ml_clean_data_study.json").write_text(json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(),
+                                                             "gate": GATE, "report": report}, indent=2) + "\n")
+
+
 if __name__ == "__main__":
     import sys
-    if "--improve" in sys.argv:
+    if "--clean" in sys.argv:
+        main_clean()
+    elif "--improve" in sys.argv:
         main_improvements()
     elif "--cot" in sys.argv:
         main_v2()

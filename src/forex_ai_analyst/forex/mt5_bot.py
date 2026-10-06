@@ -13,20 +13,23 @@ sized so that the stop costs FX_BOT_RISK_PCT of equity.
 The bot refuses to trade an account that is not a demo account.
 
 Optional .env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, FX_BOT_RISK_PCT (0.5),
-FX_BOT_DB (fx_ml_demo.sqlite), FX_SYMBOL_MAP (e.g. "XAUUSD=GOLD,EURUSD=EURUSD.").
+FX_BOT_DB (fx_ml_demo.sqlite), FX_SYMBOL_MAP (e.g. "XAUUSD=GOLD,EURUSD=EURUSD."), and the portfolio,
+spread and health limits documented in mt5_guards.py. Signals are placed strongest first.
 """
 from __future__ import annotations
 
 import logging
 import os
 import sqlite3
+import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import ml_model
+from forex_ai_analyst.forex import fix_live, ml_model, trend_live
+from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.ml_features import feature_row, load_context
 from forex_ai_analyst.forex.regime_system_study import FX_ONLY
 from forex_ai_analyst.shared.notifier import send_telegram_message
@@ -35,7 +38,7 @@ logger = logging.getLogger("fx_ml_demo")
 MAGIC = 742026
 STOP_ATR = 3.0
 _SUFFIXES = ("", "m", ".", "#", "-ECN", ".r", "c", "pro", ".a")
-RETRYABLE = ("symbol not found", "below minimum volume")
+RETRYABLE = ("symbol not found", "below minimum volume", "spread too wide", "news blackout")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS trades (
  id INTEGER PRIMARY KEY AUTOINCREMENT, model_version TEXT NOT NULL, decision_day TEXT NOT NULL, market TEXT NOT NULL,
@@ -73,6 +76,7 @@ def open_db(path: str | None = None) -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     db.execute(SCHEMA)
     db.commit()
+    guards.migrate(db)
     return db
 
 
@@ -106,6 +110,12 @@ def volume_for(mt5, symbol: str, stop_distance: float, risk_money: float) -> flo
     return min(volume, info.volume_max) if volume >= info.volume_min else 0.0
 
 
+def risk_of(mt5, symbol: str, volume: float, stop_distance: float) -> float:
+    """Money lost if `volume` lots move `stop_distance` against the position."""
+    info = mt5.symbol_info(symbol)
+    return volume * stop_distance * info.trade_tick_value / (info.trade_tick_size or info.point)
+
+
 def min_equity_for(mt5, symbol: str, stop_distance: float, risk_pct: float) -> float:
     """Equity needed for the broker's minimum volume to fit the risk budget."""
     info = mt5.symbol_info(symbol)
@@ -122,7 +132,8 @@ def _filling(mt5, symbol: str) -> int:
     return mt5.ORDER_FILLING_RETURN
 
 
-def _send(mt5, symbol: str, side: int, volume: float, sl: float | None, comment: str, position: int | None = None):
+def _send(mt5, symbol: str, side: int, volume: float, sl: float | None, comment: str, position: int | None = None,
+          tp: float | None = None):
     tick = mt5.symbol_info_tick(symbol)
     buy = side > 0
     request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": volume,
@@ -131,6 +142,8 @@ def _send(mt5, symbol: str, side: int, volume: float, sl: float | None, comment:
                "type_filling": _filling(mt5, symbol)}
     if sl is not None:
         request["sl"] = sl
+    if tp is not None:
+        request["tp"] = tp
     if position is not None:
         request["position"] = position
     return mt5.order_send(request)
@@ -142,9 +155,13 @@ def close_due(mt5, db: sqlite3.Connection, today: str) -> list[str]:
     for row in db.execute("SELECT * FROM trades WHERE status = 'OPEN' AND exit_day < ?", [today]).fetchall():
         positions = mt5.positions_get(ticket=row["ticket"]) or ()
         if not positions:
-            db.execute("UPDATE trades SET status = 'CLOSED', note = ? WHERE id = ?",
-                       ["closed before the exit day (emergency stop)", row["id"]])
-            messages.append(f"⛔ {row['market']}: favqulodda stop oldinroq yopgan")
+            deals = getattr(mt5, "history_deals_get", lambda **_: None)(position=row["ticket"]) or ()
+            profit = sum(d.profit + d.commission + d.swap for d in deals) if deals else None
+            db.execute("UPDATE trades SET status = 'CLOSED', profit = ?, note = ? WHERE id = ?",
+                       [profit, "closed before the exit day (stop or take-profit)", row["id"]])
+            result = "" if profit is None else f": {profit:+.2f}"
+            icon = "🎯" if profit and profit > 0 else "⛔"
+            messages.append(f"{icon} {row['market']}: stop yoki TP oldinroq yopgan{result}")
             continue
         position = positions[0]
         result = _send(mt5, row["symbol"], -row["side"], position.volume, None, "fx-ml exit", position=position.ticket)
@@ -163,7 +180,7 @@ LABELS = {"fx_logistic": "v1", "fx_logistic_cot_c01": "v2c"}
 _COT_WARNED: set[str] = set()
 
 
-def decide(mt5, db: sqlite3.Connection, now: datetime, account) -> list[str]:
+def decide(mt5, db: sqlite3.Connection, now: datetime, account, paused: bool = False) -> list[str]:
     """Run every exported model family on the same Monday close; each has its own journal rows."""
     today = now.date().isoformat()
     models = ml_model.load_all()
@@ -188,13 +205,22 @@ def decide(mt5, db: sqlite3.Connection, now: datetime, account) -> list[str]:
             continue
         ctx.cot = cot_data if model.get("uses_cot") else None
         label = LABELS.get(model.get("family", ""), model["version"])
-        messages += [f"[{label}] {m}" for m in decide_model(mt5, db, now, account, ctx, model, decision_day)]
+        messages += [f"[{label}] {m}" for m in decide_model(mt5, db, now, account, ctx, model, decision_day, paused)]
     ctx.cot = cot_data
     return [m for m in messages if m]
 
 
-def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model: dict, decision_day: str) -> list[str]:
+def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model: dict, decision_day: str,
+                 paused: bool = False) -> list[str]:
     today = now.date().isoformat()
+    if guards.model_disabled(db, model["version"]):
+        key = f"disabled_note:{model['version']}:{decision_day}"
+        if guards.get(db, key):
+            return []
+        guards.put(db, key, 1)
+        s = guards.model_stats(db, model["version"])
+        return [f"⛔ model o'chirilgan: {s['trades']} yopiq trade, PF {s['pf']:.2f} < {guards.HEALTH_MIN_PF} "
+                "(qayta yoqish: .env FX_BOT_NO_AUTO_DISABLE=1)"]
     existing = db.execute("SELECT market, status, note FROM trades WHERE model_version = ? AND decision_day = ?",
                           [model["version"], decision_day]).fetchall()
     if existing:
@@ -203,6 +229,7 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
         if today > nth_weekday_after(decision_day, 1):
             return []
         retry = {r["market"] for r in existing if r["status"] == "SKIPPED" and r["note"] in RETRYABLE}
+        retry |= {m.name for m in FX_ONLY} - {r["market"] for r in existing}      # never evaluated (missing data)
         if not retry:
             return []
         db.execute(f"DELETE FROM trades WHERE model_version = ? AND decision_day = ? AND status = 'SKIPPED' "
@@ -211,18 +238,21 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
         retry = None
     risk_money = account.equity * env_float("FX_BOT_RISK_PCT", 0.5) / 100
     exit_day = nth_weekday_after(decision_day, 5)
-    messages = []
+    messages, candidates = [], []
     for market in FX_ONLY:
         if retry is not None and market.name not in retry:
             continue
         c = ctx.caches[market.name]
         if decision_day not in c.days:
+            logger.warning("%s: no daily bar for %s; retried next cycle", market.name, decision_day)
             continue
         i = c.days.index(decision_day)
         feats = feature_row(ctx, market.name, i)
         if feats is None:
             continue
-        p = ml_model.probability_up(model, feats)
+        candidates.append((market, c, i, ml_model.probability_up(model, feats)))
+    # strongest signals first, so a full risk budget is spent on them rather than on list order
+    for market, c, i, p in sorted(candidates, key=lambda x: -abs(x[3] - 0.5)):
         side = 1 if p >= model["long_threshold"] else -1 if p <= model["short_threshold"] else 0
         base = [model["version"], decision_day, market.name, side, p, exit_day, now.isoformat()]
         if side == 0:
@@ -245,18 +275,47 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
                                 f"risk chegarasidan katta. Kerakli balans ≈ ${need:,.0f} (hozir ${account.equity:,.0f})")
             continue
         tick = mt5.symbol_info_tick(symbol)
-        stop = (tick.ask if side > 0 else tick.bid) - side * stop_distance
-        result = _send(mt5, symbol, side, volume, stop, f"fx-ml {model['version']}")
+        info = mt5.symbol_info(symbol)
+        mpp = info.trade_tick_value / (info.trade_tick_size or info.point)
+        volume = guards.stress_volume(market.name, volume, mpp, tick.ask, account.equity, info.volume_step,
+                                      info.volume_min)
+        risk = risk_of(mt5, symbol, volume, stop_distance)
+        stress = guards.stress_loss(market.name, volume, mpp, tick.ask)
+        crowded = guards.currency_room(db, account.equity, market.name, side, risk)
+        news = guards.news_blackout(market.name, now)
+        blocked = ("drawdown pause" if paused else
+                   "stress limit" if volume <= 0 or not guards.stress_room(db, account.equity, stress) else
+                   "portfolio risk limit" if not guards.risk_room(db, account.equity, risk) else
+                   "currency risk limit" if crowded else
+                   "news blackout" if news else
+                   "spread too wide" if not guards.spread_ok(tick.ask, tick.bid, stop_distance) else None)
+        if blocked:
+            db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, side, prob, exit_day, "
+                       "created_at, status, note) VALUES (?, ?, ?, ?, ?, ?, ?, 'SKIPPED', ?)", base + [blocked])
+            why = {"drawdown pause": "hisob cho'qqidan limitdan ko'p tushgan",
+                   "stress limit": "tarixdagi eng yomon kun takrorlansa zarar limitdan oshadi",
+                   "portfolio risk limit": "umumiy ochiq risk limiti to'lgan",
+                   "currency risk limit": f"{crowded} bo'yicha bir tomonlama risk limiti to'lgan",
+                   "news blackout": f"muhim yangilik yaqin ({news}), keyinroq qayta uriniladi",
+                   "spread too wide": "spread juda keng, keyinroq qayta uriniladi"}[blocked]
+            messages.append(f"⏸ {market.name} {'BUY' if side > 0 else 'SELL'} signali kutib turibdi: {why}")
+            continue
+        price = tick.ask if side > 0 else tick.bid
+        stop = price - side * stop_distance
+        tp_atr = ml_model.FAMILIES.get(model.get("family", ""), {}).get("tp_atr")
+        target = price + side * tp_atr * c.f["atr"][i] if tp_atr else None
+        result = _send(mt5, symbol, side, volume, stop, f"fx-ml {model['version']}", tp=target)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             messages.append(f"❌ {market.name}: order rad etildi ({getattr(result, 'comment', mt5.last_error())})")
             continue
         db.execute("INSERT OR IGNORE INTO trades (model_version, decision_day, market, symbol, side, prob, ticket, "
-                   "volume, entry_price, stop, exit_day, created_at, status) "
-                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')",
+                   "volume, entry_price, stop, exit_day, created_at, status, risk_money, requested_price, slippage, stress_money) "
+                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)",
                    [model["version"], decision_day, market.name, symbol, side, p, result.order, volume, result.price,
-                    stop, exit_day, now.isoformat()])
+                    stop, exit_day, now.isoformat(), risk, price, side * (result.price - price), stress])
         messages.append(f"📌 {market.name} {'BUY' if side > 0 else 'SELL'} {volume} lot @ {result.price} "
-                        f"(ehtimol {p:.0%}, stop {stop:.5g}, {exit_day} yopilishidan keyin chiqadi)")
+                        f"(ehtimol {p:.0%}, stop {stop:.5g}{f', TP {target:.5g}' if target else ''}, "
+                        f"{exit_day} yopilishidan keyin chiqadi)")
     db.commit()
     return messages
 
@@ -264,7 +323,9 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
 def cycle(mt5, db: sqlite3.Connection, now: datetime | None = None) -> list[str]:
     now = now or datetime.now(timezone.utc)
     account = require_demo(mt5)
-    return close_due(mt5, db, now.date().isoformat()) + decide(mt5, db, now, account)
+    paused, change = guards.drawdown_pause(db, account.equity)
+    return ([change] if change else []) + close_due(mt5, db, now.date().isoformat()) + \
+        decide(mt5, db, now, account, paused)
 
 
 def main() -> None:
@@ -282,21 +343,47 @@ def main() -> None:
     require_demo(mt5)
     db = open_db()
     notify("🧪 FX ML demo bot ishga tushdi (faqat DEMO hisob)")
-    last_error_alert = 0.0
+    alerts: dict[str, float] = {}
+    last_slow = -1e9
     while True:
+        slow = time.monotonic() - last_slow >= 15 * 60
+        if slow:
+            last_slow = time.monotonic()        # set first, so a failing engine is not retried every minute
+        messages = tick(mt5, db, datetime.now(timezone.utc), slow, alerts)
+        if messages:
+            notify("🧪 FX demo\n" + "\n".join(messages))
+        time.sleep(60)
+
+
+def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[str, float]) -> list[str]:
+    """One minute of the bot. slow=True also runs the 15-minute engines (risk state, weekly closes, ML,
+    trend, report). Every engine is isolated: one failing never stops the others (the month-end fix
+    must not be missed because a data source for the ML model is down)."""
+    me = sys.modules[__name__]
+    # the fix rule is time-critical (3-minute windows), so it runs before the slower engines
+    engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
+    if slow:
+        engines += [("risk", lambda: [m for m in [guards.drawdown_pause(db, require_demo(mt5).equity)[1]] if m]),
+                    ("close", lambda: close_due(mt5, db, now.date().isoformat())),
+                    ("ml", lambda: decide(mt5, db, now, require_demo(mt5), _paused(db))),
+                    ("trend", lambda: trend_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
+                    ("report", lambda: [r] if (r := guards.weekly_report(db, mt5.account_info().equity, now))
+                     else [])]
+    messages: list[str] = []
+    for name, run in engines:
         try:
-            messages = cycle(mt5, db)
-            if messages:
-                notify("🧪 FX ML demo\n" + "\n".join(messages))
+            messages += run()
         except SystemExit:
             raise
         except Exception as exc:
-            logger.exception("cycle failed")
-            if time.monotonic() - last_error_alert > 6 * 3600:
-                notify(f"⚠️ FX ML demo bot xatosi: {type(exc).__name__}: {exc}")
-                last_error_alert = time.monotonic()
-        time.sleep(15 * 60)
+            logger.exception("%s engine failed", name)
+            if time.monotonic() - alerts.get(name, -1e9) > 6 * 3600:
+                messages.append(f"⚠️ {name} xatosi: {type(exc).__name__}: {exc}")
+                alerts[name] = time.monotonic()
+    return messages
 
+def _paused(db: sqlite3.Connection) -> bool:
+    return guards.get(db, "dd_paused", "0") == "1"
 
 if __name__ == "__main__":
     main()

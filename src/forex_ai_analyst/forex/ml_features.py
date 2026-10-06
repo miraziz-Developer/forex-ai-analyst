@@ -142,10 +142,17 @@ def feature_row(ctx: Context, name: str, i: int) -> dict | None:
     return feats
 
 
-def load_context(markets: list[Market], with_cot: bool = False) -> Context:
+def load_context(markets: list[Market], with_cot: bool = False, source: str = "yahoo") -> Context:
+    """source "yahoo" (what the live bot uses today) or "dukascopy": clean daily FX bars (real open/close;
+    Yahoo's FX daily bars are malformed in many years, docs/ML_STUDY.md). S&P 500 and VIX come from Yahoo."""
     from forex_ai_analyst.forex.data import load_yahoo
-    ctx = build_context(markets, {m.name: load_yahoo(m, "1d") for m in markets}, load_yahoo(SPX, "1d"),
-                        load_yahoo(VIX, "1d"), fx_factors.load_rates())
+    if source == "dukascopy":
+        from forex_ai_analyst.forex import dukascopy
+        last = datetime.now(timezone.utc).year
+        fx = {m.name: dukascopy.days(m.name, 2004, last) for m in markets}
+    else:
+        fx = {m.name: load_yahoo(m, "1d") for m in markets}
+    ctx = build_context(markets, fx, load_yahoo(SPX, "1d"), load_yahoo(VIX, "1d"), fx_factors.load_rates())
     if with_cot:
         from forex_ai_analyst.forex.cot import load_positions
         ctx.cot = load_positions()

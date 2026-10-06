@@ -67,6 +67,21 @@ class DailyStampTests(unittest.TestCase):
             bars = data.load_yahoo(data.Market("T", "TEST=X", 0.0), "1d")
         self.assertEqual(datetime.fromtimestamp(bars[0]["datetime"] / 1000, timezone.utc).date().isoformat(), "2025-10-05")
 
+    def test_bar_with_close_just_outside_its_range_is_kept_and_widened(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from forex_ai_analyst.forex import data
+        payload = {"chart": {"result": [{"timestamp": [1759618800],
+                                         "indicators": {"quote": [{"open": [177.507], "high": [177.507],
+                                                                   "low": [176.211], "close": [177.52],
+                                                                   "volume": [0]}]}}]}}
+        with tempfile.TemporaryDirectory() as cache, patch.object(data, "_get", return_value=payload), \
+                patch.object(data, "CACHE_DIR", Path(cache)):
+            bars = data.load_yahoo(data.Market("T", "TEST=X", 0.0), "1d")
+        self.assertEqual(len(bars), 1)
+        self.assertEqual(bars[0]["high"], 177.52)
+
 
 if __name__ == "__main__":
     unittest.main()
