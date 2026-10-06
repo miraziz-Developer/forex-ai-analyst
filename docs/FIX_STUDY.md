@@ -40,3 +40,18 @@ Dukascopy's ECN spread.
 
 If one passes, it becomes a candidate for the MT5 demo (one trade per pair per
 month). If neither passes, the idea is recorded as failed.
+
+## Result (2026-10-06) — neither variant passes
+
+All 129 month ends x 4 pairs had data (516 trades), real bid/ask both ways.
+
+| Variant | Trades | Hit | Mean net | PF | P(mean>0) | 2016-20 / 2021-26 | Pairs + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| FIX1 every month end | 516 | 50.8% | +1.4 bp | 1.09 | 0.67 | -0.7 / +3.3 bp | 4/4 | FAIL |
+| FIX2 large pre-fix move | 278 | 52.2% | +3.9 bp | 1.24 | 0.81 | -3.2 / +9.1 bp | 3/4 | FAIL |
+
+The direction is the one the literature predicts and every pair but USDJPY in
+FIX2 is positive, but the evidence is far from the 0.95 bar and 2016-2020 lost
+money. Not adopted. Because the recent half is positive, this is the one
+idea worth re-testing later on fresh data (from October 2026 on), as a new
+pre-registered trial with these exact rules — not by tuning them now.
