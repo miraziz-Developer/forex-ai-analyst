@@ -42,5 +42,9 @@ January on all rows whose exit lies before that year; test years 2014-2026.
 4. mean net > 0 in 2014-2019 and in 2020-2026;
 5. at least 6 of the 10 markets with a positive total.
 
+**Diagnostic (not a gate):** hit rate and mean net by confidence band
+(0.55-0.57, 0.57-0.60, 0.60-0.65, 0.65+), to see whether the model can tell a
+strong signal from a weak one.
+
 A passing model becomes an MT5 demo candidate with retraining built in. If
 neither passes, the result is recorded.

@@ -188,7 +188,19 @@ def evaluate(trades: list[dict]) -> dict:
         reasons.append("not positive in both halves")
     if s["markets_positive"] < GATE["min_positive"]:
         reasons.append(f"only {s['markets_positive']}/10 markets positive")
-    return {**s, "passes": not reasons, "reasons": reasons}
+    return {**s, "passes": not reasons, "reasons": reasons, "by_confidence": by_confidence(trades)}
+
+
+def by_confidence(trades: list[dict]) -> list[dict]:
+    """Diagnostic only (not a gate): does a more confident signal win more often and earn more?"""
+    edges, out = (0.55, 0.57, 0.60, 0.65, 1.01), []
+    for lo, hi in zip(edges, edges[1:]):
+        sel = [t["net"] for t in trades if lo <= max(t["prob"], 1 - t["prob"]) < hi]
+        if sel:
+            out.append({"confidence": f"{lo:.2f}-{min(hi, 1.0):.2f}", "trades": len(sel),
+                        "hit_rate": round(sum(x > 0 for x in sel) / len(sel), 3),
+                        "mean_net_bp": round(sum(sel) / len(sel) * 1e4, 2)})
+    return out
 
 
 def prefetch() -> None:

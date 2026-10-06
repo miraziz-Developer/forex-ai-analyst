@@ -51,3 +51,11 @@ class H1StudyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfidenceTests(unittest.TestCase):
+    def test_bands_use_distance_from_one_half_for_both_sides(self):
+        trades = [{"prob": 0.56, "net": 0.001}, {"prob": 0.44, "net": -0.001}, {"prob": 0.70, "net": 0.002}]
+        bands = {b["confidence"]: b for b in h1.by_confidence(trades)}
+        self.assertEqual(bands["0.55-0.57"]["trades"], 2)
+        self.assertEqual(bands["0.65-1.00"]["hit_rate"], 1.0)
