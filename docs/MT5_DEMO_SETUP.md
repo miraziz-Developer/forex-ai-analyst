@@ -39,6 +39,13 @@ The bot checks every 15 minutes. After each Monday close it may open positions
 USDCHF, USDJPY, EURJPY, GBPJPY and XAUUSD, each with a 3 ATR emergency stop and
 0.5% of equity at risk, and closes them after the fifth trading day's close.
 
+**Month-end fix forward test.** The same bot also runs the London 4pm fix
+rule (docs/FIX_STUDY.md) on EURUSD, GBPUSD, USDJPY and AUDUSD: on the last
+weekday of each month it samples prices at 15:00 and 15:55 London, enters
+against the move at 16:03 and exits at 12:00 London the next weekday
+(`[fix]` in Telegram, 0.25% risk per trade via `FX_FIX_RISK_PCT`). The bot
+must be running from before 15:00 London on that day.
+
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
   of equity; when the budget is full the strongest signals have been placed

@@ -55,3 +55,17 @@ FIX2 is positive, but the evidence is far from the 0.95 bar and 2016-2020 lost
 money. Not adopted. Because the recent half is positive, this is the one
 idea worth re-testing later on fresh data (from October 2026 on), as a new
 pre-registered trial with these exact rules — not by tuning them now.
+
+## Forward test on the MT5 demo (from October 2026)
+
+`fix_live.py` runs the exact rule above inside the demo bot (checked every
+minute): samples at 15:00 and 15:55 London on the last weekday of the month,
+enters against the move at 16:03, exits at 12:00 London on the next weekday,
+journalled as `fix_month_end_v1` (the pre-fix move is stored, so FIX2 is the
+subset with |move| >= 0.10%). Sizing: a 1% emergency stop costing 0.25% of
+equity (`FX_FIX_RISK_PCT`), plus the portfolio, stress and drawdown guards.
+About 48 trades a year on four pairs.
+
+**Evaluation, fixed now:** after 24 month ends (96 trades), pooled with
+nothing from the backtest: FIX1 or FIX2 graduates only with mean net > 0,
+month-block bootstrap P(mean > 0) >= 0.90 and profit factor >= 1.2.

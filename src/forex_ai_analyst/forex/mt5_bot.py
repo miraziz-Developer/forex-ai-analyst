@@ -21,13 +21,14 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import ml_model
+from forex_ai_analyst.forex import fix_live, ml_model
 from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.ml_features import feature_row, load_context
 from forex_ai_analyst.forex.regime_system_study import FX_ONLY
@@ -342,23 +343,30 @@ def main() -> None:
     require_demo(mt5)
     db = open_db()
     notify("🧪 FX ML demo bot ishga tushdi (faqat DEMO hisob)")
-    last_error_alert = 0.0
+    last_error_alert, last_ml = 0.0, 0.0
     while True:
         try:
-            messages = cycle(mt5, db)
+            now = datetime.now(timezone.utc)
+            messages = []
+            if time.monotonic() - last_ml >= 15 * 60:          # the weekly ML models: every 15 minutes
+                messages += cycle(mt5, db, now)
+                last_ml = time.monotonic()
+                report = guards.weekly_report(db, mt5.account_info().equity, now)
+                if report:
+                    notify(report)
+            account = require_demo(mt5)                       # the month-end fix rule: every minute
+            paused = guards.get(db, "dd_paused", "0") == "1"
+            messages += fix_live.cycle(mt5, db, now, account, paused, sys.modules[__name__])
             if messages:
-                notify("🧪 FX ML demo\n" + "\n".join(messages))
-            report = guards.weekly_report(db, mt5.account_info().equity, datetime.now(timezone.utc))
-            if report:
-                notify(report)
+                notify("🧪 FX demo\n" + "\n".join(messages))
         except SystemExit:
             raise
         except Exception as exc:
             logger.exception("cycle failed")
             if time.monotonic() - last_error_alert > 6 * 3600:
-                notify(f"⚠️ FX ML demo bot xatosi: {type(exc).__name__}: {exc}")
+                notify(f"⚠️ FX demo bot xatosi: {type(exc).__name__}: {exc}")
                 last_error_alert = time.monotonic()
-        time.sleep(15 * 60)
+        time.sleep(60)
 
 
 if __name__ == "__main__":
