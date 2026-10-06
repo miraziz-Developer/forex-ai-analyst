@@ -122,7 +122,8 @@ def _filling(mt5, symbol: str) -> int:
     return mt5.ORDER_FILLING_RETURN
 
 
-def _send(mt5, symbol: str, side: int, volume: float, sl: float | None, comment: str, position: int | None = None):
+def _send(mt5, symbol: str, side: int, volume: float, sl: float | None, comment: str, position: int | None = None,
+          tp: float | None = None):
     tick = mt5.symbol_info_tick(symbol)
     buy = side > 0
     request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": volume,
@@ -131,6 +132,8 @@ def _send(mt5, symbol: str, side: int, volume: float, sl: float | None, comment:
                "type_filling": _filling(mt5, symbol)}
     if sl is not None:
         request["sl"] = sl
+    if tp is not None:
+        request["tp"] = tp
     if position is not None:
         request["position"] = position
     return mt5.order_send(request)
@@ -142,9 +145,13 @@ def close_due(mt5, db: sqlite3.Connection, today: str) -> list[str]:
     for row in db.execute("SELECT * FROM trades WHERE status = 'OPEN' AND exit_day < ?", [today]).fetchall():
         positions = mt5.positions_get(ticket=row["ticket"]) or ()
         if not positions:
-            db.execute("UPDATE trades SET status = 'CLOSED', note = ? WHERE id = ?",
-                       ["closed before the exit day (emergency stop)", row["id"]])
-            messages.append(f"⛔ {row['market']}: favqulodda stop oldinroq yopgan")
+            deals = getattr(mt5, "history_deals_get", lambda **_: None)(position=row["ticket"]) or ()
+            profit = sum(d.profit + d.commission + d.swap for d in deals) if deals else None
+            db.execute("UPDATE trades SET status = 'CLOSED', profit = ?, note = ? WHERE id = ?",
+                       [profit, "closed before the exit day (stop or take-profit)", row["id"]])
+            result = "" if profit is None else f": {profit:+.2f}"
+            icon = "🎯" if profit and profit > 0 else "⛔"
+            messages.append(f"{icon} {row['market']}: stop yoki TP oldinroq yopgan{result}")
             continue
         position = positions[0]
         result = _send(mt5, row["symbol"], -row["side"], position.volume, None, "fx-ml exit", position=position.ticket)
@@ -245,8 +252,11 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
                                 f"risk chegarasidan katta. Kerakli balans ≈ ${need:,.0f} (hozir ${account.equity:,.0f})")
             continue
         tick = mt5.symbol_info_tick(symbol)
-        stop = (tick.ask if side > 0 else tick.bid) - side * stop_distance
-        result = _send(mt5, symbol, side, volume, stop, f"fx-ml {model['version']}")
+        price = tick.ask if side > 0 else tick.bid
+        stop = price - side * stop_distance
+        tp_atr = ml_model.FAMILIES.get(model.get("family", ""), {}).get("tp_atr")
+        target = price + side * tp_atr * c.f["atr"][i] if tp_atr else None
+        result = _send(mt5, symbol, side, volume, stop, f"fx-ml {model['version']}", tp=target)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             messages.append(f"❌ {market.name}: order rad etildi ({getattr(result, 'comment', mt5.last_error())})")
             continue
@@ -256,7 +266,8 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
                    [model["version"], decision_day, market.name, symbol, side, p, result.order, volume, result.price,
                     stop, exit_day, now.isoformat()])
         messages.append(f"📌 {market.name} {'BUY' if side > 0 else 'SELL'} {volume} lot @ {result.price} "
-                        f"(ehtimol {p:.0%}, stop {stop:.5g}, {exit_day} yopilishidan keyin chiqadi)")
+                        f"(ehtimol {p:.0%}, stop {stop:.5g}{f', TP {target:.5g}' if target else ''}, "
+                        f"{exit_day} yopilishidan keyin chiqadi)")
     db.commit()
     return messages
 
