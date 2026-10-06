@@ -91,6 +91,7 @@ CONTROLS = {"kill_switch": False, "blocked_pairs": [], "risk_per_trade_pct": 1.0
 
 
 @patch.dict(os.environ, {"DONCHIAN_ENTRY_N": "20", "DONCHIAN_EXIT_N": "10", "DONCHIAN_STOP_ATR": "2.0"})
+@patch("forex_ai_analyst.interfaces.http._live_price", return_value=None)
 @patch("forex_ai_analyst.interfaces.http.runtime_controls.settings", return_value=CONTROLS)
 @patch("forex_ai_analyst.interfaces.http.scalping_storage")
 class ScanTrendTests(unittest.TestCase):
@@ -196,6 +197,25 @@ class ResolveTrendTests(unittest.TestCase):
         scheduler.resolve_open_paper_signals(self.provider([], FLAT_THEN_BREAKOUT + four_hour_bars(
             [111.0] * 3, start=FLAT_THEN_BREAKOUT[-1]["datetime"] + FOUR_H)))
         storage.resolve_paper_signal.assert_not_called()
+
+
+
+class AnchorTests(unittest.TestCase):
+    SIGNAL = {"entry": 100.0, "stop": 94.0, "stop_distance": 6.0, "candle_time_ms": 1, "channel_high": 99.0}
+
+    def test_entry_and_stop_follow_the_live_price_so_planned_risk_is_real_risk(self):
+        signal, why = app.anchor_to_live_price(self.SIGNAL, 102.0)
+        self.assertIsNone(why)
+        self.assertEqual((signal["entry"], signal["stop"], signal["close"]), (102.0, 96.0, 100.0))
+
+    def test_a_breakout_price_has_run_away_from_is_not_chased(self):
+        signal, why = app.anchor_to_live_price(self.SIGNAL, 107.0)            # +7: more than half of 6
+        self.assertIsNone(signal)
+        self.assertIn("quvlashmaydi", why)
+
+    def test_without_a_live_price_the_signal_close_is_used(self):
+        signal, why = app.anchor_to_live_price(self.SIGNAL, None)
+        self.assertEqual((signal["entry"], signal["stop"]), (100.0, 94.0))
 
 
 if __name__ == "__main__":

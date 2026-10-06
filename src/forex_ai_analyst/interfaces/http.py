@@ -201,10 +201,39 @@ def format_trend_signal(pair: str, signal: dict, params, risk_usdt: float, quant
     execution = (f"BingX VST demo order ochildi: #{broker_order['order_id']}; fill: {broker_order['fill_price']:.6g}."
                  if broker_order else "Paper signal (VST execution o'chiq).")
     return (f"📈 DONCHIAN 4H LONG — {pair}\n\n"
-            f"Breakout: 4h yopilish {signal['entry']:.6g} > {params.entry_n}-bar max {signal['channel_high']:.6g}\n"
+            f"Breakout: 4h yopilish {signal.get('close', signal['entry']):.6g} > {params.entry_n}-bar max "
+            f"{signal['channel_high']:.6g}\n"
+            f"Kirish (joriy narx): {signal['entry']:.6g}\n"
             f"Stop ({params.stop_atr:g} ATR, birjada): {signal['stop']:.6g}\n"
             f"Chiqish: 4h yopilish {params.exit_n}-bar minimumdan pastda yoki stop\n"
             f"Risk: ${risk_usdt:.2f}; quantity: {quantity:.8g}; leverage {params.leverage}x\n" + execution)
+
+
+MAX_CHASE_FRACTION = 0.5   # skip a breakout once price has run more than half a stop distance past its close
+
+
+def _live_price(pair: str) -> float | None:
+    try:
+        from forex_ai_analyst.trading.infrastructure import market_data
+        return market_data.latest_prices().get(pair.upper())
+    except Exception:            # price feed down: fall back to the signal close (previous behaviour)
+        logger.warning("live price unavailable for %s; using the signal close", pair)
+        return None
+
+
+def anchor_to_live_price(signal: dict, live: float | None) -> tuple[dict | None, str | None]:
+    """Re-anchor entry and stop to the price the order will actually get, as the backtest does (entry at the
+    next open, stop = entry - ATR distance), so the planned risk is the real risk. A breakout that price has
+    already run away from (for example after a restart or a newly added market) is skipped, not chased."""
+    signal = {**signal, "close": signal["entry"]}
+    if live is None or live <= 0:
+        return signal, None
+    chase = live - signal["entry"]
+    if chase > (float(os.environ.get("DONCHIAN_MAX_CHASE_FRACTION", MAX_CHASE_FRACTION))
+                * signal["stop_distance"]):
+        return None, (f"narx breakoutdan {chase / signal['entry']:.1%} uzoqlashgan (stop masofasining yarmidan ko'p); "
+                      "quvlashmaydi, keyingi 4h barni kutadi")
+    return {**signal, "entry": live, "stop": live - signal["stop_distance"]}, None
 
 
 def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = None,
@@ -216,6 +245,10 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
     signal = trend_engine.entry_signal(bars, params)
     if not signal:
         return [{"status": "SKIP", "reason": "Donchian breakout yo'q"}]
+    signal, chased = anchor_to_live_price(signal, _live_price(pair))
+    if chased:
+        logger.info("%s Donchian breakout skipped: %s", pair, chased)
+        return [{"status": "SKIP", "reason": chased}]
     regime = classify_market_regime(bars)
     candidate = CandidateSignal(
         strategy=trend_engine.STRATEGY, pair=pair.upper(), direction=Direction.BUY, regime=regime.regime,
