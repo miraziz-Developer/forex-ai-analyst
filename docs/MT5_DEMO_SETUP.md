@@ -38,6 +38,21 @@ The bot checks every 15 minutes. After each Monday close it may open positions
 (P(up) >= 55% BUY, <= 45% SELL) on EURUSD, GBPUSD, AUDUSD, NZDUSD, USDCAD,
 USDCHF, USDJPY, EURJPY, GBPJPY and XAUUSD, each with a 3 ATR emergency stop and
 0.5% of equity at risk, and closes them after the fifth trading day's close.
+
+**Guards (optional `.env` overrides):**
+- `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
+  of equity; when the budget is full the strongest signals have been placed
+  first and the rest are skipped.
+- `FX_BOT_MAX_DD_PCT=10` — 10% below the equity peak, no new trades until it
+  recovers (open trades are still closed on schedule); Telegram says so.
+- `FX_BOT_MAX_SPREAD_FRAC=0.10` — no entry while the spread is wider than 10% of
+  the stop distance (e.g. at the daily rollover); retried until the end of the
+  next day.
+- A model with 30+ closed trades and profit factor below 0.7 stops opening
+  trades (`FX_BOT_NO_AUTO_DISABLE=1` overrides).
+- Every Monday a weekly report: balance, drawdown, open risk, and per model
+  trades, win rate, profit factor, result and average slippage, against the
+  forward-test bar (26 weeks, 60 trades, PF 1.2).
 Signals, closes and errors go to Telegram; the journal is `fx_ml_demo.sqlite`.
 
 ## Export broker history for research

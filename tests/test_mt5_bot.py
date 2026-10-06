@@ -68,6 +68,10 @@ MODEL = {"version": "fx_logistic_test", "family": "fx_logistic", "uses_cot": Fal
 class Mt5BotTests(unittest.TestCase):
     def setUp(self):
         self.db = mt5_bot.open_db(":memory:")
+        # these tests open a signal on every market at once; the portfolio cap has its own tests
+        env = patch.dict("os.environ", {"FX_BOT_MAX_TOTAL_RISK_PCT": "100"})
+        env.start()
+        self.addCleanup(env.stop)
 
     def test_refuses_a_real_account(self):
         with self.assertRaises(SystemExit):
@@ -91,9 +95,10 @@ class Mt5BotTests(unittest.TestCase):
             again = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 15, tzinfo=timezone.utc))
             self.assertEqual(len([m for m in first if "📌" in m]), 2)
             self.assertEqual(again, [])
-            self.assertEqual(mt5.sent[0]["type"], FakeMT5.ORDER_TYPE_BUY)
-            self.assertLess(mt5.sent[0]["sl"], mt5.sent[0]["price"])
-            self.assertEqual(mt5.sent[1]["type"], FakeMT5.ORDER_TYPE_SELL)
+            # the stronger signal (0.31, a SELL) is placed before the weaker one (0.62, a BUY)
+            self.assertEqual(mt5.sent[0]["type"], FakeMT5.ORDER_TYPE_SELL)
+            self.assertEqual(mt5.sent[1]["type"], FakeMT5.ORDER_TYPE_BUY)
+            self.assertLess(mt5.sent[1]["sl"], mt5.sent[1]["price"])
             # exit day = 5th weekday after Monday 10-05 = Monday 10-12; closes on the first cycle on 10-13
             not_yet = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 12, 23, 0, tzinfo=timezone.utc))
             self.assertFalse([m for m in not_yet if "yopildi" in m])
@@ -196,6 +201,74 @@ class Mt5BotTests(unittest.TestCase):
                         "'x', 'OPEN')")
         out = mt5_bot.close_due(mt5, self.db, "2026-10-13")
         self.assertEqual(out, ["🎯 EURUSD: stop yoki TP oldinroq yopgan: +28.50"])
+
+    def test_portfolio_cap_keeps_the_strongest_signals(self):
+        mt5 = FakeMT5()
+        days = weekday_days("2026-10-05", 12)
+        probs = {m.name: 0.56 + 0.01 * k for k, m in enumerate(FX_ONLY)}      # last markets are strongest
+        with patch.dict("os.environ", {"FX_BOT_MAX_TOTAL_RISK_PCT": "1.6", "FX_BOT_RISK_PCT": "0.5"}), \
+                patch.object(mt5_bot, "load_context", return_value=context(days)), \
+                patch.object(mt5_bot, "feature_row", side_effect=lambda ctx, name, i: {"name": name}), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]), \
+                patch.object(mt5_bot.ml_model, "probability_up", side_effect=lambda m, f: probs[f["name"]]):
+            out = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+        opened = [m for m in out if "📌" in m]
+        self.assertEqual(len(opened), 3)                                        # 3 x 0.5% fits in 1.6%
+        self.assertIn(FX_ONLY[-1].name, opened[0])
+        self.assertTrue(any("umumiy ochiq risk" in m for m in out))
+
+    def test_wide_spread_waits_and_is_retried(self):
+        mt5 = FakeMT5()
+        days = weekday_days("2026-10-05", 12)
+        wide = SimpleNamespace(ask=1.1100, bid=1.1000)                         # 0.01 spread vs 0.015 stop
+        with patch.object(mt5_bot, "load_context", return_value=context(days)), \
+                patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]), \
+                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62):
+            with patch.object(FakeMT5, "symbol_info_tick", return_value=wide):
+                waiting = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+            later = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 3, 0, tzinfo=timezone.utc))
+        self.assertTrue(all("spread" in m for m in waiting))
+        self.assertEqual(len([m for m in later if "📌" in m]), len(FX_ONLY))
+
+    def test_drawdown_pause_blocks_entries_and_reports_once(self):
+        mt5 = FakeMT5()
+        days = weekday_days("2026-10-05", 12)
+        mt5_bot.guards.put(self.db, "equity_peak", 12_000)                     # 10,000 is 16.7% below
+        with patch.object(mt5_bot, "load_context", return_value=context(days)), \
+                patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]), \
+                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62):
+            out = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+        self.assertTrue(out[0].startswith("🛑"))
+        self.assertFalse([m for m in out if "📌" in m])
+        self.assertEqual(mt5.sent, [])
+
+    def test_slippage_and_risk_are_journaled(self):
+        mt5 = FakeMT5()
+        days = weekday_days("2026-10-05", 12)
+        with patch.object(mt5_bot, "load_context", return_value=context(days)), \
+                patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]), \
+                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62):
+            mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+        row = self.db.execute("SELECT risk_money, slippage FROM trades WHERE status = 'OPEN' LIMIT 1").fetchone()
+        self.assertAlmostEqual(row["risk_money"], 0.03 * 0.015 * 100_000)        # 0.03 lot, 0.015 stop
+        self.assertEqual(row["slippage"], 0.0)
+
+    def test_weekly_report_once_per_week_and_auto_disable(self):
+        for k in range(30):
+            self.db.execute("INSERT INTO trades (model_version, decision_day, market, side, prob, ticket, exit_day, "
+                            "created_at, status, profit) VALUES ('m', ?, 'EURUSD', 1, 0.6, ?, '2026-01-01', 'x', "
+                            "'CLOSED', ?)", [f"2025-{k // 28 + 1:02d}-{k % 28 + 1:02d}", k, 10.0 if k % 4 == 0 else -10.0])
+        now = datetime(2026, 10, 5, 0, 5, tzinfo=timezone.utc)
+        report = mt5_bot.guards.weekly_report(self.db, 9_500.0, now)
+        self.assertIn("30 trade", report)
+        self.assertIn("avtomatik o'chirilgan", report)
+        self.assertIsNone(mt5_bot.guards.weekly_report(self.db, 9_500.0, now))
+        self.assertTrue(mt5_bot.guards.model_disabled(self.db, "m"))
+        with patch.dict("os.environ", {"FX_BOT_NO_AUTO_DISABLE": "1"}):
+            self.assertFalse(mt5_bot.guards.model_disabled(self.db, "m"))
 
     def test_nth_weekday_after_skips_weekends(self):
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-05", 5), "2026-10-12")
