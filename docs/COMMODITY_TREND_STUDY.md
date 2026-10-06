@@ -90,3 +90,21 @@ trades; P(mean R > 0) >= 0.95; profit factor >= 1.2; mean R > 0 in both halves;
 at least 5 of 7 markets positive. A pass supports the commodity-trend engine
 already in forward test; it does not add these markets to the bot (most are not
 offered by the broker).
+
+### Replication result (2026-10-06) — FAIL by a hair (P 0.948 < 0.95)
+
+| Trades | Win | Mean R | PF | P(mean R>0) | Halves | Positive |
+|---|---|---|---|---|---|---|
+| 366 | 26% | +0.29 | 1.40 | 0.948 | +0.37 / +0.21 | 5/7 |
+
+Per market (total R / PF): corn +29.3 / 1.84, wheat -18.5 / 0.58, soybeans
++32.5 / 2.06, soybean oil +28.9 / 1.82, soybean meal -4.7 / 0.91, sugar
++37.0 / 2.36, heating oil +1.5 / 1.04.
+
+The verdict stands as FAIL; the bar is not moved. What the two independent
+samples say together (reported as a summary, not as a pass): the same rule, on
+twelve commodities never used before, earned a similar mean of about +0.27R
+and +0.29R per trade with profit factors 1.35 and 1.40, positive in all four
+half-periods. That is the most consistent evidence in this project outside
+crypto, and it is why the rule is in forward test on the demo. Risk is not
+raised and no real money is used until the forward test passes its own bar.
