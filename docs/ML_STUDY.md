@@ -137,3 +137,17 @@ Consequence: Yahoo is not a reliable source for daily FX bars. Next step (a
 data correction, not a new model): rebuild daily FX bars from Dukascopy hourly
 bid/ask with the standard New York 17:00 day, rerun v1/v2c unchanged on them, and
 have the live bot compute features from the broker's own MT5 daily bars.
+
+**Rerun on clean Dukascopy daily bars (2026-10-06): no edge.** Same code, same
+walk-forward, FX bars from Dukascopy's own day candles (real open and close):
+
+| Model | Trades | Hit | Mean net | PF | P(mean>0) | 2010-17 / 2018+ | Markets + |
+|---|---|---|---|---|---|---|---|
+| v1 logistic | 3033 | 50.2% | -0.024% | 0.96 | 0.21 | -0.061% / +0.059% | 4/10 |
+| v1 gradient boosting | 3139 | 49.4% | -0.030% | 0.95 | 0.15 | -0.009% / -0.103% | 5/10 |
+| v2 (COT) | 3285 | 50.6% | -0.019% | 0.97 | 0.25 | -0.050% / +0.045% | 4/10 |
+| v2c (COT, C = 0.1) | 3166 | 50.5% | -0.026% | 0.95 | 0.18 | -0.059% / +0.044% | 3/10 |
+
+With clean data every daily model loses slightly after costs. The daily FX ML
+line is closed: v1/v2c stay on the demo only as a free experiment, no further
+daily-model variants are tried on this data.
