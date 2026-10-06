@@ -115,3 +115,17 @@ earlier check showed does not drive the result. Same costs and swap.
 P(mean > 0) >= 0.95; PF >= 1.3; mean > 0 in 2004-2014 and 2015-2026; at least
 6 of 8 indices positive; net per day held >= 2x the drift baseline. A pass adds
 these markets to the index engine where the broker offers them.
+
+### Replication result (2026-10-06) — FAIL (P 0.85, PF 1.11)
+
+| Trades | Win | Mean net | PF | P(mean>0) | 2004-14 / 2015-26 | Positive | Net/day vs drift |
+|---|---|---|---|---|---|---|---|
+| 1312 | 66.1% | +0.071% | 1.11 | 0.85 | +0.117% / +0.032% | 6/8 | 0.017% vs 0.000% |
+
+Per index (total %): AUS200 -5.9, HK50 +19.4, FRA40 -10.5, EU50 +18.4, ESP35
++23.6, NL25 +14.2, SWI20 +19.4, CAN60 +14.5.
+
+The direction holds (66% hit rate, 6 of 8 positive, both periods positive, and
+it earns while these indices had no drift at all), but the effect is about a
+third of the original six and too small for the bar. These markets are not
+added; the index engine keeps the original six.
