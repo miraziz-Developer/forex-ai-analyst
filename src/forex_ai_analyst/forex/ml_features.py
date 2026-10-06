@@ -60,6 +60,7 @@ class Context:
     rates: dict
     closes_by_day: dict[str, dict[str, float]]
     caches: dict[str, MarketCache] = field(default_factory=dict)
+    cot: dict | None = None          # CFTC positioning (model v2); None for model v1
 
     def __post_init__(self):
         self.spx_days, self.vix_days = sorted(self.spx), sorted(self.vix)
@@ -132,10 +133,20 @@ def feature_row(ctx: Context, name: str, i: int) -> dict | None:
     }
     for k, other in enumerate(ctx.markets):
         feats[f"mkt_{other.name}"] = float(k == c.index)
+    if ctx.cot is not None:
+        from forex_ai_analyst.forex.cot import features_at
+        positioning = features_at(ctx.cot, name, day)
+        if positioning is None:
+            return None
+        feats.update(positioning)
     return feats
 
 
-def load_context(markets: list[Market]) -> Context:
+def load_context(markets: list[Market], with_cot: bool = False) -> Context:
     from forex_ai_analyst.forex.data import load_yahoo
-    return build_context(markets, {m.name: load_yahoo(m, "1d") for m in markets}, load_yahoo(SPX, "1d"),
-                         load_yahoo(VIX, "1d"), fx_factors.load_rates())
+    ctx = build_context(markets, {m.name: load_yahoo(m, "1d") for m in markets}, load_yahoo(SPX, "1d"),
+                        load_yahoo(VIX, "1d"), fx_factors.load_rates())
+    if with_cot:
+        from forex_ai_analyst.forex.cot import load_positions
+        ctx.cot = load_positions()
+    return ctx
