@@ -101,6 +101,27 @@ class Mt5BotTests(unittest.TestCase):
         statuses = {r[0] for r in self.db.execute("SELECT status FROM trades WHERE ticket IS NOT NULL")}
         self.assertEqual(statuses, {"CLOSED"})
 
+    def test_signal_skipped_for_a_small_account_is_retried_the_next_day_only(self):
+        small, big = FakeMT5(), FakeMT5()
+        small.account_info = lambda: SimpleNamespace(trade_mode=0, equity=100.0)
+        days = weekday_days("2026-10-05", 12)
+        patches = (patch.object(mt5_bot, "load_context", return_value=context(days)),
+                   patch.object(mt5_bot, "feature_row", return_value={"x": 1}),
+                   patch.object(mt5_bot.ml_model, "load", return_value=MODEL),
+                   patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62))
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        skipped = mt5_bot.cycle(small, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+        self.assertTrue(all("o'tkazildi" in m for m in skipped))
+        opened = mt5_bot.cycle(big, self.db, datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc))      # same Tuesday
+        self.assertEqual(len([m for m in opened if m.startswith("📌")]), len(FX_ONLY))
+        self.assertEqual(mt5_bot.cycle(big, self.db, datetime(2026, 10, 6, 9, 15, tzinfo=timezone.utc)), [])
+        late = FakeMT5()
+        db2 = mt5_bot.open_db(":memory:")
+        mt5_bot.cycle(small, db2, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+        self.assertEqual(mt5_bot.cycle(late, db2, datetime(2026, 10, 7, 9, 0, tzinfo=timezone.utc)), [])   # Wednesday: too late
+
     def test_min_equity_explains_skipped_signals(self):
         # 0.01 lot * 0.015 stop * 100,000 per price unit = 15 money; at 0.5% that needs 3,000 equity
         self.assertAlmostEqual(mt5_bot.min_equity_for(FakeMT5(), "EURUSD", 0.015, 0.5), 3000.0)
