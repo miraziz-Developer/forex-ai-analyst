@@ -24,6 +24,21 @@ model version; if none passes, v1 continues alone.
 Trials so far on this data: forex rules 7, CFD trend 2, FX factors 4, forced
 flows 3, regime system 4, development 144, ML 2 + 1 (COT) + 3 (these).
 
-## Result
+## Result (2026-10-06) — no variant passes; v1 continues alone
 
-(pending)
+| Variant | Trades | Hit | Mean net | PF | P(mean>0) | 2010-17 / 2018+ | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| v2 reference | 2528 | 52.1% | +0.038% | 1.07 | 0.86 | -0.010% / +0.140% | 8/10 | — |
+| A 20-day horizon | 778 | 49.5% | +0.077% | 1.08 | 0.76 | -0.145% / +0.229% | 5/10 | FAIL |
+| B sizing | 2528 | 52.1% | (weighted) | 1.04 | 0.72 | negative / positive | 6/10 | FAIL |
+| **C regularised** | 2421 | 52.4% | **+0.045%** | **1.08** | **0.90** | **-0.001% / +0.146%** | 7/10 | FAIL |
+
+- C is the best FX ML result so far: 2010-2017 is now about break-even and
+  P reaches 0.90, but it misses the stricter 0.95 bar (three trials at once) and
+  the profit-factor bar of 1.2.
+- B: weighting by confidence did not help; the model's confidence is not well
+  calibrated to the size of the move.
+- A: a longer horizon makes the edge larger per trade but less consistent
+  (2010-2017 clearly negative, half the markets negative).
+
+The v2 reference was re-run before the variants and reproduced exactly.
