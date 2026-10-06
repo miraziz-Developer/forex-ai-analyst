@@ -34,6 +34,7 @@ logger = logging.getLogger("fx_ml_demo")
 MAGIC = 742026
 STOP_ATR = 3.0
 _SUFFIXES = ("", "m", ".", "#", "-ECN", ".r", "c", "pro", ".a")
+RETRYABLE = ("symbol not found", "below minimum volume")
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS trades (
  id INTEGER PRIMARY KEY AUTOINCREMENT, model_version TEXT NOT NULL, decision_day TEXT NOT NULL, market TEXT NOT NULL,
@@ -166,13 +167,26 @@ def decide(mt5, db: sqlite3.Connection, now: datetime, account) -> list[str]:
     if not complete or date.fromisoformat(complete[-1]).weekday() != 0:
         return []
     decision_day = complete[-1]
-    if db.execute("SELECT 1 FROM trades WHERE model_version = ? AND decision_day = ?",
-                  [model["version"], decision_day]).fetchone():
-        return []
+    existing = db.execute("SELECT market, status, note FROM trades WHERE model_version = ? AND decision_day = ?",
+                          [model["version"], decision_day]).fetchall()
+    if existing:
+        # Signals skipped only for an execution reason (account too small, symbol missing) are retried
+        # until the end of the day after the decision, e.g. after switching to a larger demo account.
+        if today > nth_weekday_after(decision_day, 1):
+            return []
+        retry = {r["market"] for r in existing if r["status"] == "SKIPPED" and r["note"] in RETRYABLE}
+        if not retry:
+            return []
+        db.execute(f"DELETE FROM trades WHERE model_version = ? AND decision_day = ? AND status = 'SKIPPED' "
+                   f"AND market IN ({', '.join('?' * len(retry))})", [model["version"], decision_day, *sorted(retry)])
+    else:
+        retry = None
     risk_money = account.equity * env_float("FX_BOT_RISK_PCT", 0.5) / 100
     exit_day = nth_weekday_after(decision_day, 5)
     messages = []
     for market in FX_ONLY:
+        if retry is not None and market.name not in retry:
+            continue
         c = ctx.caches[market.name]
         if decision_day not in c.days:
             continue
