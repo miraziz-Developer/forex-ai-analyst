@@ -87,3 +87,14 @@ as a second, independent return stream next to crypto.
 **Owner decision (2026-10-06): shelved.** The edge is real but the return is too
 small to be worth a separate bot for now; no MT5 bot is built. Kept in reserve
 as a possible second return stream next to crypto.
+
+## Reactivated as a forward test (2026-10-06, owner's request for more trades)
+
+`index_live.py` runs IDX1 unchanged inside the MT5 demo bot on the broker's
+index CFDs (US500, US30, NAS100, GER40, UK100, JP225, whichever exist): buy on a
+completed D1 close above the 200-day average with RSI(2) < 10, 3 ATR stop, exit
+after a close above the 5-day average or 10 bars. Risk 0.5% per trade
+(`FX_INDEX_RISK_PCT`) with adaptive allocation and all guards; stress moves for
+indices are the worst documented one-day falls (12-16%). Journalled as
+`index_pullback_v1`. Graduation, fixed now: 60 closed forward trades, mean > 0,
+bootstrap P >= 0.90, PF >= 1.2.

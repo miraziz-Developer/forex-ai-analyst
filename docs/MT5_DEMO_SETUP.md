@@ -57,9 +57,14 @@ named differently at the broker, map it, e.g. `FX_SYMBOL_MAP=WTI=USOil,BRENT=UKO
 which commodity and FX symbols it found at the broker (a missing one is named,
 with the hint to map it via `FX_SYMBOL_MAP`).
 
-**Engines on/off:** `FX_BOT_ENGINES=trend,fix,ml` (default). The weekly ML
-models have no demonstrated edge (docs/ML_STUDY.md); `FX_BOT_ENGINES=trend,fix`
-switches them off. Open trades are always closed on schedule either way.
+**Index pullback forward test.** On US500, US30, NAS100, GER40, UK100 and
+JP225 (whichever the broker offers): buy a sharp dip (RSI(2) < 10) in an index
+above its 200-day average, 3 ATR stop, exit on a close above the 5-day average
+or after 10 days (`[index]` in Telegram, docs/INDEX_STUDY.md).
+
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,ml` (default). The weekly
+ML models have no demonstrated edge (docs/ML_STUDY.md);
+`FX_BOT_ENGINES=trend,fix,index` switches them off. Open trades are always closed on schedule either way.
 
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
