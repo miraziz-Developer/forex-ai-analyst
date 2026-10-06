@@ -102,7 +102,7 @@ def build_dataset() -> tuple[np.ndarray, np.ndarray, list[dict], list[str]]:
             daily = [math.log(closes[j] / closes[j - 1]) for j in range(i - 19, i + 1)]
             vol20 = float(np.std(daily))
             next_month = f"{int(month[:4]) + (month[5:] == '12')}-{int(month[5:]) % 12 + 1:02d}-01"
-            to_month_end = int(np.busday_count(np.datetime64(day) + 1, np.datetime64(next_month)))   # calendar only
+            to_month_end = int(np.busday_count(np.datetime64(day) + np.timedelta64(1, "D"), np.datetime64(next_month)))   # calendar only
             feats = {
                 "r1": ret(1), "r5": ret(5), "r20": ret(20), "r60": ret(60), "r120": ret(120),
                 "vol20": vol20, "atr_ratio": f["vol_ratio"][i], "adx": f["adx"][i], "er": f["er"][i],

@@ -35,6 +35,25 @@ bootstrap P(mean net > 0) >= 0.90; profit factor >= 1.2; positive in both
 2010-2017 and 2018-2026; at least 60% of markets positive. A passing model is
 eligible for an MT5 demo trader that retrains the same way.
 
-## Result
+## Result (2026-10-06) — neither model passes
 
-(pending)
+10,852 samples, 38 features, 51.7% of 5-day windows were up.
+
+| Model | Trades | Per year | Hit rate | Mean net / trade | PF | P(mean>0) | 2010-17 / 2018+ | Markets + | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| logistic | 2123 | 126 | 52.2% | +0.028% | 1.05 | 0.75 | -0.019% / +0.159% | 9/10 | FAIL |
+| gradient boosting | 2991 | 178 | 51.3% | -0.015% | 0.97 | 0.30 | -0.030% / +0.011% | 4/10 | FAIL |
+
+- The adaptive logistic model is the best result of all the forex work: small
+  positive mean, nine of ten markets positive, clearly positive after 2018. It
+  still fails the pre-registered bar (P 0.75, PF 1.05, negative 2010-2017), so
+  it is not a proven edge: a 52% hit rate on 5-day moves is close to a coin
+  flip after costs.
+- The more flexible gradient boosting model did worse out of sample: more
+  capacity fitted more noise.
+
+**Decision.** No MT5 trader is built. The logistic model's 2018+ behaviour is a
+candidate for a forward test (paper only), not for money.
+
+A deprecation-only change (`np.timedelta64(1, "D")` instead of `+ 1` in the
+calendar feature) was made after the run; it does not change any value.
