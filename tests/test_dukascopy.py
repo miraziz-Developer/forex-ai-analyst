@@ -33,3 +33,23 @@ class DukascopyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrefetchTests(unittest.TestCase):
+    def test_failing_file_is_retried_later_then_skipped_and_others_continue(self):
+        import tempfile
+        from pathlib import Path
+        calls = []
+
+        def fake_raw(pair, day, side, hourly=False):
+            calls.append((pair, side))
+            if pair == "BAD":
+                raise RuntimeError("503")
+            return b""
+        with tempfile.TemporaryDirectory() as cache, patch.object(dukascopy, "CACHE_DIR", Path(cache)), \
+                patch.object(dukascopy, "_raw", side_effect=fake_raw), patch.object(dukascopy.time, "sleep"):
+            done = dukascopy.prefetch([("BAD", date(2024, 1, 2)), ("EURUSD", date(2024, 1, 2))], log=lambda m: None)
+        self.assertEqual(done, 2)                                   # EURUSD bid and ask
+        self.assertEqual(calls.count(("BAD", "BID")), 3)
+            self.assertTrue((Path(cache) / "dukascopy" / "BAD" / "2024-01-02-BID.missing").exists())
+        self.assertEqual(calls[1], ("BAD", "ASK"))                  # moved on instead of waiting

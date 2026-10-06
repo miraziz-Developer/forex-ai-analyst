@@ -31,6 +31,8 @@ def _raw(pair: str, day: date, side: str, hourly: bool = False) -> bytes:
     path = CACHE_DIR / "dukascopy" / pair / name
     if path.exists():
         return path.read_bytes()
+    if path.with_suffix(".missing").exists():               # prefetch gave up on it: treat as no data
+        return b""
     url = (HOUR_URL.format(pair=pair, y=day.year, m=day.month - 1, side=side) if hourly
            else URL.format(pair=pair, y=day.year, m=day.month - 1, d=day.day, side=side))
     for attempt in range(6):
@@ -51,32 +53,40 @@ def _raw(pair: str, day: date, side: str, hourly: bool = False) -> bytes:
 
 
 def prefetch(jobs: list[tuple[str, date]], log=print, hourly: bool = False) -> int:
-    """Download every (pair, day) bid and ask file not cached yet; survives outages (retries forever).
-    With hourly=True each job's day stands for its month's hour file."""
+    """Download every (pair, day) bid and ask file not cached yet. A failing file goes to the back of the
+    queue (others continue) and is skipped after three failures; several failures in a row mean the feed is
+    blocking us, so wait five minutes. With hourly=True each job's day stands for its month's hour file."""
+    from collections import deque
+
     def cached(p, d, s):
         name = f"{d.isoformat()[:7]}-{s}-H1.bi5" if hourly else f"{d.isoformat()}-{s}.bi5"
         return (CACHE_DIR / "dukascopy" / p / name).exists()
-    pending = [(p, d, s) for p, d in jobs for s in ("BID", "ASK") if not cached(p, d, s)]
-    done, failures = 0, 0
-    while pending:
-        pair, day, side = pending[0]
+    queue = deque((p, d, s) for p, d in jobs for s in ("BID", "ASK") if not cached(p, d, s))
+    done, fails, in_a_row = 0, {}, 0
+    while queue:
+        item = queue.popleft()
         try:
-            _raw(pair, day, side, hourly)
-            failures = 0
+            _raw(item[0], item[1], item[2], hourly)
         except RuntimeError:
-            failures += 1
-            if failures >= 3:                      # this file is not served at all: skip it, the study sees a gap
-                log(f"skipping {pair} {day} {side}: not served after 3 rounds")
-                pending.pop(0)
-                failures = 0
-                continue
-            log(f"feed unavailable at {pair} {day}; waiting 5 minutes ({len(pending)} files left)")
-            time.sleep(300)
+            fails[item] = fails.get(item, 0) + 1
+            in_a_row += 1
+            if fails[item] < 3:
+                queue.append(item)
+            else:
+                log(f"skipping {item[0]} {item[1]} {item[2]}: not served after 3 tries")
+                name = f"{item[1].isoformat()[:7]}-{item[2]}-H1" if hourly else f"{item[1].isoformat()}-{item[2]}"
+                marker = CACHE_DIR / "dukascopy" / item[0] / f"{name}.missing"
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.touch()
+            if in_a_row >= 3:
+                log(f"feed is blocking; waiting 5 minutes ({len(queue)} files left)")
+                time.sleep(300)
+                in_a_row = 0
             continue
-        pending.pop(0)
+        in_a_row = 0
         done += 1
         if done % 100 == 0:
-            log(f"{done} downloaded, {len(pending)} left")
+            log(f"{done} downloaded, {len(queue)} left")
     return done
 
 
