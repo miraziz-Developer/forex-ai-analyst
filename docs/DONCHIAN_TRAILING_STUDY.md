@@ -17,3 +17,15 @@ unchanged, 20-bar channel exit kept:
 **Adopted only if** its daily-return Sharpe beats the live rule in both
 2021-2023 and 2024-2026 and over the full period, and its profit factor is not
 lower. Otherwise the live exit stays.
+
+## Result (2026-10-06) — neither trail is adopted
+
+| Exit | Sharpe | 2021-23 | 2024-26 | Win | Mean R | PF |
+|---|---|---|---|---|---|---|
+| **live (20-bar channel)** | **1.13** | **1.29** | **0.94** | 31.4% | **+0.51** | **1.85** |
+| T1 + 3 ATR chandelier | 0.54 | 0.64 | 0.45 | 35.5% | +0.08 | 1.21 |
+| T2 + 2 ATR chandelier | 0.28 | 0.09 | 0.44 | 34.4% | +0.02 | 1.08 |
+
+A tighter trail raises the hit rate a little but cuts the large trends that
+make the strategy: mean R falls from +0.51 to +0.08 and +0.02. The live exit
+stays.
