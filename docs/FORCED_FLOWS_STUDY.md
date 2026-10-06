@@ -1,0 +1,42 @@
+# Forced-flow FX study — pre-registration
+
+Written and committed, with its code (`src/forex_ai_analyst/forex/forced_flows.py`),
+**before** any of these tests is run.
+
+**Idea.** Instead of reading charts, find moments when someone must trade
+regardless of price, and measure what the currency does then. Three flows with
+an economic reason; each is tested alone first. Only flows that pass may later
+be combined into a multi-factor score.
+
+**1. Gotobi (USDJPY).** Japanese importers settle on the 5th, 10th, 15th, 20th,
+25th and last day of the month (weekends roll back to Friday) and buy USD at the
+Tokyo 09:55 fix. Trade: long USDJPY from the open of the 23:00 UTC bar (08:00
+JST) to the close of the 00:00 UTC bar (10:00 JST). Yahoo H1, about 2.8 years.
+Cost 1.4 pips round trip. Control: the same window on all other weekdays.
+
+**2. Month-end hedge rebalancing (USD basket).** When US stocks beat foreign
+stocks (average of DAX, FTSE, Nikkei in local currency) from the previous month
+end to three trading days before this month end, foreign investors' USD hedges
+must grow, so they sell USD into the month-end fix. Trade: sell USD against an
+equal-weight basket of EUR, GBP, AUD, NZD, JPY, CAD, CHF from the close three
+trading days before month end to the last close of the month; buy USD when US
+stocks lagged. Yahoo daily from 2004. Cost 0.015% round trip.
+
+**3. Risk-off carry unwind (AUDJPY).** A VIX rise of at least 20% in one day
+forces leveraged carry positions to close. Trade: short AUDJPY from the next FX
+day's open for five FX days, one trade at a time. Yahoo daily from 2004. Cost
+0.028% round trip.
+
+**Each flow passes only if, net of cost:**
+1. enough events (gotobi >= 100, month end >= 150, risk-off >= 40);
+2. bootstrap P(mean net > 0) >= 0.90;
+3. mean net return positive in both chronological halves;
+4. gotobi only: the gotobi-day mean is above the same window on other days.
+
+Three tests are run; a pass at P >= 0.90 can happen by chance about once in
+ten, so a passing flow still needs confirmation on longer MT5 data before any
+trading.
+
+## Result
+
+(pending)
