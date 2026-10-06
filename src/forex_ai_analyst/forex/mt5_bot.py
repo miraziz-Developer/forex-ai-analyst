@@ -242,7 +242,8 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
                    f"AND market IN ({', '.join('?' * len(retry))})", [model["version"], decision_day, *sorted(retry)])
     else:
         retry = None
-    risk_money = account.equity * env_float("FX_BOT_RISK_PCT", 0.5) / 100
+    risk_pct = guards.engine_risk_pct(db, model["version"], env_float("FX_BOT_RISK_PCT", 0.5))
+    risk_money = account.equity * risk_pct / 100
     exit_day = nth_weekday_after(decision_day, 5)
     messages, candidates = [], []
     for market in FX_ONLY:
@@ -276,7 +277,7 @@ def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model
                 messages.append(f"⚠️ {market.name} {'BUY' if side > 0 else 'SELL'} signali: brokerda simvol topilmadi "
                                 "(FX_SYMBOL_MAP bilan ko'rsating)")
             else:
-                need = min_equity_for(mt5, symbol, stop_distance, env_float("FX_BOT_RISK_PCT", 0.5))
+                need = min_equity_for(mt5, symbol, stop_distance, risk_pct)
                 messages.append(f"⚠️ {market.name} {'BUY' if side > 0 else 'SELL'} signali o'tkazildi: minimal lot ham "
                                 f"risk chegarasidan katta. Kerakli balans ≈ ${need:,.0f} (hozir ${account.equity:,.0f})")
             continue

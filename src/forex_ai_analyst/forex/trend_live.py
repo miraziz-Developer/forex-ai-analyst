@@ -94,7 +94,7 @@ def manage(mt5, db, row, exit_signal: bool, bot) -> list[str]:
 def enter(mt5, db, now, account, paused, bot, market, symbol, day, stop_distance) -> list[str]:
     tick = mt5.symbol_info_tick(symbol)
     info = mt5.symbol_info(symbol)
-    volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * guards.env_float("FX_TREND_RISK_PCT", 0.5) / 100)
+    volume = bot.volume_for(mt5, symbol, stop_distance, account.equity * guards.engine_risk_pct(db, VERSION, guards.env_float("FX_TREND_RISK_PCT", 0.5)) / 100)
     mpp = info.trade_tick_value / (info.trade_tick_size or info.point)
     volume = guards.stress_volume(market, volume, mpp, tick.ask, account.equity, info.volume_step, info.volume_min) \
         if volume > 0 else 0.0
