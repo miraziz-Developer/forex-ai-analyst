@@ -57,9 +57,30 @@ named differently at the broker, map it, e.g. `FX_SYMBOL_MAP=WTI=USOil,BRENT=UKO
 which commodity and FX symbols it found at the broker (a missing one is named,
 with the hint to map it via `FX_SYMBOL_MAP`).
 
-**Engines on/off:** `FX_BOT_ENGINES=trend,fix,ml` (default). The weekly ML
-models have no demonstrated edge (docs/ML_STUDY.md); `FX_BOT_ENGINES=trend,fix`
-switches them off. Open trades are always closed on schedule either way.
+**Index pullback forward test.** On US500, US30, NAS100, GER40, UK100 and
+JP225 (whichever the broker offers): buy a sharp dip (RSI(2) < 10) in an index
+above its 200-day average, 3 ATR stop, exit on a close above the 5-day average
+or after 10 days (`[index]` in Telegram, docs/INDEX_STUDY.md).
+
+**Crypto CFD forward test.** The live BingX rule (Donchian 4h, 100/20, 3 ATR,
+long only) on the broker's crypto CFDs (BTC, ETH, SOL, XRP, BNB, DOGE, ADA,
+LINK, AVAX, LTC — whichever exist), `[crypto]` in Telegram, 0.5% risk via
+`FX_CRYPTO_RISK_PCT` (docs/CRYPTO_CFD_STUDY.md). Coins fall together, so a 40%
+one-day stress move applies and the 15% portfolio stress cap limits how many
+crypto positions are open at once.
+
+**Gold/silver 4h forward test.** The same Donchian 4h rule on XAUUSD and
+XAGUSD (docs/GOLD_H4_STUDY.md: gold PF 2.01, silver PF 1.71), `[gold]` in
+Telegram, 0.75% risk via `FX_GOLD_RISK_PCT`.
+
+**Default risk per engine** (docs/PORTFOLIO_STUDY.md; engines are nearly
+uncorrelated): crypto 0.3%, gold/silver 4h 0.75%, index 1.0%, commodity 0.5%,
+fix 0.5%; at most 6% open risk in total. Adaptive allocation then moves each
+engine with its own live results.
+
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,ml` (default).
+The weekly ML models have no demonstrated edge (docs/ML_STUDY.md);
+`FX_BOT_ENGINES=trend,fix,index,crypto,gold` switches them off. Open trades are always closed on schedule either way.
 
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%

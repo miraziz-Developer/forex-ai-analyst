@@ -1,7 +1,7 @@
 """Portfolio risk, execution and monitoring guards for the MT5 demo bot (layers 5-7).
 
 All limits come from .env with conservative defaults:
-  FX_BOT_MAX_TOTAL_RISK_PCT (5.0)  open risk of all positions together, % of equity
+  FX_BOT_MAX_TOTAL_RISK_PCT (6.0)  open risk of all positions together, % of equity
   FX_BOT_MAX_DD_PCT (10.0)         pause new trades when equity is this far below its peak
   FX_BOT_MAX_SPREAD_FRAC (0.10)    skip an entry while the spread exceeds this share of the stop distance
   FX_BOT_MAX_CCY_RISK_PCT (2.5)    open risk in one direction of one currency (e.g. short USD), % of equity
@@ -73,7 +73,7 @@ def open_risk(db: sqlite3.Connection) -> float:
 
 
 def risk_room(db: sqlite3.Connection, equity: float, new_risk: float) -> bool:
-    return open_risk(db) + new_risk <= equity * env_float("FX_BOT_MAX_TOTAL_RISK_PCT", 5.0) / 100 + 1e-9
+    return open_risk(db) + new_risk <= equity * env_float("FX_BOT_MAX_TOTAL_RISK_PCT", 6.0) / 100 + 1e-9
 
 
 def spread_ok(ask: float, bid: float, stop_distance: float) -> bool:
