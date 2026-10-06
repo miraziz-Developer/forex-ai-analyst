@@ -40,3 +40,17 @@ using only the trailing 24 months.
 The equal-weight combination of DC and MM is reported for information. A
 passing strategy becomes a monthly MT5 demo rebalancer; if neither passes,
 the result is recorded.
+
+## Result (2026-10-06) — both fail
+
+| Strategy | From | Sharpe | CAGR (10% vol) | Max DD | Halves (annual) | P(mean>0) | Verdict |
+|---|---|---|---|---|---|---|---|
+| DC dollar carry | 2007-06 | -0.17 | -2.5% | -49% | -4.4% / +0.5% | 0.25 | FAIL |
+| MM macro momentum | 2008-07 | -0.24 | -2.9% | -50% | +1.3% / -6.2% | 0.29 | FAIL |
+| combined (info) | 2009-07 | -0.17 | -2.4% | -49% | -1.0% / -2.6% | 0.20 | — |
+
+Diagnostic without swap markup and turnover cost: DC Sharpe -0.04, MM +0.11.
+The signals themselves earned about nothing after 2007, so this is not a cost
+problem. Both papers' samples end before or around 2010-2013; after
+publication and after the post-2008 era of near-zero, converging rates, these
+fund factors have not paid on the major currencies.
