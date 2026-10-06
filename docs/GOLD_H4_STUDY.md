@@ -20,3 +20,14 @@ on a close below the previous 20-bar low, 3 ATR stop, long only.
 day-clustered P(mean R > 0) >= 0.95 and mean R > 0 in both chronological
 halves; and silver (replication) has mean R > 0. A pass adds gold (and silver
 if offered) to the crypto-style H4 engine on the MT5 demo.
+
+## Result (2026-10-06) — PASS
+
+| Market | Trades | Win | Mean R | PF | P | Halves |
+|---|---|---|---|---|---|---|
+| gold | 115 | 40.9% | +0.49 | 2.01 | 0.994 | +0.31 / +0.66 |
+| silver (replication) | 114 | 39.5% | +0.37 | 1.71 | — | — |
+
+Adopted as the `gold` engine (`metals_live.py`) on gold and silver, H4,
+100/20/3 ATR, long only. Default risk 0.75% per trade (not 1%) because gold
+and silver move together.

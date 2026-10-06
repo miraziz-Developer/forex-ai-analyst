@@ -69,9 +69,18 @@ LINK, AVAX, LTC — whichever exist), `[crypto]` in Telegram, 0.5% risk via
 one-day stress move applies and the 15% portfolio stress cap limits how many
 crypto positions are open at once.
 
-**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,ml` (default). The
-weekly ML models have no demonstrated edge (docs/ML_STUDY.md);
-`FX_BOT_ENGINES=trend,fix,index,crypto` switches them off. Open trades are always closed on schedule either way.
+**Gold/silver 4h forward test.** The same Donchian 4h rule on XAUUSD and
+XAGUSD (docs/GOLD_H4_STUDY.md: gold PF 2.01, silver PF 1.71), `[gold]` in
+Telegram, 0.75% risk via `FX_GOLD_RISK_PCT`.
+
+**Default risk per engine** (docs/PORTFOLIO_STUDY.md; engines are nearly
+uncorrelated): crypto 0.3%, gold/silver 4h 0.75%, index 1.0%, commodity 0.5%,
+fix 0.5%; at most 6% open risk in total. Adaptive allocation then moves each
+engine with its own live results.
+
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,ml` (default).
+The weekly ML models have no demonstrated edge (docs/ML_STUDY.md);
+`FX_BOT_ENGINES=trend,fix,index,crypto,gold` switches them off. Open trades are always closed on schedule either way.
 
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%

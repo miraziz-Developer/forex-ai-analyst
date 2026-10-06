@@ -62,3 +62,19 @@ class CryptoLiveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MetalsLiveTests(unittest.TestCase):
+    def test_gold_h4_engine_uses_its_own_journal_and_risk(self):
+        from forex_ai_analyst.forex import metals_live
+
+        class Gold(CryptoBroker):
+            def symbol_info(self, name):
+                return super().symbol_info("BTCUSD") if name == "XAUUSD" else None
+        db = mt5_bot.open_db(":memory:")
+        mt5 = Gold([2000.0] * 150 + [2100.0])
+        out = metals_live.cycle(mt5, db, datetime(2026, 10, 7, tzinfo=timezone.utc), mt5.account_info(), False,
+                                sys.modules["forex_ai_analyst.forex.mt5_bot"])
+        self.assertTrue(any(m.startswith("📌 [gold] XAUUSD BUY") for m in out))
+        self.assertEqual(db.execute("SELECT model_version FROM trades").fetchone()[0], "metals_donchian_h4_v1")
+        self.assertEqual(metals_live.METALS.default_risk_pct, 0.75)
