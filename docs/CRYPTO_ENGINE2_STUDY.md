@@ -26,3 +26,17 @@ only, one position per market.
 profit factor >= 1.2; at least 12 of 20 markets positive; correlation of daily
 returns with the live Donchian <= 0.5. A pass becomes a second engine of the
 live bot (BingX VST demo first).
+
+## Result (2026-10-06)
+
+**A — PASS; the live list grows to thirty markets.** 563 trades, 32.5% win,
+mean +0.33R, PF 1.58, bootstrap P 0.989, 9 of 10 markets positive, largest
+share of positive R 19%. Per market (total R): ZEC +37.7, RLC -15.1, YFI +6.0,
+DASH +15.3, SAND +14.2, XMR +18.2, TRB +4.1, AXS +37.1, CRV +36.8, ALGO +32.5.
+Quantity precision and minimums are BingX's own contract values.
+
+**B — FAIL on the multiple-testing bar only.** 1553 trades (23 a month), 52%
+win, mean +0.10R, PF 1.23, Sharpe 0.60 (2021-23 0.48, 2024-26 0.83), 16 of 20
+markets positive, correlation with Donchian 0.01 — but deflated Sharpe 0.003
+with 181 trials. Not adopted; it remains the best candidate for a later
+paper forward test as an independent second crypto engine.
