@@ -75,7 +75,7 @@ Telegram, 0.75% risk via `FX_GOLD_RISK_PCT`.
 
 **Default risk per engine** (docs/PORTFOLIO_STUDY.md; engines are nearly
 uncorrelated): crypto 0.3%, gold/silver 4h 0.75%, index 1.0%, commodity 0.5%,
-fix 0.5%; at most 6% open risk in total. Adaptive allocation then moves each
+fix 0.25% (weakest evidence); at most 6% open risk in total. Adaptive allocation then moves each
 engine with its own live results.
 
 **Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,ml` (default).
