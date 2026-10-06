@@ -29,7 +29,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import fix_live, index_live, ml_model, trend_live
+from forex_ai_analyst.forex import crypto_live, fix_live, index_live, ml_model, trend_live
 from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.ml_features import feature_row, load_context
 from forex_ai_analyst.forex.regime_system_study import FX_ONLY
@@ -368,9 +368,9 @@ def main() -> None:
 
 
 def enabled_engines() -> set[str]:
-    """FX_BOT_ENGINES, e.g. "trend,fix,index" to switch the weekly ML experiment off (default: all four).
+    """FX_BOT_ENGINES, e.g. "trend,fix,index,crypto" to switch the weekly ML experiment off (default: all).
     Closing open trades, the risk state and the weekly report always run."""
-    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,ml")
+    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,crypto,ml")
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
@@ -389,6 +389,11 @@ def startup_report(mt5) -> str:
         (found if symbol else missing).append(f"{market}={symbol}" if symbol else market)
     lines.append("Indekslar: " + (", ".join(found) or "yo'q")
                  + (f" | topilmadi: {', '.join(missing)} (FX_SYMBOL_MAP bilan ko'rsating)" if missing else ""))
+    found, missing = [], []
+    for market in crypto_live.CANDIDATES:
+        symbol = crypto_live.resolve(mt5, market)
+        (found if symbol else missing).append(f"{market}={symbol}" if symbol else market)
+    lines.append("Kripto: " + (", ".join(found) or "yo'q") + (f" | topilmadi: {', '.join(missing)}" if missing else ""))
     fx_missing = [m.name for m in FX_ONLY if not resolve_symbol(mt5, m.name)]
     lines.append("FX juftliklar: " + ("hammasi topildi" if not fx_missing else f"topilmadi: {', '.join(fx_missing)}"))
     return "\n".join(lines)
@@ -407,9 +412,10 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                     ("ml", lambda: decide(mt5, db, now, require_demo(mt5), _paused(db))),
                     ("trend", lambda: trend_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                     ("index", lambda: index_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
+                    ("crypto", lambda: crypto_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                     ("report", lambda: [r] if (r := guards.weekly_report(db, mt5.account_info().equity, now))
                      else [])]
-    switchable = {"fix", "ml", "trend", "index"}
+    switchable = {"fix", "ml", "trend", "index", "crypto"}
     engines = [(n, r) for n, r in engines if n not in switchable or n in enabled_engines()]
     messages: list[str] = []
     for name, run in engines:

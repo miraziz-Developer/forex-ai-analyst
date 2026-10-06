@@ -62,9 +62,16 @@ JP225 (whichever the broker offers): buy a sharp dip (RSI(2) < 10) in an index
 above its 200-day average, 3 ATR stop, exit on a close above the 5-day average
 or after 10 days (`[index]` in Telegram, docs/INDEX_STUDY.md).
 
-**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,ml` (default). The weekly
-ML models have no demonstrated edge (docs/ML_STUDY.md);
-`FX_BOT_ENGINES=trend,fix,index` switches them off. Open trades are always closed on schedule either way.
+**Crypto CFD forward test.** The live BingX rule (Donchian 4h, 100/20, 3 ATR,
+long only) on the broker's crypto CFDs (BTC, ETH, SOL, XRP, BNB, DOGE, ADA,
+LINK, AVAX, LTC — whichever exist), `[crypto]` in Telegram, 0.5% risk via
+`FX_CRYPTO_RISK_PCT` (docs/CRYPTO_CFD_STUDY.md). Coins fall together, so a 40%
+one-day stress move applies and the 15% portfolio stress cap limits how many
+crypto positions are open at once.
+
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,ml` (default). The
+weekly ML models have no demonstrated edge (docs/ML_STUDY.md);
+`FX_BOT_ENGINES=trend,fix,index,crypto` switches them off. Open trades are always closed on schedule either way.
 
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
