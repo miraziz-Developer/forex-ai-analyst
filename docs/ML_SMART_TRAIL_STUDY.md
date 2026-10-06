@@ -31,3 +31,20 @@ if its mean net per trade beats T3 with paired day-block bootstrap
 P(variant - T3 > 0) >= **0.95**, and neither 2010-2017 nor 2018+ gets worse.
 Hit rate is reported but is not a criterion: a higher win rate with a lower
 mean is a worse strategy. Trials on this data: 2 more.
+
+## Result (2026-10-06) — neither variant passes; v2c keeps T3
+
+| Variant | Hit | Mean net | PF | P(mean>0) | 2010-17 / 2018+ | P(better than T3) | Verdict |
+|---|---|---|---|---|---|---|---|
+| T3 (reference) | 52.3% | +0.054% | 1.10 | 0.95 | +0.019% / +0.131% | — | — |
+| SM1 structure trail | 49.9% | +0.055% | 1.11 | 0.96 | +0.024% / +0.125% | 0.57 | FAIL |
+| SM2 profit lock | 52.0% | +0.053% | 1.10 | 0.94 | +0.018% / +0.129% | 0.23 | FAIL |
+
+- Ignoring wicks works as intended, but over a 5-day hold structure exits mostly
+  swap one outcome for another: SM1 cuts some losers early yet also exits
+  trades that would have recovered, so the hit rate falls to 49.9% and 2018+
+  gets worse; the mean difference is noise (P 0.57).
+- The break-even lock (SM2) did not raise the win rate: trades that touch +1 ATR
+  and come back to entry would mostly have closed in profit at day 5.
+- With a 5-day time exit and a 3 ATR take-profit already in place, there is
+  little left for a trailing stop to capture.
