@@ -159,15 +159,42 @@ def close_due(mt5, db: sqlite3.Connection, today: str) -> list[str]:
     return messages
 
 
+LABELS = {"fx_logistic": "v1", "fx_logistic_cot_c01": "v2c"}
+_COT_WARNED: set[str] = set()
+
+
 def decide(mt5, db: sqlite3.Connection, now: datetime, account) -> list[str]:
+    """Run every exported model family on the same Monday close; each has its own journal rows."""
     today = now.date().isoformat()
-    model = ml_model.load()
-    ctx = load_context(FX_ONLY)
+    models = ml_model.load_all()
+    messages = []
+    cot_failed = False
+    try:
+        ctx = load_context(FX_ONLY, with_cot=any(m.get("uses_cot") for m in models))
+    except Exception as exc:          # CFTC unreachable: models without COT still run; retried next cycle
+        logger.warning("COT data unavailable (%s); running models without COT only", type(exc).__name__)
+        ctx, cot_failed = load_context(FX_ONLY), True
     reference = ctx.caches[FX_ONLY[0].name]
     complete = [d for d in reference.days if d < today]
     if not complete or date.fromisoformat(complete[-1]).weekday() != 0:
         return []
     decision_day = complete[-1]
+    if cot_failed and decision_day not in _COT_WARNED:
+        _COT_WARNED.add(decision_day)
+        messages.append("⚠️ CFTC COT ma'lumoti olinmadi: v2c signallari kechikadi, bot qayta urinadi")
+    cot_data = ctx.cot
+    for model in models:
+        if model.get("uses_cot") and cot_data is None:
+            continue
+        ctx.cot = cot_data if model.get("uses_cot") else None
+        label = LABELS.get(model.get("family", ""), model["version"])
+        messages += [f"[{label}] {m}" for m in decide_model(mt5, db, now, account, ctx, model, decision_day)]
+    ctx.cot = cot_data
+    return [m for m in messages if m]
+
+
+def decide_model(mt5, db: sqlite3.Connection, now: datetime, account, ctx, model: dict, decision_day: str) -> list[str]:
+    today = now.date().isoformat()
     existing = db.execute("SELECT market, status, note FROM trades WHERE model_version = ? AND decision_day = ?",
                           [model["version"], decision_day]).fetchall()
     if existing:

@@ -42,3 +42,11 @@ flows 3, regime system 4, development 144, ML 2 + 1 (COT) + 3 (these).
   (2010-2017 clearly negative, half the markets negative).
 
 The v2 reference was re-run before the variants and reproduced exactly.
+
+## Deviation, recorded openly (2026-10-06)
+
+At the owner's request, variant C (`fx_logistic_cot_c01`: v2 + COT, C = 0.1)
+also runs on the MT5 **demo**, next to v1, although it did not pass its gate.
+This is a forward comparison only: both models are judged by the same forward
+criteria in `docs/ML_STUDY.md`, each on its own journal rows (model version),
+and neither may trade real money on the strength of this study.

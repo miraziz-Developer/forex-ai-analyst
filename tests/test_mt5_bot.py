@@ -58,10 +58,11 @@ def weekday_days(start, n):
 
 def context(days):
     caches = {m.name: SimpleNamespace(days=days, f={"atr": [0.005] * len(days)}) for m in FX_ONLY}
-    return SimpleNamespace(caches=caches)
+    return SimpleNamespace(caches=caches, cot=None)
 
 
-MODEL = {"version": "fx_logistic_test", "long_threshold": 0.55, "short_threshold": 0.45}
+MODEL = {"version": "fx_logistic_test", "family": "fx_logistic", "uses_cot": False,
+         "long_threshold": 0.55, "short_threshold": 0.45}
 
 
 class Mt5BotTests(unittest.TestCase):
@@ -84,11 +85,11 @@ class Mt5BotTests(unittest.TestCase):
         probs = iter([0.62, 0.31] + [0.5] * 50)
         with patch.object(mt5_bot, "load_context", return_value=context(days)), \
                 patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
-                patch.object(mt5_bot.ml_model, "load", return_value=MODEL), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]), \
                 patch.object(mt5_bot.ml_model, "probability_up", side_effect=lambda m, f: next(probs)):
             first = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
             again = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 15, tzinfo=timezone.utc))
-            self.assertEqual(len([m for m in first if m.startswith("📌")]), 2)
+            self.assertEqual(len([m for m in first if "📌" in m]), 2)
             self.assertEqual(again, [])
             self.assertEqual(mt5.sent[0]["type"], FakeMT5.ORDER_TYPE_BUY)
             self.assertLess(mt5.sent[0]["sl"], mt5.sent[0]["price"])
@@ -107,7 +108,7 @@ class Mt5BotTests(unittest.TestCase):
         days = weekday_days("2026-10-05", 12)
         patches = (patch.object(mt5_bot, "load_context", return_value=context(days)),
                    patch.object(mt5_bot, "feature_row", return_value={"x": 1}),
-                   patch.object(mt5_bot.ml_model, "load", return_value=MODEL),
+                   patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL]),
                    patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62))
         for p in patches:
             p.start()
@@ -115,7 +116,7 @@ class Mt5BotTests(unittest.TestCase):
         skipped = mt5_bot.cycle(small, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
         self.assertTrue(all("o'tkazildi" in m for m in skipped))
         opened = mt5_bot.cycle(big, self.db, datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc))      # same Tuesday
-        self.assertEqual(len([m for m in opened if m.startswith("📌")]), len(FX_ONLY))
+        self.assertEqual(len([m for m in opened if "📌" in m]), len(FX_ONLY))
         self.assertEqual(mt5_bot.cycle(big, self.db, datetime(2026, 10, 6, 9, 15, tzinfo=timezone.utc)), [])
         late = FakeMT5()
         db2 = mt5_bot.open_db(":memory:")
@@ -125,6 +126,29 @@ class Mt5BotTests(unittest.TestCase):
     def test_min_equity_explains_skipped_signals(self):
         # 0.01 lot * 0.015 stop * 100,000 per price unit = 15 money; at 0.5% that needs 3,000 equity
         self.assertAlmostEqual(mt5_bot.min_equity_for(FakeMT5(), "EURUSD", 0.015, 0.5), 3000.0)
+
+    def test_two_model_families_trade_independently_and_cot_outage_only_skips_v2c(self):
+        mt5 = FakeMT5()
+        days = weekday_days("2026-10-05", 12)
+        v2c = {**MODEL, "version": "fx_logistic_cot_c01_test", "family": "fx_logistic_cot_c01", "uses_cot": True}
+        calls = []
+
+        def fake_context(markets, with_cot=False):
+            calls.append(with_cot)
+            if with_cot:
+                raise RuntimeError("CFTC down")
+            return context(days)
+        with patch.object(mt5_bot, "load_context", side_effect=fake_context), \
+                patch.object(mt5_bot, "feature_row", return_value={"x": 1}), \
+                patch.object(mt5_bot.ml_model, "load_all", return_value=[MODEL, v2c]), \
+                patch.object(mt5_bot.ml_model, "probability_up", return_value=0.62):
+            mt5_bot._COT_WARNED.clear()
+            out = mt5_bot.cycle(mt5, self.db, datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc))
+        self.assertTrue(any("CFTC" in m for m in out))
+        self.assertEqual(len([m for m in out if m.startswith("[v1] 📌")]), len(FX_ONLY))
+        self.assertFalse([m for m in out if m.startswith("[v2c]")])
+        versions = {r[0] for r in self.db.execute("SELECT model_version FROM trades")}
+        self.assertEqual(versions, {"fx_logistic_test"})
 
     def test_nth_weekday_after_skips_weekends(self):
         self.assertEqual(mt5_bot.nth_weekday_after("2026-10-05", 5), "2026-10-12")

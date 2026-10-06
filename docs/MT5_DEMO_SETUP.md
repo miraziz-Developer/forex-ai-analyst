@@ -28,6 +28,12 @@ Runs the forward test of the FX logistic model (`docs/ML_STUDY.md`) on a broker
 ```powershell
 deploy\windows\run_fx_ml_demo.bat
 ```
+The bot runs every exported model: **v1** (`fx_logistic`) and **v2c**
+(`fx_logistic_cot_c01`, v1 + CFTC positioning, stronger regularisation). Each
+decides on its own and its trades are labelled `[v1]` / `[v2c]` in Telegram and
+journalled under its model version; both may hold the same market at once. If
+the CFTC site is unreachable, v2c waits while v1 trades.
+
 The bot checks every 15 minutes. After each Monday close it may open positions
 (P(up) >= 55% BUY, <= 45% SELL) on EURUSD, GBPUSD, AUDUSD, NZDUSD, USDCAD,
 USDCHF, USDJPY, EURJPY, GBPJPY and XAUUSD, each with a 3 ATR emergency stop and
