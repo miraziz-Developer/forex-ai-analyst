@@ -26,38 +26,38 @@ LONG_T, SHORT_T = 0.55, 0.45
 GATE = {"min_trades": 200, "min_bootstrap_p": 0.90, "min_profit_factor": 1.2, "min_market_share_positive": 0.6}
 
 
-def build_dataset(with_cot: bool = False) -> tuple[np.ndarray, np.ndarray, list[dict], list[str]]:
+def build_dataset(with_cot: bool = False, horizon: int = HORIZON) -> tuple[np.ndarray, np.ndarray, list[dict], list[str]]:
     ctx = load_context(FX_ONLY, with_cot=with_cot)
     rows, labels, meta = [], [], []
     feature_names: list[str] = []
     for market in FX_ONLY:
         c = ctx.caches[market.name]
-        for i in range(200, len(c.bars) - HORIZON - 1, STEP):
+        for i in range(200, len(c.bars) - horizon - 1, horizon):
             feats = feature_row(ctx, market.name, i)
             if feats is None:
                 continue
             if not feature_names:
                 feature_names = list(feats)
-            entry, exit_ = c.bars[i + 1]["open"], c.bars[i + HORIZON]["close"]
+            entry, exit_ = c.bars[i + 1]["open"], c.bars[i + horizon]["close"]
             fwd = exit_ / entry - 1
             rows.append([feats[k] for k in feature_names])
             labels.append(1 if fwd > 0 else 0)
-            meta.append({"market": market.name, "day": c.days[i], "exit_day": c.days[i + HORIZON], "fwd": fwd,
-                         "cost": c.cost})
+            meta.append({"market": market.name, "day": c.days[i], "exit_day": c.days[i + horizon], "fwd": fwd,
+                         "cost": c.cost, "vol20": feats["vol20"]})
     return np.array(rows, dtype=float), np.array(labels), meta, feature_names
 
 
-def models():
+def models(c: float = 1.0):
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
-    return {"logistic": lambda: make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=2000)),
+    return {"logistic": lambda: make_pipeline(StandardScaler(), LogisticRegression(C=c, max_iter=2000)),
             "gradient_boosting": lambda: HistGradientBoostingClassifier(max_depth=3, learning_rate=0.05, max_iter=200,
                                                                         random_state=0)}
 
 
-def walk_forward(X, y, meta, factory) -> list[dict]:
+def walk_forward(X, y, meta, factory, sized: bool = False) -> list[dict]:
     trades = []
     years = sorted({m["day"][:4] for m in meta})
     for year in [y_ for y_ in years if int(y_) >= FIRST_TEST_YEAR]:
@@ -72,7 +72,8 @@ def walk_forward(X, y, meta, factory) -> list[dict]:
         for p, m in zip(prob, [m for m, t in zip(meta, test) if t]):
             if p >= LONG_T or p <= SHORT_T:
                 side = 1 if p >= LONG_T else -1
-                trades.append({**m, "prob": float(p), "side": side, "net": side * m["fwd"] - m["cost"],
+                weight = abs(p - 0.5) * 0.005 / m["vol20"] if sized else 1.0     # confidence x inverse volatility
+                trades.append({**m, "prob": float(p), "side": side, "net": weight * (side * m["fwd"] - m["cost"]),
                                "hit": side * m["fwd"] > 0})
     return trades
 
@@ -91,7 +92,8 @@ def bootstrap_p(trades, runs=4000, seed=11) -> float:
     return positive / runs
 
 
-def evaluate(trades) -> dict:
+def evaluate(trades, gate: dict | None = None) -> dict:
+    gate = gate or GATE
     if not trades:
         return {"trades": 0, "passes": False, "reasons": ["no trades"]}
     net = [t["net"] for t in trades]
@@ -109,15 +111,15 @@ def evaluate(trades) -> dict:
          "p_mean_positive": round(p, 3), "markets_positive": f"{positive}/{len(per_market)}",
          "per_market_total_pct": {k: round(v * 100, 1) for k, v in per_market.items()}}
     reasons = []
-    if s["trades"] < GATE["min_trades"]:
-        reasons.append(f"{s['trades']} trades < {GATE['min_trades']}")
-    if p < GATE["min_bootstrap_p"]:
-        reasons.append(f"P(mean > 0) {p:.2f} < {GATE['min_bootstrap_p']}")
-    if (s["profit_factor"] or 0) < GATE["min_profit_factor"]:
-        reasons.append(f"profit factor {s['profit_factor']} < {GATE['min_profit_factor']}")
+    if s["trades"] < gate["min_trades"]:
+        reasons.append(f"{s['trades']} trades < {gate['min_trades']}")
+    if p < gate["min_bootstrap_p"]:
+        reasons.append(f"P(mean > 0) {p:.2f} < {gate['min_bootstrap_p']}")
+    if (s["profit_factor"] or 0) < gate["min_profit_factor"]:
+        reasons.append(f"profit factor {s['profit_factor']} < {gate['min_profit_factor']}")
     if not first or not second or min(sum(first), sum(second)) <= 0:
         reasons.append("not positive in both halves (2010-2017, 2018+)")
-    if positive / len(per_market) < GATE["min_market_share_positive"]:
+    if positive / len(per_market) < gate["min_market_share_positive"]:
         reasons.append(f"only {positive}/{len(per_market)} markets positive")
     return {**s, "passes": not reasons, "reasons": reasons}
 
@@ -132,6 +134,25 @@ def main_v2() -> None:
     out.mkdir(exist_ok=True)
     (out / "ml_cot_study.json").write_text(json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(),
                                                        "gate": GATE, "features": names, "report": r}, indent=2) + "\n")
+
+
+IMPROVEMENT_GATE = {**GATE, "min_bootstrap_p": 0.95}     # three new trials at once: stricter bar
+
+
+def main_improvements() -> None:
+    """Three declared improvements of v2 (docs/ML_IMPROVEMENTS_STUDY.md)."""
+    report = {}
+    X20, y20, meta20, _ = build_dataset(with_cot=True, horizon=20)
+    report["A_horizon20"] = evaluate(walk_forward(X20, y20, meta20, models()["logistic"]), IMPROVEMENT_GATE)
+    X, y, meta, names = build_dataset(with_cot=True)
+    report["B_sized"] = evaluate(walk_forward(X, y, meta, models()["logistic"], sized=True), IMPROVEMENT_GATE)
+    report["C_regularised"] = evaluate(walk_forward(X, y, meta, models(c=0.1)["logistic"]), IMPROVEMENT_GATE)
+    for name, r in report.items():
+        print(f"{name}: {json.dumps({k: v for k, v in r.items() if k != 'per_market_total_pct'})}")
+    out = Path("research_output")
+    out.mkdir(exist_ok=True)
+    (out / "ml_improvements_study.json").write_text(json.dumps({"generated_at": datetime.now(timezone.utc).isoformat(),
+                                                                "gate": IMPROVEMENT_GATE, "report": report}, indent=2) + "\n")
 
 
 def main() -> None:
@@ -150,4 +171,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     import sys
-    main_v2() if "--cot" in sys.argv else main()
+    if "--improve" in sys.argv:
+        main_improvements()
+    elif "--cot" in sys.argv:
+        main_v2()
+    else:
+        main()
