@@ -39,3 +39,13 @@ charged the extra 0.5x instead).
 If one passes, the next step is validation on longer broker history with real
 spreads (`mt5_export.py` on the VM) before any bot. If neither passes, the idea
 is recorded as failed.
+
+## Result (2026-10-06) — both fail
+
+| Variant | Trades | Hit | Gross / trade | Net / trade | PF | P(mean>0) | Pairs + | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| SF1 US hours | 5073 | 46% | -0.08 bp | -1.8 bp | 0.86 | 0.04 | 0/7 | FAIL |
+| SF2 both sides | 9119 | 47% | +0.31 bp | -1.8 bp | 0.86 | 0.01 | 0/7 | FAIL |
+
+In 2024-2026 the time-of-day effect is gone before costs (well under 1 bp per
+trade); costs of about 1-2 bp make every pair lose. Nothing is built.
