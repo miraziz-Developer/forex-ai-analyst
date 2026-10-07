@@ -52,3 +52,18 @@ slippage per side, real funding) and period (2021-01..2026-09) unchanged; code
 **Passes only if:** mean R > 0 with bootstrap P(mean > 0) >= 0.95; profit factor >= 1.15; at least 6 of 10
 markets positive; mean R > 0 in 2021-2023 and in 2024-2026. A pass makes B a paper forward-test candidate
 as the bot's second engine (BingX VST demo), never live money without a separate decision.
+
+### Replication result (2026-10-07) — PASS
+
+| Sample | Trades | Win | Mean R | PF | Avg win / loss |
+|---|---|---|---|---|---|
+| Ten unseen markets, 2021-01..2026-09 | 1,183 | 50.2% | **+0.145** | **1.33** | +1.17 / -0.89 R |
+| 2021-2023 | 795 | 50.3% | +0.141 | 1.32 | |
+| 2024-2026 | 388 | 50.0% | +0.153 | 1.34 | |
+
+Bootstrap P(mean > 0) = 0.987; **10 of 10 markets positive** (total R: ALGO +29.6, RLC +23.9, CRV +20.8,
+SAND +19.3, AXS +18.6, DASH +17.3, TRB +13.4, ZEC +12.3, YFI +10.6, XMR +5.6). Costs and funding included.
+On data it had never seen, the rule did slightly better than on the twenty markets it was first tested
+on (+0.10R, PF 1.23), so the earlier result was not a product of the many trials. With the original twenty
+it covers all thirty live markets: about 2,700 trades over 5.7 years, roughly 40 a month. Next: paper
+forward test as the crypto bot's second engine on the BingX VST demo.
