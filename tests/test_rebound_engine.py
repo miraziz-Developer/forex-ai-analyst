@@ -93,6 +93,31 @@ class ScanReboundTests(unittest.TestCase):
         execute.assert_not_called()
 
 
+    @patch("forex_ai_analyst.interfaces.http._live_price", return_value=None)
+    @patch("forex_ai_analyst.interfaces.http.execute_trend_order")
+    def test_engine_cap_on_open_rebound_positions(self, execute, _live, storage, *_):
+        self.storage(storage)
+        storage.open_paper_signals.return_value = [{"pair": f"X{i}-USDT", "strategy": "crypto_rebound_1h"}
+                                                   for i in range(5)]
+        result = app.scan_rebound("BTC-USDT", self.provider(CRASH), account_state=ACCOUNT)
+        self.assertEqual(result[0]["status"], "SKIP")
+        self.assertIn("limit 5", result[0]["reason"])
+        execute.assert_not_called()
+
+
+class PairListTests(unittest.TestCase):
+    def test_rebound_only_pairs_are_the_extra_coins_with_a_contract_spec(self):
+        pairs = app.rebound_only_pairs()
+        self.assertEqual(len(pairs), 32)
+        self.assertIn("1INCH-USDT", pairs)
+        self.assertNotIn("BTC-USDT", pairs)
+        with patch.dict(os.environ, {"REBOUND_EXTRA_PAIRS": "ANKR-USDT,NOPE-USDT,BTC-USDT"}):
+            self.assertEqual(app.rebound_only_pairs(), ("ANKR-USDT",))
+
+    def test_extra_coins_are_not_traded_by_donchian(self):
+        self.assertNotIn("ANKR-USDT", app.configured_pairs())
+
+
 @patch("forex_ai_analyst.trading.application.scheduler.scalping_storage")
 class ResolveReboundTests(unittest.TestCase):
     def row(self, expired=False, **extra):

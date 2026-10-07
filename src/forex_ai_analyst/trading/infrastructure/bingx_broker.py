@@ -27,13 +27,26 @@ QUANTITY_PRECISION = {"BTC-USDT": 4, "ETH-USDT": 2, "SOL-USDT": 2, "XRP-USDT": 0
                       "ATOM-USDT": 2, "ETC-USDT": 2, "FIL-USDT": 1, "AAVE-USDT": 1, "XLM-USDT": 0,
                       # docs/CRYPTO_ENGINE2_STUDY.md (A): ten more markets, precision from BingX /quote/contracts
                       "ZEC-USDT": 3, "RLC-USDT": 1, "YFI-USDT": 4, "DASH-USDT": 2, "SAND-USDT": 0,
-                      "XMR-USDT": 3, "TRB-USDT": 2, "AXS-USDT": 0, "CRV-USDT": 1, "ALGO-USDT": 1}
+                      "XMR-USDT": 3, "TRB-USDT": 2, "AXS-USDT": 0, "CRV-USDT": 1, "ALGO-USDT": 1,
+                      # docs/CRYPTO_ENGINE2_STUDY.md (expansion): 32 rebound-only markets, BingX /quote/contracts 2026-10-07
+                      "XTZ-USDT": 1, "THETA-USDT": 1, "VET-USDT": 0, "ICP-USDT": 2, "MANA-USDT": 0, "GALA-USDT": 0,
+                      "CHZ-USDT": 0, "ENJ-USDT": 0, "KSM-USDT": 1, "COMP-USDT": 2, "SNX-USDT": 1, "1INCH-USDT": 0,
+                      "SUSHI-USDT": 0, "ZIL-USDT": 0, "IOTA-USDT": 0, "NEO-USDT": 2, "QTUM-USDT": 1, "ONT-USDT": 1,
+                      "BAT-USDT": 1, "ZRX-USDT": 1, "KAVA-USDT": 1, "RUNE-USDT": 0, "EGLD-USDT": 1, "HBAR-USDT": 0,
+                      "GRT-USDT": 0, "CELO-USDT": 1, "SKL-USDT": 0, "ANKR-USDT": 0, "CTSI-USDT": 0, "DYDX-USDT": 1,
+                      "ENS-USDT": 1, "APE-USDT": 0}
 MIN_QUANTITY = {"BTC-USDT": 0.0001, "ETH-USDT": 0.01, "SOL-USDT": 0.02, "XRP-USDT": 2, "BNB-USDT": 0.01,
                 "DOGE-USDT": 21, "ADA-USDT": 8, "LINK-USDT": 0.2, "AVAX-USDT": 1, "LTC-USDT": 0.1,
                 "DOT-USDT": 1.7, "TRX-USDT": 6, "BCH-USDT": 0.01, "UNI-USDT": 1, "NEAR-USDT": 1,
                 "ATOM-USDT": 1.09, "ETC-USDT": 0.21, "FIL-USDT": 1.9, "AAVE-USDT": 0.1, "XLM-USDT": 10,
                 "ZEC-USDT": 0.002, "RLC-USDT": 2.7, "YFI-USDT": 0.0008, "DASH-USDT": 0.04, "SAND-USDT": 31,
-                "XMR-USDT": 0.004, "TRB-USDT": 0.09, "AXS-USDT": 2, "CRV-USDT": 5.6, "ALGO-USDT": 16.2}
+                "XMR-USDT": 0.004, "TRB-USDT": 0.09, "AXS-USDT": 2, "CRV-USDT": 5.6, "ALGO-USDT": 16.2,
+                "XTZ-USDT": 6.5, "THETA-USDT": 9.3, "VET-USDT": 249, "ICP-USDT": 0.64, "MANA-USDT": 19, "GALA-USDT":
+                872, "CHZ-USDT": 128, "ENJ-USDT": 67, "KSM-USDT": 0.5, "COMP-USDT": 0.09, "SNX-USDT": 8.4,
+                "1INCH-USDT": 21, "SUSHI-USDT": 9, "ZIL-USDT": 597, "IOTA-USDT": 38, "NEO-USDT": 0.84, "QTUM-USDT":
+                2.2, "ONT-USDT": 34.5, "BAT-USDT": 20, "ZRX-USDT": 16.9, "KAVA-USDT": 30.2, "RUNE-USDT": 3,
+                "EGLD-USDT": 0.5, "HBAR-USDT": 22, "GRT-USDT": 73, "CELO-USDT": 21.3, "SKL-USDT": 446, "ANKR-USDT":
+                434, "CTSI-USDT": 68, "DYDX-USDT": 15, "ENS-USDT": 0.4, "APE-USDT": 14}
 _HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 

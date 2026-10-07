@@ -136,3 +136,13 @@ hourly gaps is excluded as bad data, whatever its result. Rule, costs and fundin
 at least 60% of the tested coins positive; mean R > 0 in 2021-2023 and in 2024-2026. A pass adds **every**
 tested coin (losers included, so the list is not picked by its results) to the rebound engine only; the
 Donchian list stays as it is.
+
+### Expansion result (2026-10-08) — PASS on 32 more coins
+
+All 32 candidates had complete archives (none excluded). 3,455 trades, 50.1% win, mean **+0.118R**, PF
+**1.26**, bootstrap P 0.957, **28 of 32 coins positive**, halves +0.114R (2021-2023) / +0.126R (2024-2026).
+Losers: RUNE -11.8R, APE -5.0R, ICP -3.1R, ENS -2.2R; best ANKR +35.1R, NEO +28.6R, IOTA +25.7R.
+Third independent confirmation of the rule (original twenty markets, ten unseen, thirty-two unseen).
+By the rule fixed in advance all 32 join the rebound engine only (`REBOUND_EXTRA_PAIRS`), losers included.
+With 62 markets a crash produces many signals at once, so the rebound engine gets its own cap on open
+positions (`REBOUND_MAX_OPEN`, 5) inside the bot's overall cap: a risk control, not a backtested setting.
