@@ -107,3 +107,23 @@ Variants `M15`, `H1`, `H4`: rules 1–7 unchanged except that they run on 15-min
 (ATR, stop, the 24-bar time limit and the confluence window all scale with the bar). Rule 8 is left out of
 these variants. Positions are still closed before weekends. The holdout choice now runs over 30 combined
 versions (10 variants × portfolio / confluence / selected), with the same thresholds.
+
+## Official development result, all three pairs (2026-10-08) — FAIL; the holdout is not spent
+
+| Version | Trades | Mean R | PF | P | Hit |
+|---|---|---|---|---|---|
+| base portfolio / confluence | 82,801 / 19,576 | -0.576 / -0.414 | 0.32 / 0.43 | 0.00 | 22% / 37% |
+| S (07-17 UTC) | 31,084 / 8,484 | -0.202 / -0.220 | 0.65 / 0.63 | 0.00 | |
+| T (H1 trend) | 37,830 / 10,740 | -0.574 / -0.550 | 0.33 / 0.36 | 0.00 | |
+| W (stop >= 6 pips) | 80,498 / 17,336 | -0.418 / -0.299 | 0.37 / 0.51 | 0.00 | |
+| STW | 13,951 / 4,086 | -0.136 / -0.181 | 0.74 / 0.69 | 0.00 | |
+| F / FS (fade) | 68,842 / 30,044 portfolio | -0.351 / -0.208 | 0.41 / 0.59 | 0.00 | |
+| M15 | 19,103 / 4,482 | -0.326 / -0.196 | 0.51 / 0.66 | 0.00 | |
+| H1 | 4,376 / 1,092 | -0.092 / -0.136 | 0.81 / 0.74 | 0.04 / 0.00 | |
+| H4 | 1,092 / 292 | -0.009 / -0.024 | 0.98 / 0.95 | 0.43 / 0.34 | |
+| best "selected" (H4, rules positive in development) | 216 | +0.077 | 1.21 | 0.76 | 39% |
+
+(Each cell: portfolio / confluence.) By the choice rule fixed in advance, no version has at least 300
+development trades with P >= 0.95 and PF >= 1.2, so no holdout run is made and the verdict is FAIL. The
+pattern is the same on all three pairs as on the two-pair look: the shorter the bars, the larger the loss,
+and even H4 only reaches zero.

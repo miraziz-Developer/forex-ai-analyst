@@ -28,3 +28,11 @@ One order or position per pair at a time.
    mean net > 0 with day-bootstrap P(mean > 0) >= 0.95; profit factor >= 1.2;
    at least 2 of 3 pairs positive. Every version tried on development data is
    listed in the result, so the number of attempts is visible.
+
+## Development result (2026-10-08) — FAIL; the holdout is not spent
+
+EURUSD, GBPUSD, USDCHF, 2024-10..2025-09 (zero-volume filler minutes dropped, see SCALP_MULTI_STUDY.md):
+2,805 trades, hit rate 43.2%, mean -0.145R (-2.5 bp), PF 0.76, P(mean > 0) 0.00, **0 of 3 pairs positive**
+(total EURUSD -11.5%, GBPUSD -16.0%, USDCHF -42.9% of notional summed). The improvements tried for this rule
+are part of SCALP_MULTI_STUDY.md (rule r8 inside the portfolio versions); none qualified there either.
+The forum's claimed 95% win rate is 43% on real bid/ask data.
