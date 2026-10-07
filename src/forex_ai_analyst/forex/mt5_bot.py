@@ -29,7 +29,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import crypto_live, fix_live, index_live, metals_live, ml_model, status_report, trend_live
+from forex_ai_analyst.forex import (crypto_live, fix_live, index_live, metals_live, ml_model, rebound_live,
+                                   status_report, trend_live)
 from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.ml_features import feature_row, load_context
 from forex_ai_analyst.forex.regime_system_study import FX_ONLY
@@ -370,9 +371,9 @@ def main() -> None:
 
 
 def enabled_engines() -> set[str]:
-    """FX_BOT_ENGINES, e.g. "trend,fix,index,crypto,gold" to switch the weekly ML experiment off (default: all).
-    Closing open trades, the risk state and the weekly report always run."""
-    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,crypto,gold,ml")
+    """FX_BOT_ENGINES, e.g. "trend,fix,index,crypto,gold,rebound" to switch the weekly ML experiment off
+    (default: all). Closing open trades, the risk state and the weekly report always run."""
+    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,crypto,gold,rebound,ml")
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
@@ -411,7 +412,9 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
     must not be missed because a data source for the ML model is down)."""
     me = sys.modules[__name__]
     # the fix rule is time-critical (3-minute windows), so it runs before the slower engines
-    engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
+    engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
+               # the rebound buys the hour after a crash, so it also runs every minute (it skips stale signals)
+               ("rebound", lambda: rebound_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
     if slow:
         engines += [("risk", lambda: [m for m in [guards.drawdown_pause(db, require_demo(mt5).equity)[1]] if m]),
                     ("close", lambda: close_due(mt5, db, now.date().isoformat())),
@@ -424,7 +427,7 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                      else []),
                     ("status", lambda: [r] if (r := status_report.daily_status(mt5, db, now, enabled_engines()))
                      else [])]
-    switchable = {"fix", "ml", "trend", "index", "crypto", "gold"}
+    switchable = {"fix", "ml", "trend", "index", "crypto", "gold", "rebound"}
     engines = [(n, r) for n, r in engines if n not in switchable or n in enabled_engines()]
     messages: list[str] = []
     for name, run in engines:
