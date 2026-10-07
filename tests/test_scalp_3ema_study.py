@@ -19,6 +19,13 @@ def uptrend_then(tail):
 
 
 class Scalp3EmaTest(unittest.TestCase):
+    def test_minutes_drop_no_tick_fillers(self):
+        from datetime import date
+        from unittest.mock import patch
+        rows = [dict(minute(0, 1.1), bid_volume=0.0), dict(minute(1, 1.1), bid_volume=2.5)]
+        with patch.object(s.dukascopy, "minutes", return_value=rows):
+            self.assertEqual(len(s.minutes("EURUSD", date(2025, 1, 1), date(2025, 1, 1))), 1)
+
     def test_stacked(self):
         self.assertEqual(s.stacked(3, 2, 1), 1)
         self.assertEqual(s.stacked(1, 2, 3), -1)

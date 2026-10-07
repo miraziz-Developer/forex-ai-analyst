@@ -43,7 +43,8 @@ def minutes(pair: str, first: date, last: date) -> list[dict]:
         if d.weekday() < 5:
             out += dukascopy.minutes(pair, d)
         d += timedelta(days=1)
-    return [b for b in out if b["bid_high"] >= b["bid_low"]]
+    # minutes without ticks are flat fillers at the last price: they would fake zero volatility (holidays)
+    return [b for b in out if b["bid_high"] >= b["bid_low"] and b.get("bid_volume", 1) > 0]
 
 
 def ema(values: list[float], n: int) -> list[float]:

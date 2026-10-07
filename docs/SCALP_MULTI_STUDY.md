@@ -68,3 +68,11 @@ rules whose development mean R is positive). The development run also reports wh
 portfolio / confluence / selected), the one with the highest development mean R at the 0.7 pip cost, among
 those with at least 300 development trades, development P(mean > 0) >= 0.95 and profit factor >= 1.2.
 If no version qualifies, the holdout is not spent and the verdict is FAIL on development data.
+
+## Data fix found during the first development run (2026-10-07)
+
+The pivot rule produced absurd results (losses of billions of R). Cause: on holidays (e.g. 2025-01-01) the
+feed fills minutes without ticks with flat candles at the last price (volume 0). They have no range, so the
+ATR, and with it the protective stop, collapsed to almost nothing. Minutes with zero tick volume are now
+dropped in `scalp_3ema_study.minutes` (shared by both studies). On a normal day this removes about 2 of
+1,440 minutes. This is a correction of the data, not a change of any rule.
