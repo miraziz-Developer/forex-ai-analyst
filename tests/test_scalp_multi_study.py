@@ -166,6 +166,14 @@ class ExecutionTest(unittest.TestCase):
         first_fill = min(i for i, b in enumerate(m1) if b["bid_high"] >= 1.1003 + s.THROUGH)
         self.assertEqual(trades[0]["entry_ms"], m1[first_fill]["datetime"])
 
+    def test_bigger_bars_give_wider_stops(self):
+        m1 = wavy(6000)
+        small = s.rule_trades("EURUSD", m1, s.RULES[6])
+        big = s.rule_trades("EURUSD", m1, s.RULES[6], minutes=60)
+        if small and big:
+            self.assertGreater(min(t["risk_pips"] for t in big), max(t["risk_pips"] for t in small) / 4)
+        self.assertLess(len(big), len(small) + 1)
+
     def test_evaluate_subtracts_cost_in_r(self):
         trades = [{"pair": "EURUSD", "day": "2025-01-0%d" % (i % 5 + 1), "r_gross": 1.0 if i % 2 else -1.0,
                    "risk_pips": 7.0} for i in range(20)]

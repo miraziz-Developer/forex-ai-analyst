@@ -370,8 +370,8 @@ def execute(pair: str, name: str, m1: list[dict], bars: list[dict], sig: dict, s
 
 
 def rule_trades(pair: str, m1: list[dict], rule: Rule, gate=None, min_stop: float = 0.0,
-                faded: bool = False) -> list[dict]:
-    bars = base.aggregate(m1, rule.minutes * M1)
+                faded: bool = False, minutes: int | None = None) -> list[dict]:
+    bars = base.aggregate(m1, (minutes or rule.minutes) * M1)
     sig = rule.signals(bars)
     return execute(pair, rule.name, m1, bars, fade(sig) if faded else sig, rule.stop_atr, rule.target_atr,
                    rule.max_hold, gate, min_stop)
@@ -385,10 +385,10 @@ def forum_trades(pair: str, m1: list[dict]) -> list[dict]:
 
 
 def confluence(pair: str, m1: list[dict], components: list[dict], need: int = 2, window: int = 3,
-               gate=None, min_stop: float = 0.0) -> list[dict]:
+               gate=None, min_stop: float = 0.0, bar_minutes: int = 5) -> list[dict]:
     """Enter at the close of a 5-minute bar when at least `need` different rules opened a trade the same way
     during the last `window` bars and none opened the other way; 1.5 ATR stop, 1.5 ATR target, 24 bars."""
-    bars = base.aggregate(m1, 5 * M1)
+    bars = base.aggregate(m1, bar_minutes * M1)
     ends = [b["end"] for b in bars]
     sig = _empty(len(bars))
     votes: list[dict] = [{} for _ in bars]
@@ -435,12 +435,14 @@ class Variant:
     trend: bool = False               # trade only with the H1 EMA 8/13/21 stack
     min_stop_pips: float = 0.0        # a stop narrower than this is widened: the cost stays a small part of R
     fade: bool = False                # take the opposite side of rules 1-7 (added after the first development run)
+    minutes: int | None = None        # run rules 1-7 on this bar size instead of M2/M5 (added on the owner's request)
 
 
 LIQUID = tuple(range(7, 17))          # London open to the end of the London/New York overlap
 VARIANTS = (Variant("base"), Variant("S", hours=LIQUID), Variant("T", trend=True), Variant("W", min_stop_pips=6.0),
             Variant("STW", hours=LIQUID, trend=True, min_stop_pips=6.0),
-            Variant("F", fade=True), Variant("FS", hours=LIQUID, fade=True))
+            Variant("F", fade=True), Variant("FS", hours=LIQUID, fade=True),
+            Variant("M15", minutes=15), Variant("H1", minutes=60), Variant("H4", minutes=240))
 
 
 def make_gate(m1: list[dict], variant: Variant):
@@ -467,14 +469,16 @@ def all_trades(period, variants=VARIANTS) -> dict[str, list[dict]]:
         forum = forum_trades(pair, m1)
         for v in variants:
             gate, min_stop = make_gate(m1, v), v.min_stop_pips * PIP
-            components = [] if v.fade else [t for t in forum if v.hours is None or t["hour"] in v.hours]
+            own = v.fade or v.minutes
+            components = [] if own else [t for t in forum if v.hours is None or t["hour"] in v.hours]
             for rule in RULES:
-                components += rule_trades(pair, m1, rule, gate, min_stop, v.fade)
+                components += rule_trades(pair, m1, rule, gate, min_stop, v.fade, v.minutes)
             for t in components:
                 out.setdefault(f"{v.name}:{t['rule']}", []).append(t)
             out.setdefault(f"{v.name}:portfolio", []).extend(components)
             out.setdefault(f"{v.name}:confluence", []).extend(confluence(pair, m1, components, gate=gate,
-                                                                         min_stop=min_stop))
+                                                                         min_stop=min_stop,
+                                                                         bar_minutes=v.minutes or 5))
     return out
 
 

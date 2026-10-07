@@ -98,3 +98,12 @@ Rule 8 (3-EMA) is not faded. Variants `F` (fade, all hours) and `FS` (fade, 07�
 **Holdout choice, amended:** the same rule over 21 combined versions (7 variants × portfolio / confluence /
 selected). Since the fade idea came from the development data, the development numbers of the fade versions
 are in-sample; only the holdout can show whether it is real.
+
+## Amendment 2: bigger bars (2026-10-07, on the owner's question, before running it on any data)
+
+On M2/M5 the protective stop is 5–8 pips, so the spread and the 0.7 pip cost take 10–30% of R and the
+entry timing noise is of the same size as the stop. On bigger bars the same cost is a small part of R.
+Variants `M15`, `H1`, `H4`: rules 1–7 unchanged except that they run on 15-minute, 1-hour or 4-hour bars
+(ATR, stop, the 24-bar time limit and the confluence window all scale with the bar). Rule 8 is left out of
+these variants. Positions are still closed before weekends. The holdout choice now runs over 30 combined
+versions (10 variants × portfolio / confluence / selected), with the same thresholds.
