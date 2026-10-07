@@ -65,7 +65,7 @@ def aggregate(m1: list[dict], width: int) -> list[dict]:
     out = []
     for start in sorted(groups):
         g = groups[start]
-        out.append({"start": start, "end": start + width,
+        out.append({"start": start, "end": start + width, "open": (g[0]["bid_open"] + g[0]["ask_open"]) / 2,
                     "high": max((b["bid_high"] + b["ask_high"]) / 2 for b in g),
                     "low": min((b["bid_low"] + b["ask_low"]) / 2 for b in g),
                     "close": (g[-1]["bid_close"] + g[-1]["ask_close"]) / 2})
@@ -146,7 +146,8 @@ def simulate(pair: str, m1: list[dict], p: Params) -> list[dict]:
         t = datetime.fromtimestamp(m1[fill_i]["datetime"] / 1000, timezone.utc)
         trades.append({"pair": pair, "day": t.date().isoformat(), "hour": t.hour, "side": side, "net": net,
                        "r": side * (exit_ - entry) / abs(entry - stop), "risk_pips": abs(entry - stop) / PIP,
-                       "spread_pips": spread / PIP, "minutes": (m1[x]["datetime"] - m1[fill_i]["datetime"]) // M1})
+                       "spread_pips": spread / PIP, "minutes": (m1[x]["datetime"] - m1[fill_i]["datetime"]) // M1,
+                       "entry_ms": m1[fill_i]["datetime"]})
         busy_until = m1[x]["datetime"]
         k += 1
     return trades
