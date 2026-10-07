@@ -92,3 +92,22 @@ t-statistic, not mean R, so that a filter cannot win merely by trading less.
 **The chosen variant is adopted only if, on the ten replication markets:** mean R > +0.145 (beats the
 unchanged rule), bootstrap P >= 0.95, PF >= 1.15, at least 6 of 10 markets positive, both halves positive.
 Otherwise the unchanged rule stays.
+
+### Improvement result (2026-10-07) — the unchanged rule stays
+
+Twenty original markets, 2021-01..2026-09 (the base row skips each market's first eight days, which the
+volume filter needs as history, so it differs slightly from the original B row):
+
+| Variant | Trades | Win | Mean R | PF | t-stat | Halves | Markets + |
+|---|---|---|---|---|---|---|---|
+| **base** | 1,545 | 51.8% | **+0.097** | **1.22** | **3.38** | +0.067 / +0.174 | 16/20 |
+| F funding <= 0 | 690 | 49.7% | +0.075 | 1.17 | 1.77 | +0.078 / +0.069 | 14/20 |
+| M BTC also down 5% | 1,221 | 52.7% | +0.095 | 1.22 | 3.00 | +0.044 / +0.242 | 16/20 |
+| V volume climax | 1,189 | 53.5% | +0.096 | 1.23 | 3.04 | +0.046 / +0.196 | 15/20 |
+| T38 target 38.2% | 1,621 | 55.0% | +0.061 | 1.15 | 2.48 | +0.044 / +0.105 | 15/20 |
+| S1 stop 1.0 ATR | 1,448 | 56.2% | +0.074 | 1.20 | 3.04 | +0.059 / +0.114 | 17/20 |
+
+No change raised the t-statistic, so by the rule fixed in advance the base rule is chosen and the ten
+replication markets are not spent again (the base rule already passed there). The filters keep about the
+same edge per trade on fewer trades; the exit changes raise the win rate (55-56%) but cut the size of the
+wins more than they cut the losses, so profit falls. The rule as first written is already the best of these.
