@@ -21,7 +21,7 @@ dukascopy.POINT.update({"XAGUSD": 1e-3})
 MARKETS = {"US500": "USA500IDXUSD", "NAS100": "USATECHIDXUSD", "US30": "USA30IDXUSD", "GER40": "DEUIDXEUR",
            "UK100": "GBRIDXGBP", "JP225": "JPNIDXJPY", "XAUUSD": "XAUUSD", "XAGUSD": "XAGUSD"}
 EXTRA = {"XAGUSD": 0.0005}                  # on top of the real spread, round trip; indices and gold 0.02%
-FIRST, LAST = (2013, 1), (2026, 9)
+FIRST, LAST, LAST_DEV = (2013, 1), (2026, 9), (2019, 12)
 HOLDOUT_START = int(datetime(2020, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
 HOLDOUT_SPLIT = int(datetime(2023, 4, 1, tzinfo=timezone.utc).timestamp() * 1000)
 BAND_N, BAND_K, HOLD, STOP_ATR = 20, 2.5, 24, 3.0
@@ -29,9 +29,9 @@ OUT = Path("research_output/quiet_range.json")
 VARIANTS = {"QR1": True, "QR2": False}        # name -> quiet-regime filter on
 
 
-def load(instrument: str) -> list[dict]:
+def load(instrument: str, last: tuple[int, int] = LAST) -> list[dict]:
     out, (y, m) = [], FIRST
-    while (y, m) <= LAST:
+    while (y, m) <= last:
         out += [h for h in dukascopy.hours(instrument, y, m) if h["bid_high"] > h["bid_low"]]
         y, m = (y + 1, 1) if m == 12 else (y, m + 1)
     return out
@@ -132,9 +132,11 @@ def run(loaded: dict[str, list[dict]], quiet_filter: bool, holdout: bool) -> lis
 
 
 def main() -> None:
-    loaded = {m: load(instrument) for m, instrument in MARKETS.items()}
+    holdout = "--holdout" in sys.argv
+    # development reads 2013-2019 only (nothing later is needed for its trades or their daily context)
+    loaded = {m: load(instrument, LAST if holdout else LAST_DEV) for m, instrument in MARKETS.items()}
     Path("research_output").mkdir(exist_ok=True)
-    if "--holdout" in sys.argv:
+    if holdout:
         saved = json.loads(OUT.read_text())
         if not saved.get("holdout_allowed"):
             raise SystemExit("development did not qualify: the holdout is not spent")
