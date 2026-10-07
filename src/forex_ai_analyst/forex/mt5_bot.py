@@ -428,7 +428,8 @@ def _markets_line(mt5, resolve, candidates, timeframe: str, need: int) -> str:
             missing.append(market)
             continue
         try:
-            bars = len(trend_live.completed_bars(mt5, symbol, timeframe, need + 1))
+            # ask for at least as many bars as the engines do: completed_bars returns nothing below 80
+            bars = len(trend_live.completed_bars(mt5, symbol, timeframe, max(need + 1, 300)))
         except Exception:
             bars = None
         if bars is None or bars >= need:
@@ -467,7 +468,7 @@ def startup_report(mt5) -> str:
                  _markets_line(mt5, crypto_live.resolve, crypto_live.CANDIDATES, "H4", 101))
     fx_missing = [m.name for m in FX_ONLY if not resolve_symbol(mt5, m.name)]
     lines.append("FX juftliklar (fix): " + ("hammasi topildi" if not fx_missing else f"topilmadi: {', '.join(fx_missing)}"))
-    lines.append("Loglar: logs\\mt5_bot.log (har 15 daqiqada heartbeat qatori)")
+    lines.append("Loglar: logs\\mt5_bot.log (har 15 daqiqada heartbeat; o'qish: Get-Content ... -Encoding UTF8 -Wait)")
     return "\n".join(lines)
 
 
