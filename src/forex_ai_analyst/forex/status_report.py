@@ -2,7 +2,8 @@
 
 Shows the balance, open positions, trades of the last 24 hours and, per engine, the markets closest to a
 signal: distance to the Donchian breakout level for the trend engines, RSI(2) for the index pullback
-(a buy needs RSI(2) < 10 above the 200-day average) and the days left to the month-end fix.
+(a buy needs RSI(2) < 10 above the 200-day average), the coins that fell most in 24 hours for the rebound
+(a buy needs -12%) and the days left to the month-end fix.
 """
 from __future__ import annotations
 
@@ -47,6 +48,18 @@ def _index_rsi(mt5) -> list[tuple[float, str]]:
     return sorted(out)
 
 
+def _crypto_falls(mt5) -> list[tuple[float, str]]:
+    out = []
+    for market in crypto_live.CANDIDATES:
+        symbol = crypto_live.resolve(mt5, market)
+        if not symbol:
+            continue
+        bars = trend_live.completed_bars(mt5, symbol, "H1", 100)
+        if len(bars) > 24:
+            out.append((bars[-1]["close"] / bars[-25]["close"] - 1, market))
+    return sorted(out)
+
+
 def daily_status(mt5, db: sqlite3.Connection, now: datetime, engines: set[str]) -> str | None:
     if now.hour < SEND_FROM_HOUR_UTC:
         return None
@@ -75,6 +88,12 @@ def daily_status(mt5, db: sqlite3.Connection, now: datetime, engines: set[str]) 
             lines.append(f"[index] signal RSI < 10 da: {', '.join(near) if near else 'trendda indeks yoʻq'}")
         except Exception as exc:
             lines.append(f"[index] maʼlumot olinmadi ({type(exc).__name__})")
+    if "rebound" in engines:
+        try:
+            near = [f"{m} {d:+.1%}" for d, m in _crypto_falls(mt5)][:3]
+            lines.append(f"[rebound] 24 soatlik o'zgarish (signal -12% da): {', '.join(near) if near else 'maʼlumot yoʻq'}")
+        except Exception as exc:
+            lines.append(f"[rebound] maʼlumot olinmadi ({type(exc).__name__})")
     if "fix" in engines:
         days = (fix_live.last_weekday(now.date()) - now.date()).days
         lines.append(f"[fix] oy oxiriga {days} kun" if days > 0 else "[fix] bugun oy oxiri: 15:00-16:03 London")

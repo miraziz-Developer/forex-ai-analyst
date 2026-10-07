@@ -92,7 +92,7 @@ class DailyStatusTests(unittest.TestCase):
         from forex_ai_analyst.forex import status_report
         db = mt5_bot.open_db(":memory:")
         mt5 = Broker()
-        engines = {"crypto", "gold", "trend", "index", "fix"}
+        engines = {"crypto", "gold", "trend", "index", "fix", "rebound"}
         early = datetime(2026, 10, 7, 5, tzinfo=timezone.utc)
         self.assertIsNone(status_report.daily_status(mt5, db, early, engines))          # before 06:00 UTC
         now = datetime(2026, 10, 7, 7, tzinfo=timezone.utc)
@@ -101,4 +101,5 @@ class DailyStatusTests(unittest.TestCase):
         self.assertIn("[trend] yorilishgacha: ", text)
         self.assertIn("XAUUSD", text)
         self.assertIn("[fix] oy oxiriga 23 kun", text)                                  # Oct 7 -> Oct 30
+        self.assertIn("[rebound]", text)
         self.assertIsNone(status_report.daily_status(mt5, db, now, engines))            # once a day
