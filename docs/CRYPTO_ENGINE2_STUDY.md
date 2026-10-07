@@ -40,3 +40,15 @@ win, mean +0.10R, PF 1.23, Sharpe 0.60 (2021-23 0.48, 2024-26 0.83), 16 of 20
 markets positive, correlation with Donchian 0.01 — but deflated Sharpe 0.003
 with 181 trials. Not adopted; it remains the best candidate for a later
 paper forward test as an independent second crypto engine.
+
+## Replication of B on the ten unseen markets — pre-registration (2026-10-07)
+
+B failed only the multiple-testing bar (deflated Sharpe with 181 trials). The honest way past that bar is
+data the rule has never seen: B was run on the twenty older live markets only, so the ten markets added in
+part A (ZEC, RLC, YFI, DASH, SAND, XMR, TRB, AXS, CRV, ALGO) are unseen. Rule, costs (taker 0.05% + 0.02%
+slippage per side, real funding) and period (2021-01..2026-09) unchanged; code
+`src/forex_ai_analyst/lab/rebound_replication.py`, committed before it is run.
+
+**Passes only if:** mean R > 0 with bootstrap P(mean > 0) >= 0.95; profit factor >= 1.15; at least 6 of 10
+markets positive; mean R > 0 in 2021-2023 and in 2024-2026. A pass makes B a paper forward-test candidate
+as the bot's second engine (BingX VST demo), never live money without a separate decision.
