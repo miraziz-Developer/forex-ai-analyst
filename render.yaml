@@ -45,6 +45,11 @@ services:
         value: "true"
       - key: REBOUND_LEVERAGE
         value: "3"
+      # 32 more coins for the rebound engine only (passed on unseen data); at most 5 rebound positions at once
+      - key: REBOUND_EXTRA_PAIRS
+        value: "XTZ-USDT,THETA-USDT,VET-USDT,ICP-USDT,MANA-USDT,GALA-USDT,CHZ-USDT,ENJ-USDT,KSM-USDT,COMP-USDT,SNX-USDT,1INCH-USDT,SUSHI-USDT,ZIL-USDT,IOTA-USDT,NEO-USDT,QTUM-USDT,ONT-USDT,BAT-USDT,ZRX-USDT,KAVA-USDT,RUNE-USDT,EGLD-USDT,HBAR-USDT,GRT-USDT,CELO-USDT,SKL-USDT,ANKR-USDT,CTSI-USDT,DYDX-USDT,ENS-USDT,APE-USDT"
+      - key: REBOUND_MAX_OPEN
+        value: "5"
       - key: MAX_CONCURRENT_POSITIONS
         value: "12"
       - key: TRADE_COOLDOWN_MINUTES

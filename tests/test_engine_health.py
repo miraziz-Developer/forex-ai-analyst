@@ -1,4 +1,3 @@
-import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -47,6 +46,23 @@ class EngineHealthTests(unittest.TestCase):
         self.assertTrue(health.connection_lost(mt5))
         mt5.account_info = lambda: None
         self.assertTrue(health.connection_lost(mt5))
+
+
+class ReconcileTests(unittest.TestCase):
+    def test_rows_without_a_broker_position_are_closed_unless_their_engine_manages_them(self):
+        from unittest.mock import patch
+        db = mt5_bot.open_db(":memory:")
+        for version, ticket in (("fx_logistic_cot_c01", 11), ("crypto_donchian_h4_v1", 12), ("fx_logistic", 13)):
+            db.execute("INSERT INTO trades (model_version, decision_day, market, symbol, side, prob, ticket, volume, "
+                       "exit_day, created_at, status) VALUES (?, '2026-10-05', 'EURJPY', 'EURJPY', 1, 0.6, ?, 0.1, "
+                       "'2026-10-12', 'x', 'OPEN')", [version, ticket])
+        mt5 = FakeMT5()
+        mt5.positions[13] = SimpleNamespace(ticket=13, volume=0.1, profit=1.0)        # still at the broker
+        with patch.dict("os.environ", {"FX_BOT_ENGINES": "trend,fix,index,crypto,gold,rebound"}):
+            out = mt5_bot.reconcile_orphans(mt5, db)
+        self.assertEqual(len(out), 1)
+        status = dict(db.execute("SELECT ticket, status FROM trades").fetchall())
+        self.assertEqual(status, {11: "CLOSED", 12: "OPEN", 13: "OPEN"})
 
 
 class TickHealthTests(unittest.TestCase):

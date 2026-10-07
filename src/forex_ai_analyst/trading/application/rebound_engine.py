@@ -17,6 +17,26 @@ HOLD_HOURS = HOLD
 HISTORY_BARS = 200
 
 
+# docs/CRYPTO_ENGINE2_STUDY.md (expansion): passed on 32 unseen coins; traded by this engine only, not by Donchian
+EXTRA_PAIRS = ("XTZ-USDT,THETA-USDT,VET-USDT,ICP-USDT,MANA-USDT,GALA-USDT,CHZ-USDT,ENJ-USDT,KSM-USDT,COMP-USDT,"
+               "SNX-USDT,1INCH-USDT,SUSHI-USDT,ZIL-USDT,IOTA-USDT,NEO-USDT,QTUM-USDT,ONT-USDT,BAT-USDT,ZRX-USDT,"
+               "KAVA-USDT,RUNE-USDT,EGLD-USDT,HBAR-USDT,GRT-USDT,CELO-USDT,SKL-USDT,ANKR-USDT,CTSI-USDT,DYDX-USDT,"
+               "ENS-USDT,APE-USDT")
+
+
+def extra_pairs() -> tuple[str, ...]:
+    raw = os.environ.get("REBOUND_EXTRA_PAIRS", EXTRA_PAIRS)
+    return tuple(dict.fromkeys(p.strip().upper() for p in raw.split(",") if p.strip()))
+
+
+def max_open() -> int:
+    """Crashes hit many coins at once; this caps the engine's open positions inside the bot's overall cap."""
+    try:
+        return int(os.environ.get("REBOUND_MAX_OPEN", "5"))
+    except ValueError:
+        return 5
+
+
 def leverage() -> int:
     try:
         return int(os.environ.get("REBOUND_LEVERAGE", "3"))

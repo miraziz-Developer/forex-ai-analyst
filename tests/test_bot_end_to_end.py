@@ -85,6 +85,7 @@ class SwitchAndStartupTests(unittest.TestCase):
         self.assertIn("XAUUSD=XAUUSD", text)
         self.assertIn("WTI=USOIL", text)
         self.assertIn("topilmadi: XAGUSD", text)
+        self.assertNotIn("ma'lumot kam: XAUUSD", text)          # 101 D1 bars are enough for the 55-day channel
 
 
 class DailyStatusTests(unittest.TestCase):

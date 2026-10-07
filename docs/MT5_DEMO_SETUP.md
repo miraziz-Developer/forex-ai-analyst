@@ -154,10 +154,11 @@ Signals, closes and errors go to Telegram; the journal is `fx_ml_demo.sqlite`.
   To watch it live on the VM:
 
   ```powershell
-  Get-Content C:\Users\forexadmin\forex-ai-analyst-main\logs\mt5_bot.log -Tail 50 -Wait
+  Get-Content C:\Users\forexadmin\forex-ai-analyst-main\logs\mt5_bot.log -Tail 50 -Wait -Encoding UTF8
   ```
 
-  Only the errors: `Select-String -Path ...\logs\mt5_bot.log -Pattern "ERROR|WARNING|dvigatel ishlamayapti"`.
+  (`-Encoding UTF8`: Windows PowerShell otherwise shows the emoji as `âœ…`.) Only the errors:
+  `Select-String -Path ...\logs\mt5_bot.log -Encoding UTF8 -Pattern "ERROR|WARNING|dvigatel ishlamayapti"`.
 
 **All proven engines on** (`.env` on the VM):
 

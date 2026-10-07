@@ -361,9 +361,20 @@ def scan_rebound(pair: str, provider: MarketDataProvider, now: datetime | None =
         features={"stop_distance": signal["stop_distance"], "target_distance": signal["target_distance"]})
     if scalping_storage.fingerprint_exists(candidate.fingerprint):
         return [{"status": "SKIP", "reason": "bu qulash signali allaqachon ko'rib chiqilgan"}]
+    open_rebounds = sum(1 for s in scalping_storage.open_paper_signals() if s.get("strategy") == rebound_engine.STRATEGY)
+    if open_rebounds >= rebound_engine.max_open():
+        return [{"status": "SKIP", "reason": f"qaytish dvigatelida {open_rebounds} pozitsiya ochiq (limit "
+                                            f"{rebound_engine.max_open()}) - pozitsiya filtri"}]
     return _open_long(pair, candidate, signal, rebound_engine.leverage(), now, account_state, "Rebound",
                       signal["target"], "capitulation rebound 1h",
                       lambda risk, qty, order: format_rebound_signal(pair, signal, risk, qty, order))
+
+
+def rebound_only_pairs() -> tuple[str, ...]:
+    """Extra markets for the rebound engine (not Donchian) with a known BingX contract spec."""
+    from forex_ai_analyst.trading.infrastructure.bingx_broker import QUANTITY_PRECISION
+    main = set(configured_pairs())
+    return tuple(p for p in rebound_engine.extra_pairs() if p in QUANTITY_PRECISION and p not in main)
 
 
 def scan_configured_pairs(provider: MarketDataProvider) -> None:
@@ -392,6 +403,13 @@ def scan_configured_pairs(provider: MarketDataProvider) -> None:
             logger.exception("multi-strategy scan failed for %s", pair)
         if not rebound_engine.enabled():
             continue
+        try:
+            scan_rebound(pair, provider, account_state=account_state)
+        except Exception:
+            logger.exception("rebound scan failed for %s", pair)
+    if not rebound_engine.enabled():
+        return
+    for pair in rebound_only_pairs():
         try:
             scan_rebound(pair, provider, account_state=account_state)
         except Exception:
