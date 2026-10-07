@@ -35,3 +35,13 @@ results should be expected to be weaker; the coins move together, so the bot
 adds a 40% one-day stress move for crypto; the Render bot trades the same
 signals on BingX, so the two accounts carry correlated risk.
 Adopted: a fourth MT5 demo engine (`crypto_live.py`).
+
+## Capitulation rebound on the same CFDs — pre-registration (2026-10-07)
+
+The rebound rule (docs/CRYPTO_ENGINE2_STUDY.md, B; replicated on ten unseen coins with PF 1.33) would add
+about 20 short trades a month to the MT5 demo. These ten coins were among the markets B was first tested
+on, so this is not a new test of the edge; it checks whether the edge survives CFD costs: the spreads above
+(0.15% BTC/ETH, 0.30% others, round trip), no funding, swap 10/20/30% a year on the days held. Rule
+unchanged. Code `src/forex_ai_analyst/forex/rebound_cfd_study.py`.
+**Added to the MT5 demo only if, at the 20% swap:** mean R > 0, PF >= 1.15, bootstrap P >= 0.90, at least
+6 of 10 coins positive.
