@@ -59,6 +59,11 @@ the start-up message warns if the account is netting. Orders refused only
 because the market is closed (weekends, session breaks) are retried quietly
 when it reopens.
 
+**Daily status** (once a day after 06:00 UTC): balance, open positions, trades
+of the last 24 hours and, per engine, the markets closest to a signal (distance
+to the breakout level, index RSI(2), days to the month-end fix), so a quiet day
+is visibly a quiet day.
+
 **On start** the bot sends a Telegram message listing the engines it runs and
 which commodity and FX symbols it found at the broker (a missing one is named,
 with the hint to map it via `FX_SYMBOL_MAP`).
