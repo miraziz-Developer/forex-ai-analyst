@@ -29,7 +29,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import crypto_live, fix_live, index_live, metals_live, ml_model, trend_live
+from forex_ai_analyst.forex import crypto_live, fix_live, index_live, metals_live, ml_model, status_report, trend_live
 from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.ml_features import feature_row, load_context
 from forex_ai_analyst.forex.regime_system_study import FX_ONLY
@@ -421,6 +421,8 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                     ("crypto", lambda: crypto_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                     ("gold", lambda: metals_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                     ("report", lambda: [r] if (r := guards.weekly_report(db, mt5.account_info().equity, now))
+                     else []),
+                    ("status", lambda: [r] if (r := status_report.daily_status(mt5, db, now, enabled_engines()))
                      else [])]
     switchable = {"fix", "ml", "trend", "index", "crypto", "gold"}
     engines = [(n, r) for n, r in engines if n not in switchable or n in enabled_engines()]

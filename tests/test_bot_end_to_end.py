@@ -12,7 +12,7 @@ LONDON = ZoneInfo("Europe/London")
 
 
 class Broker(FakeMT5):
-    TIMEFRAME_D1 = 16408
+    TIMEFRAME_D1, TIMEFRAME_H4 = 16408, 16388
 
     def __init__(self):
         super().__init__()
@@ -85,3 +85,20 @@ class SwitchAndStartupTests(unittest.TestCase):
         self.assertIn("XAUUSD=XAUUSD", text)
         self.assertIn("WTI=USOIL", text)
         self.assertIn("topilmadi: XAGUSD", text)
+
+
+class DailyStatusTests(unittest.TestCase):
+    def test_one_status_message_a_day_with_nearest_signals(self):
+        from forex_ai_analyst.forex import status_report
+        db = mt5_bot.open_db(":memory:")
+        mt5 = Broker()
+        engines = {"crypto", "gold", "trend", "index", "fix"}
+        early = datetime(2026, 10, 7, 5, tzinfo=timezone.utc)
+        self.assertIsNone(status_report.daily_status(mt5, db, early, engines))          # before 06:00 UTC
+        now = datetime(2026, 10, 7, 7, tzinfo=timezone.utc)
+        text = status_report.daily_status(mt5, db, now, engines)
+        self.assertIn("Kunlik holat", text)
+        self.assertIn("[trend] yorilishgacha: ", text)
+        self.assertIn("XAUUSD", text)
+        self.assertIn("[fix] oy oxiriga 23 kun", text)                                  # Oct 7 -> Oct 30
+        self.assertIsNone(status_report.daily_status(mt5, db, now, engines))            # once a day
