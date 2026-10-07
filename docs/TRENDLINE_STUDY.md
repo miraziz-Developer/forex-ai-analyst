@@ -27,3 +27,15 @@ mid prices, fills on the real bid/ask plus 0.3 bp.
 **Passes only if:** at least 500 trades; day-bootstrap P(mean > 0) >= 0.95;
 PF >= 1.2; mean > 0 in 2010-2017 and 2018-2026; at least 6 of 10 pairs
 positive.
+
+## Result (2026-10-07) — FAIL on every pair
+
+| Trades | Win | Mean | Mean R | PF | P | 2010-17 / 2018-26 | Pairs + |
+|---|---|---|---|---|---|---|---|
+| 23476 | 40.1% | -1.3 bp | -0.05 | 0.92 | 0.00 | -1.5 / -1.2 bp | 0/10 |
+
+Per pair (total %): EURUSD -21.5, GBPUSD -21.6, USDJPY -1.6, AUDUSD -35.9,
+USDCAD -27.4, USDCHF -29.9, NZDUSD -61.1, EURJPY -19.4, GBPJPY -49.0, EURGBP
+-46.7. Drawn without hindsight, trendline breaks win 40% of the time with a
+target not far enough to pay for the losers and the spread. The textbook
+pictures show the breaks that worked.
