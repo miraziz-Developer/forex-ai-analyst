@@ -67,3 +67,28 @@ On data it had never seen, the rule did slightly better than on the twenty marke
 on (+0.10R, PF 1.23), so the earlier result was not a product of the many trials. With the original twenty
 it covers all thirty live markets: about 2,700 trades over 5.7 years, roughly 40 a month. Next: paper
 forward test as the crypto bot's second engine on the BingX VST demo.
+
+## Improving B (more profit and a higher win rate) — pre-registration (2026-10-07)
+
+Owner's request after the replication pass. Tuning on data that has already been seen produces a better
+backtest and a worse live result, so: **changes are chosen on the twenty original markets only**, and the
+one chosen version is run **once** on the ten replication markets, where the unchanged rule made +0.145R,
+PF 1.33. Code `src/forex_ai_analyst/lab/rebound_improve.py`, committed before it is run.
+
+Each candidate change has a reason written before any number is seen:
+
+| Variant | Change | Why it could help |
+|---|---|---|
+| `F` | only when the last known funding rate is <= 0 | after the crash shorts are crowded and paying: fuel for a squeeze |
+| `M` | only when BTC is also down >= 5% in the same 24 h | a market-wide liquidation is forced selling; a single-coin crash may be news (hack, unlock) that does not come back |
+| `V` | only when some hour of the 24 h had >= 3x the prior week's hourly volume | a selling climax marks forced liquidation |
+| `T38` | take profit at 38.2% of the drop instead of 50% | more trades reach the target: higher win rate (smaller wins) |
+| `S1` | stop 1.0 ATR below the 24 h low instead of 0.5 | fewer stop-outs on a last flush: higher win rate (larger losses) |
+
+**Choice (fixed now):** the single changes that raise the development t-statistic of mean R over the base
+rule are also tried together; the variant with the highest development t-statistic is chosen. The
+t-statistic, not mean R, so that a filter cannot win merely by trading less.
+
+**The chosen variant is adopted only if, on the ten replication markets:** mean R > +0.145 (beats the
+unchanged rule), bootstrap P >= 0.95, PF >= 1.15, at least 6 of 10 markets positive, both halves positive.
+Otherwise the unchanged rule stays.
