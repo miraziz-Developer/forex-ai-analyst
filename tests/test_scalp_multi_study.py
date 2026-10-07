@@ -136,6 +136,36 @@ class ExecutionTest(unittest.TestCase):
                "S:r3_momentum": {"cost_0.7": {"mean_r": 0.2}}, "W:portfolio": {"cost_0.7": {"mean_r": 0.3}}}
         self.assertEqual(s.selected(dev, "W"), ["r1_ribbon"])
 
+    def test_fade_swaps_sides_and_turns_stops_into_limits(self):
+        sig = s._empty(3)
+        sig["le"][1], sig["xs"][2], sig["lstop"][0] = True, True, 1.2
+        f = s.fade(sig)
+        self.assertTrue(f["se"][1])
+        self.assertTrue(f["xl"][2])
+        self.assertEqual(f["slimit"][0], 1.2)
+        self.assertIsNone(f["lstop"][0])
+
+    def test_sell_limit_fills_only_when_traded_through(self):
+        m1 = [minute(i, 1.1) for i in range(300)] + [minute(300 + i, 1.1 + 0.00001 * i) for i in range(100)]
+        bars = s.base.aggregate(m1, 5 * s.M1)
+        sig = s._empty(len(bars))
+        for k in range(55, len(bars)):
+            sig["slimit"][k] = 1.1003
+        trades = s.execute("EURUSD", "t", m1, bars, sig, 100.0, None, 1000)
+        self.assertEqual(trades, [])                      # still open at the end: filled, never closed
+        m1 = m1 + [minute(400 + i, 1.0990) for i in range(200)]
+        bars = s.base.aggregate(m1, 5 * s.M1)
+        sig = s._empty(len(bars))
+        for k in range(55, len(bars)):
+            sig["slimit"][k] = 1.1003
+        sig["xs"][100] = True
+        trades = s.execute("EURUSD", "t", m1, bars, sig, 100.0, None, 1000)
+        self.assertEqual(trades[0]["side"], -1)
+        self.assertGreater(trades[0]["r_gross"], 0)
+        # filled at the limit, never better: price had to reach 1.1003 + 0.2 pip (bid high = mid + 0.5 pip)
+        first_fill = min(i for i, b in enumerate(m1) if b["bid_high"] >= 1.1003 + s.THROUGH)
+        self.assertEqual(trades[0]["entry_ms"], m1[first_fill]["datetime"])
+
     def test_evaluate_subtracts_cost_in_r(self):
         trades = [{"pair": "EURUSD", "day": "2025-01-0%d" % (i % 5 + 1), "r_gross": 1.0 if i % 2 else -1.0,
                    "risk_pips": 7.0} for i in range(20)]

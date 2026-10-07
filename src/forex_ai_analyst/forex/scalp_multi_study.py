@@ -23,6 +23,7 @@ EXTRA_PIPS = 0.7          # Dukascopy's own commission ($35 per million per side
 RETAIL_EXTRA_PIPS = 1.2   # sensitivity: a retail no-commission account with ~1 pip wider spreads
 GAP = 30 * M1             # positions are closed before any pause in the data longer than this (weekends)
 STOP_ATR, MAX_HOLD = 2.0, 24
+THROUGH = 0.2 * PIP       # a limit order fills only when price trades this far through it (queue position)
 
 
 # ---------- indicators (None while warming up) ----------
@@ -130,7 +131,15 @@ def down_cross(a: list, b, i: int) -> bool:
 # ---------- the seven article rules, as signals on completed bars ----------
 
 def _empty(n: int) -> dict:
-    return {key: [False] * n for key in ("le", "se", "xl", "xs")} | {"lstop": [None] * n, "sstop": [None] * n}
+    return {key: [False] * n for key in ("le", "se", "xl", "xs")} | \
+        {key: [None] * n for key in ("lstop", "sstop", "llimit", "slimit")}
+
+
+def fade(sig: dict) -> dict:
+    """The opposite trade of every signal: buys become sells, exits swap, and a stop entry becomes a limit
+    order on the other side (a buy stop above a pivot high becomes a sell limit there)."""
+    return {"le": sig["se"], "se": sig["le"], "xl": sig["xs"], "xs": sig["xl"],
+            "lstop": sig["llimit"], "sstop": sig["slimit"], "llimit": sig["sstop"], "slimit": sig["lstop"]}
 
 
 def _ribbon(bars):
@@ -331,6 +340,18 @@ def execute(pair: str, name: str, m1: list[dict], bars: list[dict], sig: dict, s
                 if pos is not None:
                     close(price, i)
                 open_(-1, price, i, k - 1)
+            elif (llimit := sig["llimit"][k - 1]) is not None and (pos is None or pos["side"] < 0) \
+                    and b["ask_low"] <= llimit - THROUGH:
+                price = min(llimit, b["ask_open"])
+                if pos is not None:
+                    close(price, i)
+                open_(1, price, i, k - 1)
+            elif (slimit := sig["slimit"][k - 1]) is not None and (pos is None or pos["side"] > 0) \
+                    and b["bid_high"] >= slimit + THROUGH:
+                price = max(slimit, b["bid_open"])
+                if pos is not None:
+                    close(price, i)
+                open_(-1, price, i, k - 1)
         if hi == 0 or hi >= len(m1):
             continue
         last, nxt = m1[hi - 1], m1[hi]
@@ -348,10 +369,12 @@ def execute(pair: str, name: str, m1: list[dict], bars: list[dict], sig: dict, s
     return trades
 
 
-def rule_trades(pair: str, m1: list[dict], rule: Rule, gate=None, min_stop: float = 0.0) -> list[dict]:
+def rule_trades(pair: str, m1: list[dict], rule: Rule, gate=None, min_stop: float = 0.0,
+                faded: bool = False) -> list[dict]:
     bars = base.aggregate(m1, rule.minutes * M1)
-    return execute(pair, rule.name, m1, bars, rule.signals(bars), rule.stop_atr, rule.target_atr, rule.max_hold,
-                   gate, min_stop)
+    sig = rule.signals(bars)
+    return execute(pair, rule.name, m1, bars, fade(sig) if faded else sig, rule.stop_atr, rule.target_atr,
+                   rule.max_hold, gate, min_stop)
 
 
 def forum_trades(pair: str, m1: list[dict]) -> list[dict]:
@@ -411,11 +434,13 @@ class Variant:
     hours: tuple | None = None        # entry hours allowed (UTC)
     trend: bool = False               # trade only with the H1 EMA 8/13/21 stack
     min_stop_pips: float = 0.0        # a stop narrower than this is widened: the cost stays a small part of R
+    fade: bool = False                # take the opposite side of rules 1-7 (added after the first development run)
 
 
 LIQUID = tuple(range(7, 17))          # London open to the end of the London/New York overlap
 VARIANTS = (Variant("base"), Variant("S", hours=LIQUID), Variant("T", trend=True), Variant("W", min_stop_pips=6.0),
-            Variant("STW", hours=LIQUID, trend=True, min_stop_pips=6.0))
+            Variant("STW", hours=LIQUID, trend=True, min_stop_pips=6.0),
+            Variant("F", fade=True), Variant("FS", hours=LIQUID, fade=True))
 
 
 def make_gate(m1: list[dict], variant: Variant):
@@ -442,9 +467,9 @@ def all_trades(period, variants=VARIANTS) -> dict[str, list[dict]]:
         forum = forum_trades(pair, m1)
         for v in variants:
             gate, min_stop = make_gate(m1, v), v.min_stop_pips * PIP
-            components = [t for t in forum if v.hours is None or t["hour"] in v.hours]
+            components = [] if v.fade else [t for t in forum if v.hours is None or t["hour"] in v.hours]
             for rule in RULES:
-                components += rule_trades(pair, m1, rule, gate, min_stop)
+                components += rule_trades(pair, m1, rule, gate, min_stop, v.fade)
             for t in components:
                 out.setdefault(f"{v.name}:{t['rule']}", []).append(t)
             out.setdefault(f"{v.name}:portfolio", []).extend(components)

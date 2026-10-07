@@ -76,3 +76,25 @@ feed fills minutes without ticks with flat candles at the last price (volume 0).
 ATR, and with it the protective stop, collapsed to almost nothing. Minutes with zero tick volume are now
 dropped in `scalp_3ema_study.minutes` (shared by both studies). On a normal day this removes about 2 of
 1,440 minutes. This is a correction of the data, not a change of any rule.
+
+## Amendment after the first development look (2026-10-07, before USDCHF arrived)
+
+**What the development data showed (EURUSD + GBPUSD, 2024-10..2025-09):** every rule that buys strength
+and sells weakness lost **before** any added cost: per trade at zero extra cost, ribbon -0.23R, pivot
+reversal -0.59R, MACD/RSI -0.14R, EMA/RSI -0.13R, 3-EMA forum rule -0.10R. The simulator was checked on a
+zero-cost random walk, where every rule comes out near 0R (-0.25 to +0.14R, within noise for the trade
+counts), so this is the market, not the code: on 2- and 5-minute bars these majors mean-revert, and a
+breakout more often comes back than runs. The fixes registered above (session, trend, wider stop) only
+reduce the damage; none of the 15 combined versions is positive on these two pairs.
+
+**Added versions (written before running them on any data):** the opposite trade of rules 1–7 (`fade`):
+- buy signals become sells, exits swap;
+- a stop entry becomes a limit order on the other side (sell limit at the pivot high instead of a buy
+  stop there). A limit order fills only when price trades 0.2 pip through it, at the limit price, never
+  better unless the minute opens beyond it.
+
+Rule 8 (3-EMA) is not faded. Variants `F` (fade, all hours) and `FS` (fade, 07–17 UTC).
+
+**Holdout choice, amended:** the same rule over 21 combined versions (7 variants × portfolio / confluence /
+selected). Since the fade idea came from the development data, the development numbers of the fade versions
+are in-sample; only the holdout can show whether it is real.
