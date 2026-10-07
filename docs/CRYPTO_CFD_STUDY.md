@@ -45,3 +45,16 @@ on, so this is not a new test of the edge; it checks whether the edge survives C
 unchanged. Code `src/forex_ai_analyst/forex/rebound_cfd_study.py`.
 **Added to the MT5 demo only if, at the 20% swap:** mean R > 0, PF >= 1.15, bootstrap P >= 0.90, at least
 6 of 10 coins positive.
+
+### Rebound result (2026-10-07) — PASS at every swap level
+
+| Swap | Trades | Win | Mean R | PF | P | Coins + | 0.5% risk: CAGR / max DD |
+|---|---|---|---|---|---|---|---|
+| 10% | 709 | 52.8% | +0.102 | 1.23 | 0.91 | 8/10 | 5.7% / -19.5% |
+| **20%** | 709 | 52.8% | **+0.100** | **1.23** | 0.90 | 8/10 | 5.6% / -19.6% |
+| 30% | 709 | 52.6% | +0.098 | 1.23 | 0.90 | 8/10 | 5.4% / -19.8% |
+
+About ten trades a month on the ten CFDs, held at most a day, so the swap hardly matters. Losers: SOL
+(-1.8R) and LTC (-3.7R) in total. On its own it is a modest engine (5-6% a year at 0.5% risk, with a
+drawdown of about 20% because crashes cluster); its value is that it trades when the trend engines are
+flat or being stopped out. It joins the MT5 demo as engine `rebound` (H1), default risk 0.3%.
