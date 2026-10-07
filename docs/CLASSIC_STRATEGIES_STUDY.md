@@ -33,3 +33,17 @@ in halves (split 2018-07-01).
 
 **Each strategy passes only if:** at least 300 trades; mean net R > 0 with month-bootstrap P(mean > 0) >=
 0.95; profit factor >= 1.2; at least 8 of 12 markets positive; both halves positive.
+
+## Result (2026-10-07) — all three FAIL
+
+| Strategy | Trades | Hit | Gross R / trade | Net R / trade | PF | P(mean>0) | 2010-18 / 2018-26 | Markets + |
+|---|---|---|---|---|---|---|---|---|
+| Pivot point break | 39,927 | 34.6% | -0.109 | -0.128 | 0.68 | 0.00 | -0.101 / -0.155 | 0/12 |
+| Support / resistance with trend | 16,928 | 29.3% | -0.125 | -0.177 | 0.76 | 0.00 | -0.166 / -0.187 | 0/12 |
+| Trendline bounce | 37,323 | 27.1% | -0.191 | -0.270 | 0.66 | 0.00 | -0.259 / -0.282 | 0/12 |
+
+**Robustness.** Inside an hour the stop was assumed to come first. With the opposite, optimistic assumption
+(target first) all three still lose: pivot -0.125R (PF 0.69), support/resistance -0.145R (PF 0.80),
+trendline bounce -0.213R (PF 0.73). The losses are present before costs and in every market and both halves.
+Automated, the levels these rules trade are touched and broken far more often than the article's chosen
+examples suggest. Nothing is built.
