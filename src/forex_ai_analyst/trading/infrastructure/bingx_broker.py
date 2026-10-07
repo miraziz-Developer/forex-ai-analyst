@@ -293,19 +293,20 @@ def close_position(symbol: str, direction: str, quantity: float) -> dict:
             "filled_quantity": _executed_quantity(order)}
 
 
-def cancel_stop_orders(symbol: str, position_side: str) -> int:
-    """Cancel open stop orders left on one position side after a manual close.
+def cancel_stop_orders(symbol: str, position_side: str, include_take_profit: bool = False) -> int:
+    """Cancel open stop orders (and, if asked, take-profit orders) left on one position side after a close.
 
-    A stop attached to an entry order can outlive a market close; if it stayed,
+    A stop or target attached to an entry order can outlive a market close; if it stayed,
     it could later close a new position on the same pair at a stale level.
     Returns the number of orders cancelled.
     """
+    kinds = {"STOP_MARKET", "STOP"} | ({"TAKE_PROFIT_MARKET", "TAKE_PROFIT"} if include_take_profit else set())
     data = _signed_request("GET", "/openApi/swap/v2/trade/openOrders", {"symbol": symbol})
     value = data.get("data", {})
     orders = value.get("orders", []) if isinstance(value, dict) else value
     cancelled = 0
     for order in orders if isinstance(orders, list) else []:
-        if str(order.get("type", "")).upper() in {"STOP_MARKET", "STOP"} and order.get("positionSide") == position_side:
+        if str(order.get("type", "")).upper() in kinds and order.get("positionSide") == position_side:
             _signed_request("DELETE", "/openApi/swap/v2/trade/order", {"symbol": symbol, "orderId": str(order["orderId"])})
             cancelled += 1
     return cancelled

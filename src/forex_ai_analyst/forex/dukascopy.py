@@ -96,16 +96,17 @@ def prefetch(jobs: list[tuple[str, date]], log=print, hourly: bool = False) -> i
     return done
 
 
-def decode(blob: bytes, day: date, point: float) -> list[tuple]:
-    """[(ms, open, high, low, close)] for one side of one day."""
+def decode(blob: bytes, day: date, point: float, volume: bool = False) -> list[tuple]:
+    """[(ms, open, high, low, close)] for one side of one day; with volume=True a sixth item, the volume."""
     if not blob:
         return []
     raw = lzma.decompress(blob)
     midnight = int(datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() * 1000)
     out = []
     for k in range(len(raw) // RECORD.size):
-        sec, o, c, lo, hi, _vol = RECORD.unpack_from(raw, k * RECORD.size)
-        out.append((midnight + sec * 1000, o * point, hi * point, lo * point, c * point))
+        sec, o, c, lo, hi, vol = RECORD.unpack_from(raw, k * RECORD.size)
+        row = (midnight + sec * 1000, o * point, hi * point, lo * point, c * point)
+        out.append(row + (vol,) if volume else row)
     return out
 
 
@@ -141,12 +142,15 @@ def days(pair: str, first_year: int, last_year: int) -> list[dict]:
 
 
 def minutes(pair: str, day: date) -> list[dict]:
-    """One-minute candles with bid and ask, UTC. Empty on days without trading."""
+    """One-minute candles with bid and ask, UTC. Empty on days without trading. `bid_volume` 0 marks a
+    minute without ticks, which the feed fills with a flat candle at the last price (holidays, quiet minutes)."""
     point = POINT.get(pair, 1e-5)
-    bid = decode(_raw(pair, day, "BID"), day, point)
+    bid = decode(_raw(pair, day, "BID"), day, point, volume=True)
     ask = {r[0]: r for r in decode(_raw(pair, day, "ASK"), day, point)}
     return [{"datetime": b[0], "bid_open": b[1], "bid_high": b[2], "bid_low": b[3], "bid_close": b[4],
-             "ask_open": ask[b[0]][1], "ask_close": ask[b[0]][4]} for b in bid if b[0] in ask]
+             "ask_open": ask[b[0]][1], "ask_high": ask[b[0]][2], "ask_low": ask[b[0]][3], "ask_close": ask[b[0]][4],
+             "bid_volume": b[5]}
+            for b in bid if b[0] in ask]
 
 
 def cache_size() -> int:

@@ -39,6 +39,12 @@ services:
         value: "3.0"
       - key: DONCHIAN_LEVERAGE
         value: "3"
+      # Second engine: crypto capitulation rebound on 1h (docs/CRYPTO_ENGINE2_STUDY.md), stop and target on BingX,
+      # closed after 24 hours. Shares the pair list, the risk controls and the one-position-per-pair gate.
+      - key: REBOUND_ENABLED
+        value: "true"
+      - key: REBOUND_LEVERAGE
+        value: "3"
       - key: MAX_CONCURRENT_POSITIONS
         value: "12"
       - key: TRADE_COOLDOWN_MINUTES

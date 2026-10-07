@@ -9,7 +9,7 @@ from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from forex_ai_analyst.trading.application import degradation, trend_engine
+from forex_ai_analyst.trading.application import degradation, rebound_engine, trend_engine
 from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
 from forex_ai_analyst.trading.infrastructure import signal_repository as scalping_storage
 from forex_ai_analyst.operations import incidents as execution_alerts
@@ -201,6 +201,51 @@ def _resolve_trend_signal(signal: dict, provider: MarketDataProvider, now: datet
                                 details={"fingerprint": signal["fingerprint"], **_broker_error_details(exc)})
 
 
+def _resolve_rebound_signal(signal: dict, provider: MarketDataProvider, now: datetime) -> None:
+    """Capitulation-rebound exits.
+
+    Paper rows: 5m bars after entry decide, the stop winning a bar that touches both. Broker rows are
+    closed by the exchange's own stop or target (matched from the broker fill by recover_open_vst_orders)
+    or, after 24 hours, at market here, with the leftover stop and target cancelled.
+    """
+    expired = datetime.fromisoformat(signal["expiry_time"]) <= now
+    entry = float(signal.get("broker_fill_price") or signal["entry_price"])
+    if not signal.get("broker_quantity"):
+        entry_open_ms = int(signal["candle_time"]) + 3_600_000           # bought after the signal hour closed
+        stop, target = float(signal["stop_price"]), float(signal["target_price"])
+        bars = provider.fetch_closed_bars(signal["pair"], "5m", 300, now)
+        for bar in bars:
+            if int(bar["datetime"]) < entry_open_ms:
+                continue
+            if float(bar["low"]) <= stop:
+                scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.LOSS, stop)
+                return
+            if float(bar["high"]) >= target:
+                scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.WIN, target)
+                return
+        if expired and bars:
+            exit_price = float(bars[-1]["close"])
+            scalping_storage.resolve_paper_signal(signal["fingerprint"], CandidateStatus.TIME_EXIT, exit_price)
+        return
+    if not expired:
+        return
+    if not broker.get_position(signal["pair"], "LONG"):
+        logger.info("%s rebound time exit: no broker position; left to broker-fill recovery", signal["pair"])
+        return
+    close_order = broker.close_position(signal["pair"], "BUY", float(signal["broker_quantity"]))
+    exit_price = float(close_order["fill_price"])
+    scalping_storage.resolve_paper_signal(signal["fingerprint"],
+                                          CandidateStatus.WIN if exit_price > entry else CandidateStatus.LOSS,
+                                          exit_price, close_order, close_reason="MAX_HOLD")
+    logger.info("TRADE CLOSE %s entry=%.6g exit=%.6g reason=MAX_HOLD (rebound 24h)", signal["pair"], entry, exit_price)
+    try:
+        broker.cancel_stop_orders(signal["pair"], "LONG", include_take_profit=True)
+    except Exception as exc:
+        execution_alerts.report(f"stale-stop:{signal['fingerprint']}",
+                                f"{signal['pair']} yopilgandan keyin eski stop/target bekor qilinmadi; BingX'da qo‘lda tekshiring.",
+                                details={"fingerprint": signal["fingerprint"], **_broker_error_details(exc)})
+
+
 def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
     """Resolve positions on closed bars; stop wins if a bar hits both levels.
 
@@ -214,6 +259,9 @@ def resolve_open_paper_signals(provider: MarketDataProvider) -> None:
         try:
             if signal.get("strategy") == trend_engine.STRATEGY:
                 _resolve_trend_signal(signal, provider, now)
+                continue
+            if signal.get("strategy") == rebound_engine.STRATEGY:
+                _resolve_rebound_signal(signal, provider, now)
                 continue
             bars = provider.fetch_closed_bars(signal["pair"], "5m", 300, now)
             if not bars:

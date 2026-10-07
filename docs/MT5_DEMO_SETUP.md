@@ -84,14 +84,26 @@ crypto positions are open at once.
 XAGUSD (docs/GOLD_H4_STUDY.md: gold PF 2.01, silver PF 1.71), `[gold]` in
 Telegram, 0.75% risk via `FX_GOLD_RISK_PCT`.
 
+**Crypto rebound (H1) forward test.** On the same crypto CFDs: when a coin
+closes an hour at least 12% below its close 24 hours earlier and that hour is
+green, buy at market with the stop (0.5 ATR under the 24-hour low) and the
+target (half the fall back) sent to MT5; closed at market after 24 hours
+otherwise (docs/CRYPTO_ENGINE2_STUDY.md: PF 1.33 on ten unseen coins;
+docs/CRYPTO_CFD_STUDY.md: PF 1.23 on CFD costs). About ten trades a month,
+`[rebound]` in Telegram, 0.3% risk via `FX_REBOUND_RISK_PCT`. It checks every
+minute, so it buys within a minute of the hour's close, and skips a signal
+that price has already run away from. On a hedge account it sits beside the
+H4 Donchian position on the same coin.
+
 **Default risk per engine** (docs/PORTFOLIO_STUDY.md; engines are nearly
-uncorrelated): crypto 0.3%, gold/silver 4h 0.75%, index 1.0%, commodity 0.5%,
-fix 0.25% (weakest evidence); at most 6% open risk in total. Adaptive allocation then moves each
+uncorrelated): crypto 0.3%, crypto rebound 0.3%, gold/silver 4h 0.75%, index
+1.0%, commodity 0.5%, fix 0.25% (weakest evidence); at most 6% open risk in total. Adaptive allocation then moves each
 engine with its own live results.
 
-**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,ml` (default).
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound,ml` (default).
 The weekly ML models have no demonstrated edge (docs/ML_STUDY.md);
-`FX_BOT_ENGINES=trend,fix,index,crypto,gold` switches them off. Open trades are always closed on schedule either way.
+`FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound` switches them off. A `.env`
+that still lists the engines without `rebound` keeps the rebound off: add it. Open trades are always closed on schedule either way.
 
 **Guards (optional `.env` overrides):**
 - `FX_BOT_MAX_TOTAL_RISK_PCT=5` — all open positions together risk at most 5%
@@ -124,6 +136,34 @@ The weekly ML models have no demonstrated edge (docs/ML_STUDY.md);
   trades, win rate, profit factor, result and average slippage, against the
   forward-test bar (26 weeks, 60 trades, PF 1.2).
 Signals, closes and errors go to Telegram; the journal is `fx_ml_demo.sqlite`.
+
+## Monitoring: nothing stops silently
+
+- **Startup message.** Every engine with ✅ or ⏸ (off) and its risk; for each engine the markets found at
+  this broker and whether each has enough history for its signal ("ma'lumot kam" otherwise); a ready
+  `FX_BOT_ENGINES=...` line if some engine is off.
+- **Engine heartbeat.** Every run of every engine is recorded. An engine that has not completed a run in
+  10 minutes (fix, rebound: every minute) or 45 minutes (the others: every 15 minutes) sends
+  `🚨 [engine] dvigatel ishlamayapti` with its last error, at most every six hours.
+- **Daily status (after 06:00 UTC).** Adds "Dvigatellar holati": ✅ working / ❌ last error / ⚠️ late, per
+  engine.
+- **MT5 connection.** If the terminal or broker link drops, the bot says so once, retries every minute and
+  says when it is back; it does not restart in a loop. A non-demo account still stops it.
+- **Log file.** `logs\mt5_bot.log` in the bot folder (5 files x 5 MB, rotating): every message, every engine
+  error with its traceback, and a `heartbeat` line every 15 minutes (equity, open trades, engine states).
+  To watch it live on the VM:
+
+  ```powershell
+  Get-Content C:\Users\forexadmin\forex-ai-analyst-main\logs\mt5_bot.log -Tail 50 -Wait
+  ```
+
+  Only the errors: `Select-String -Path ...\logs\mt5_bot.log -Pattern "ERROR|WARNING|dvigatel ishlamayapti"`.
+
+**All proven engines on** (`.env` on the VM):
+
+```
+FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound
+```
 
 ## Export broker history for research
 

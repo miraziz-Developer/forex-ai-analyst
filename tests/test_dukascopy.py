@@ -18,6 +18,10 @@ class DukascopyTests(unittest.TestCase):
         self.assertEqual(ms, 1706659200000 + 3600 * 1000)        # 2024-01-31 00:00 UTC + 1 h
         self.assertEqual((o, h, lo, c), (1.088, 1.08802, 1.08786, 1.08793))
 
+    def test_decode_can_return_volume(self):
+        out = dukascopy.decode(blob([(60, 108800, 108793, 108786, 108802, 1.5)]), date(2024, 1, 31), 1e-5, volume=True)
+        self.assertEqual(out[0][5], 1.5)
+
     def test_hours_join_bid_and_ask(self):
         files = {"BID": blob([(0, 100000, 100010, 99990, 100020, 1.0)]),
                  "ASK": blob([(0, 100002, 100012, 99992, 100022, 1.0)])}

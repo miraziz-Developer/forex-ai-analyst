@@ -29,7 +29,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import crypto_live, fix_live, index_live, metals_live, ml_model, status_report, trend_live
+from forex_ai_analyst.forex import (crypto_live, fix_live, index_live, metals_live, ml_model, rebound_live,
+                                   status_report, trend_live)
+from forex_ai_analyst.forex import engine_health as health
 from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.ml_features import feature_row, load_context
 from forex_ai_analyst.forex.regime_system_study import FX_ONLY
@@ -348,7 +350,7 @@ def main() -> None:
     # The package is installed in site-packages, so look for .env in the folder the bot is started from.
     env_file = Path.cwd() / ".env"
     load_dotenv(env_file)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    setup_logging(Path.cwd() / "logs" / "mt5_bot.log")
     logger.info("settings: .env %s | risk %.2f%% | telegram %s", "found" if env_file.exists() else "NOT found",
                 env_float("FX_BOT_RISK_PCT", 0.5),
                 "on" if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID") else "off")
@@ -358,60 +360,127 @@ def main() -> None:
     db = open_db()
     notify("🧪 FX demo bot ishga tushdi (faqat DEMO hisob)\n" + startup_report(mt5))
     alerts: dict[str, float] = {}
-    last_slow = -1e9
+    last_slow, started, lost_since = -1e9, datetime.now(timezone.utc), None
     while True:
+        now = datetime.now(timezone.utc)
+        if health.connection_lost(mt5):
+            # a dropped terminal or broker link is waited out and retried, not turned into a restart every minute
+            if lost_since is None:
+                lost_since = now
+                notify("⚠️ MT5 ulanishi yo'q (terminal yoki broker). Bot to'xtamaydi: har daqiqada qayta ulanadi.")
+            logger.warning("MT5 connection lost since %s; reconnecting", lost_since.isoformat())
+            mt5.initialize()
+            time.sleep(60)
+            continue
+        if lost_since is not None:
+            notify(f"✅ MT5 ulanishi tiklandi ({int((now - lost_since).total_seconds() // 60)} daqiqa uzilish).")
+            lost_since = None
         slow = time.monotonic() - last_slow >= 15 * 60
         if slow:
             last_slow = time.monotonic()        # set first, so a failing engine is not retried every minute
-        messages = tick(mt5, db, datetime.now(timezone.utc), slow, alerts)
+        messages = tick(mt5, db, now, slow, alerts, started)
         if messages:
             notify("🧪 FX demo\n" + "\n".join(messages))
+        if slow:
+            account = mt5.account_info()
+            open_n = db.execute("SELECT COUNT(*) FROM trades WHERE status = 'OPEN'").fetchone()[0]
+            logger.info("heartbeat: equity %.2f | open trades %d | %s", getattr(account, "equity", 0.0), open_n,
+                        " ; ".join(health.summary(db, watched_engines(), now)))
         time.sleep(60)
 
 
+def setup_logging(path: Path) -> None:
+    """Console plus a rotating file (5 x 5 MB) next to the bot, so what every engine did can be read back."""
+    from logging.handlers import RotatingFileHandler
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                        handlers=[logging.StreamHandler(), handler])
+
+
+ENGINE_ENVS = {"trend": ("FX_TREND_RISK_PCT", 0.5, "xom ashyo D1 Donchian"),
+               "gold": ("FX_GOLD_RISK_PCT", 0.75, "oltin/kumush H4 Donchian"),
+               "crypto": ("FX_CRYPTO_RISK_PCT", 0.3, "kripto H4 Donchian"),
+               "index": ("FX_INDEX_RISK_PCT", 1.0, "indeks pullback D1"),
+               "rebound": ("FX_REBOUND_RISK_PCT", 0.3, "kripto qulashdan qaytish H1"),
+               "fix": ("FX_FIX_RISK_PCT", 0.25, "oy oxiri fix"),
+               "ml": ("FX_BOT_RISK_PCT", 0.5, "haftalik ML (isbotlanmagan)")}
+
+
+def watched_engines() -> list[str]:
+    """Enabled engines plus the always-on risk and close steps: each must complete runs on its rhythm."""
+    return [e for e in ENGINE_ENVS if e in enabled_engines()] + ["risk", "close"]
+
+
 def enabled_engines() -> set[str]:
-    """FX_BOT_ENGINES, e.g. "trend,fix,index,crypto,gold" to switch the weekly ML experiment off (default: all).
-    Closing open trades, the risk state and the weekly report always run."""
-    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,crypto,gold,ml")
+    """FX_BOT_ENGINES, e.g. "trend,fix,index,crypto,gold,rebound" to switch the weekly ML experiment off
+    (default: all). Closing open trades, the risk state and the weekly report always run."""
+    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,crypto,gold,rebound,ml")
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
+def _markets_line(mt5, resolve, candidates, timeframe: str, need: int) -> str:
+    """Markets found at this broker and whether each has the bars its signal needs."""
+    found, missing, short = [], [], []
+    for market in candidates:
+        symbol = resolve(mt5, market)
+        if not symbol:
+            missing.append(market)
+            continue
+        try:
+            bars = len(trend_live.completed_bars(mt5, symbol, timeframe, need + 1))
+        except Exception:
+            bars = None
+        if bars is None or bars >= need:
+            found.append(f"{market}={symbol}")
+        else:
+            short.append(f"{market}={symbol} ({bars}/{need} {timeframe} bar)")
+    line = ", ".join(found) or "yo'q"
+    if short:
+        line += f" | ma'lumot kam: {', '.join(short)}"
+    if missing:
+        line += f" | topilmadi: {', '.join(missing)} (FX_SYMBOL_MAP bilan ko'rsating)"
+    return line
+
+
 def startup_report(mt5) -> str:
-    """Which markets each engine found at this broker, so a differently named symbol is never skipped silently."""
-    lines = [f"Dvigatellar: {', '.join(sorted(enabled_engines()))}"]
+    """Every engine, on or off, with its risk, the markets it found at this broker and whether their history is
+    long enough, so a differently named symbol or a missing engine is never skipped silently."""
+    enabled = enabled_engines()
+    lines = []
     mode = getattr(mt5.account_info(), "margin_mode", None)
     if mode is not None and mode != getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2):
         lines.append("⚠️ Hisob NETTING turida: bir simvoldagi pozitsiyalar birlashib ketadi va bot ularni to'g'ri "
                      "boshqara olmaydi. HEDGE turidagi hisob oching.")
-    found, missing = [], []
-    for market in trend_live.CANDIDATES:
-        symbol = trend_live.resolve(mt5, market)
-        (found if symbol else missing).append(f"{market}={symbol}" if symbol else market)
-    lines.append("Trend bozorlari: " + (", ".join(found) or "yo'q")
-                 + (f" | topilmadi: {', '.join(missing)} (FX_SYMBOL_MAP bilan ko'rsating)" if missing else ""))
-    found, missing = [], []
-    for market in index_live.CANDIDATES:
-        symbol = index_live.resolve(mt5, market)
-        (found if symbol else missing).append(f"{market}={symbol}" if symbol else market)
-    lines.append("Indekslar: " + (", ".join(found) or "yo'q")
-                 + (f" | topilmadi: {', '.join(missing)} (FX_SYMBOL_MAP bilan ko'rsating)" if missing else ""))
-    found, missing = [], []
-    for market in crypto_live.CANDIDATES:
-        symbol = crypto_live.resolve(mt5, market)
-        (found if symbol else missing).append(f"{market}={symbol}" if symbol else market)
-    lines.append("Kripto: " + (", ".join(found) or "yo'q") + (f" | topilmadi: {', '.join(missing)}" if missing else ""))
+    for name, (env, default, title) in ENGINE_ENVS.items():
+        state = "✅" if name in enabled else "⏸ o'chiq"
+        lines.append(f"{state} {name}: {title}, risk {env_float(env, default):g}% ({env})")
+    off = [n for n in ENGINE_ENVS if n not in enabled and n != "ml"]
+    if off:
+        lines.append(f"⚠️ O'chiq dvigatellar: {', '.join(off)}. Yoqish uchun .env: "
+                     f"FX_BOT_ENGINES={','.join(sorted((enabled - {'ml'}) | set(off)))}")
+    lines.append("Trend bozorlari: " + _markets_line(mt5, trend_live.resolve, trend_live.CANDIDATES, "D1",
+                                                       trend_live.PARAMS["entry_n"] + 1))
+    lines.append("Oltin/kumush H4: " + _markets_line(mt5, metals_live.resolve, metals_live.CANDIDATES, "H4", 101))
+    lines.append("Indekslar: " + _markets_line(mt5, index_live.resolve, index_live.CANDIDATES, "D1", 210))
+    lines.append("Kripto (H4 Donchian va H1 qaytish): " +
+                 _markets_line(mt5, crypto_live.resolve, crypto_live.CANDIDATES, "H4", 101))
     fx_missing = [m.name for m in FX_ONLY if not resolve_symbol(mt5, m.name)]
-    lines.append("FX juftliklar: " + ("hammasi topildi" if not fx_missing else f"topilmadi: {', '.join(fx_missing)}"))
+    lines.append("FX juftliklar (fix): " + ("hammasi topildi" if not fx_missing else f"topilmadi: {', '.join(fx_missing)}"))
+    lines.append("Loglar: logs\\mt5_bot.log (har 15 daqiqada heartbeat qatori)")
     return "\n".join(lines)
 
 
-def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[str, float]) -> list[str]:
+def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[str, float],
+         started: datetime | None = None) -> list[str]:
     """One minute of the bot. slow=True also runs the 15-minute engines (risk state, weekly closes, ML,
     trend, report). Every engine is isolated: one failing never stops the others (the month-end fix
     must not be missed because a data source for the ML model is down)."""
     me = sys.modules[__name__]
     # the fix rule is time-critical (3-minute windows), so it runs before the slower engines
-    engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
+    engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
+               # the rebound buys the hour after a crash, so it also runs every minute (it skips stale signals)
+               ("rebound", lambda: rebound_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
     if slow:
         engines += [("risk", lambda: [m for m in [guards.drawdown_pause(db, require_demo(mt5).equity)[1]] if m]),
                     ("close", lambda: close_due(mt5, db, now.date().isoformat())),
@@ -424,19 +493,26 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                      else []),
                     ("status", lambda: [r] if (r := status_report.daily_status(mt5, db, now, enabled_engines()))
                      else [])]
-    switchable = {"fix", "ml", "trend", "index", "crypto", "gold"}
+    switchable = {"fix", "ml", "trend", "index", "crypto", "gold", "rebound"}
     engines = [(n, r) for n, r in engines if n not in switchable or n in enabled_engines()]
     messages: list[str] = []
     for name, run in engines:
         try:
-            messages += run()
+            out = run()
+            messages += out
+            health.record_ok(db, name, now)
+            if slow or out:
+                logger.info("engine %s ok (%d messages)", name, len(out))
         except SystemExit:
             raise
         except Exception as exc:
             logger.exception("%s engine failed", name)
+            health.record_error(db, name, now, exc)
             if time.monotonic() - alerts.get(name, -1e9) > 6 * 3600:
                 messages.append(f"⚠️ {name} xatosi: {type(exc).__name__}: {exc}")
                 alerts[name] = time.monotonic()
+    if slow and started is not None:
+        messages += health.stalled(db, watched_engines(), now, started)
     return messages
 
 def _paused(db: sqlite3.Connection) -> bool:

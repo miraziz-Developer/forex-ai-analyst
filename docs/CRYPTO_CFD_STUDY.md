@@ -35,3 +35,26 @@ results should be expected to be weaker; the coins move together, so the bot
 adds a 40% one-day stress move for crypto; the Render bot trades the same
 signals on BingX, so the two accounts carry correlated risk.
 Adopted: a fourth MT5 demo engine (`crypto_live.py`).
+
+## Capitulation rebound on the same CFDs — pre-registration (2026-10-07)
+
+The rebound rule (docs/CRYPTO_ENGINE2_STUDY.md, B; replicated on ten unseen coins with PF 1.33) would add
+about 20 short trades a month to the MT5 demo. These ten coins were among the markets B was first tested
+on, so this is not a new test of the edge; it checks whether the edge survives CFD costs: the spreads above
+(0.15% BTC/ETH, 0.30% others, round trip), no funding, swap 10/20/30% a year on the days held. Rule
+unchanged. Code `src/forex_ai_analyst/forex/rebound_cfd_study.py`.
+**Added to the MT5 demo only if, at the 20% swap:** mean R > 0, PF >= 1.15, bootstrap P >= 0.90, at least
+6 of 10 coins positive.
+
+### Rebound result (2026-10-07) — PASS at every swap level
+
+| Swap | Trades | Win | Mean R | PF | P | Coins + | 0.5% risk: CAGR / max DD |
+|---|---|---|---|---|---|---|---|
+| 10% | 709 | 52.8% | +0.102 | 1.23 | 0.91 | 8/10 | 5.7% / -19.5% |
+| **20%** | 709 | 52.8% | **+0.100** | **1.23** | 0.90 | 8/10 | 5.6% / -19.6% |
+| 30% | 709 | 52.6% | +0.098 | 1.23 | 0.90 | 8/10 | 5.4% / -19.8% |
+
+About ten trades a month on the ten CFDs, held at most a day, so the swap hardly matters. Losers: SOL
+(-1.8R) and LTC (-3.7R) in total. On its own it is a modest engine (5-6% a year at 0.5% risk, with a
+drawdown of about 20% because crashes cluster); its value is that it trades when the trend engines are
+flat or being stopped out. It joins the MT5 demo as engine `rebound` (H1), default risk 0.3%.
