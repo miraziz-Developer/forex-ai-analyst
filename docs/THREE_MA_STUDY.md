@@ -22,3 +22,17 @@ Swap is not charged (stated; positions last days).
 
 **Passes only if:** at least 300 trades; mean net > 0 with month-bootstrap P(mean > 0) >= 0.95; profit
 factor >= 1.2; at least 8 of 12 markets positive; both halves positive.
+
+## Result (2026-10-07) — FAIL
+
+| Sample | Trades | Hit | Gross / trade | Net / trade | PF | P(mean>0) |
+|---|---|---|---|---|---|---|
+| All, 2010-2026 | 18,103 | 39.0% | -0.021% | -0.032% | 0.91 | 0.01 |
+| 2010-2018 | 9,231 | 39.5% | -0.030% | -0.041% | 0.89 | 0.00 |
+| 2018-2026 | 8,872 | 38.6% | -0.011% | -0.022% | 0.93 | 0.16 |
+| FX (10 pairs) | 15,357 | 39.2% | -0.015% | -0.022% | 0.92 | 0.02 |
+| Metals | 2,746 | 37.8% | -0.053% | -0.088% | 0.88 | 0.03 |
+
+Markets positive: 2 of 12 (GBPJPY PF 1.04, XAUUSD PF 1.05). The rule loses even before costs. Computed in
+real time, the crosses come 2-4 H4 bars after the turns that the chart's shifted lines appear to catch, by
+which time much of the move is over and the exit cross gives it back. Nothing is built.
