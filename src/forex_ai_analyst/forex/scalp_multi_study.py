@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import random
 import sys
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -276,8 +276,9 @@ RULES = (Rule("r1_ribbon", 2, r1_ribbon), Rule("r2_ribbon_stochastic", 2, r2_rib
 # ---------- execution on one-minute bid/ask ----------
 
 def execute(pair: str, name: str, m1: list[dict], bars: list[dict], sig: dict, stop_atr: float,
-            target_atr: float | None, max_hold: int) -> list[dict]:
-    """Market orders at the first minute after a bar's close; stop entries work during the next bar.
+            target_atr: float | None, max_hold: int, gate=None, min_stop: float = 0.0) -> list[dict]:
+    """`gate(side, minute_index)` may refuse an entry; `min_stop` widens a narrower protective stop (and the
+    target with it, keeping the ratio). Market orders at the first minute after a bar's close; stop entries work during the next bar.
     Long trades buy the ask and sell the bid. Within a minute the protective stop is checked before the
     target and before stop entries. An opposite signal closes the position (and may reverse it)."""
     a = atr(bars, 14)
@@ -295,10 +296,11 @@ def execute(pair: str, name: str, m1: list[dict], bars: list[dict], sig: dict, s
 
     def open_(side: int, price: float, i: int, k: int) -> None:
         nonlocal pos
-        if a[k] is None or a[k] <= 0:
+        if a[k] is None or a[k] <= 0 or (gate is not None and not gate(side, i)):
             return
-        stop = price - side * stop_atr * a[k]
-        target = price + side * target_atr * a[k] if target_atr else None
+        distance = max(stop_atr * a[k], min_stop)
+        stop = price - side * distance
+        target = price + side * distance * target_atr / stop_atr if target_atr else None
         pos = {"side": side, "entry": price, "stop": stop, "target": target, "k": k, "ms": times[i]}
 
     for k, bar in enumerate(bars):
@@ -346,9 +348,10 @@ def execute(pair: str, name: str, m1: list[dict], bars: list[dict], sig: dict, s
     return trades
 
 
-def rule_trades(pair: str, m1: list[dict], rule: Rule) -> list[dict]:
+def rule_trades(pair: str, m1: list[dict], rule: Rule, gate=None, min_stop: float = 0.0) -> list[dict]:
     bars = base.aggregate(m1, rule.minutes * M1)
-    return execute(pair, rule.name, m1, bars, rule.signals(bars), rule.stop_atr, rule.target_atr, rule.max_hold)
+    return execute(pair, rule.name, m1, bars, rule.signals(bars), rule.stop_atr, rule.target_atr, rule.max_hold,
+                   gate, min_stop)
 
 
 def forum_trades(pair: str, m1: list[dict]) -> list[dict]:
@@ -358,7 +361,8 @@ def forum_trades(pair: str, m1: list[dict]) -> list[dict]:
             for t in base.simulate(pair, m1, base.Params())]
 
 
-def confluence(pair: str, m1: list[dict], components: list[dict], need: int = 2, window: int = 3) -> list[dict]:
+def confluence(pair: str, m1: list[dict], components: list[dict], need: int = 2, window: int = 3,
+               gate=None, min_stop: float = 0.0) -> list[dict]:
     """Enter at the close of a 5-minute bar when at least `need` different rules opened a trade the same way
     during the last `window` bars and none opened the other way; 1.5 ATR stop, 1.5 ATR target, 24 bars."""
     bars = base.aggregate(m1, 5 * M1)
@@ -373,7 +377,7 @@ def confluence(pair: str, m1: list[dict], components: list[dict], need: int = 2,
         longs, shorts = len(v.get(1, ())), len(v.get(-1, ()))
         sig["le"][k] = longs >= need and shorts == 0
         sig["se"][k] = shorts >= need and longs == 0
-    return execute(pair, "confluence", m1, bars, sig, 1.5, 1.5, 24)
+    return execute(pair, "confluence", m1, bars, sig, 1.5, 1.5, 24, gate, min_stop)
 
 
 # ---------- evaluation in R (each trade risks the same amount) ----------
@@ -399,18 +403,71 @@ def evaluate(trades: list[dict], extra_pips: float = EXTRA_PIPS) -> dict:
             "per_pair_total_r": {k: round(v, 1) for k, v in per.items()}}
 
 
-def all_trades(period) -> dict[str, list[dict]]:
+# ---------- fixes for the known weaknesses of scalping, fixed before any development result ----------
+
+@dataclass(frozen=True)
+class Variant:
+    name: str
+    hours: tuple | None = None        # entry hours allowed (UTC)
+    trend: bool = False               # trade only with the H1 EMA 8/13/21 stack
+    min_stop_pips: float = 0.0        # a stop narrower than this is widened: the cost stays a small part of R
+
+
+LIQUID = tuple(range(7, 17))          # London open to the end of the London/New York overlap
+VARIANTS = (Variant("base"), Variant("S", hours=LIQUID), Variant("T", trend=True), Variant("W", min_stop_pips=6.0),
+            Variant("STW", hours=LIQUID, trend=True, min_stop_pips=6.0))
+
+
+def make_gate(m1: list[dict], variant: Variant):
+    if variant.hours is None and not variant.trend:
+        return None
+    times = [b["datetime"] for b in m1]
+    ends, trend = base.trend_by_time(base.aggregate(m1, base.H1), (8, 13, 21)) if variant.trend else ([], [])
+
+    def gate(side: int, i: int) -> bool:
+        if variant.hours is not None and datetime.fromtimestamp(times[i] / 1000, timezone.utc).hour not in variant.hours:
+            return False
+        if variant.trend:
+            j = bisect_right(ends, times[i]) - 1        # last completed H1 bar
+            return j >= 0 and trend[j] == side
+        return True
+    return gate
+
+
+def all_trades(period, variants=VARIANTS) -> dict[str, list[dict]]:
+    """{"variant:rule" or "variant:portfolio" or "variant:confluence": trades}"""
     out: dict[str, list[dict]] = {}
     for pair in PAIRS:
         m1 = base.minutes(pair, *period)
-        components = forum_trades(pair, m1)
-        for rule in RULES:
-            components += rule_trades(pair, m1, rule)
-        for t in components:
-            out.setdefault(t["rule"], []).append(t)
-        out.setdefault("portfolio", []).extend(components)
-        out.setdefault("confluence", []).extend(confluence(pair, m1, components))
+        forum = forum_trades(pair, m1)
+        for v in variants:
+            gate, min_stop = make_gate(m1, v), v.min_stop_pips * PIP
+            components = [t for t in forum if v.hours is None or t["hour"] in v.hours]
+            for rule in RULES:
+                components += rule_trades(pair, m1, rule, gate, min_stop)
+            for t in components:
+                out.setdefault(f"{v.name}:{t['rule']}", []).append(t)
+            out.setdefault(f"{v.name}:portfolio", []).extend(components)
+            out.setdefault(f"{v.name}:confluence", []).extend(confluence(pair, m1, components, gate=gate,
+                                                                         min_stop=min_stop))
     return out
+
+
+SESSIONS = (("asia 00-07", range(0, 7)), ("london 07-12", range(7, 12)), ("overlap 12-16", range(12, 16)),
+            ("new york 16-21", range(16, 21)), ("rollover 21-24", range(21, 24)))
+
+
+def diagnose(trades: list[dict]) -> dict:
+    """Where a version loses: by session, stop size (the cost's share of R), side and pair; R at 0.7 pip."""
+    def mean(group):
+        return {"trades": len(group), "mean_r": round(sum(t["r_gross"] - EXTRA_PIPS / t["risk_pips"]
+                                                          for t in group) / len(group), 3)} if group else None
+    return {"session": {name: mean([t for t in trades if t["hour"] in hours]) for name, hours in SESSIONS},
+            "stop_pips": {f"{lo}-{hi}": mean([t for t in trades if lo <= t["risk_pips"] < hi])
+                          for lo, hi in ((0, 4), (4, 7), (7, 12), (12, 1000))},
+            "side": {"long": mean([t for t in trades if t["side"] > 0]),
+                     "short": mean([t for t in trades if t["side"] < 0])},
+            "pair": {p: mean([t for t in trades if t["pair"] == p]) for p in PAIRS}}
 
 
 def passes(report: dict) -> bool:
@@ -418,23 +475,45 @@ def passes(report: dict) -> bool:
             and (report["profit_factor"] or 0) >= 1.2 and report["pairs_positive"] >= 2)
 
 
+def selected(dev: dict, variant: str) -> list[str]:
+    """Rules of a variant whose development mean R (0.7 pip cost) is positive."""
+    return sorted(k.split(":")[1] for k, v in dev.items()
+                  if k.startswith(variant + ":r") and v["cost_0.7"].get("mean_r", 0) > 0)
+
+
 def main() -> None:
     Path("research_output").mkdir(exist_ok=True)
-    if "--final" in sys.argv:
+    dev_path = Path("research_output/scalp_multi_development.json")
+    if "--final" in sys.argv:                     # e.g. --final STW:confluence or --final W:selected
         version = sys.argv[sys.argv.index("--final") + 1]
-        trades = all_trades(HOLDOUT)[version]
+        name, kind = version.split(":")
+        variant = next(v for v in VARIANTS if v.name == name)
+        found = all_trades(HOLDOUT, (variant,))
+        if kind == "selected":
+            rules = selected(json.loads(dev_path.read_text()), name)
+            trades = [t for r in rules for t in found.get(f"{name}:{r}", [])]
+        else:
+            rules, trades = None, found[version]
         report = evaluate(trades)
-        out = {"version": version, "holdout": report, "retail_cost": evaluate(trades, RETAIL_EXTRA_PIPS),
-               "passes": passes(report)}
+        out = {"version": version, "rules": rules, "holdout": report,
+               "retail_cost": evaluate(trades, RETAIL_EXTRA_PIPS), "passes": passes(report)}
         Path("research_output/scalp_multi_final.json").write_text(json.dumps(out, indent=2) + "\n")
         print(json.dumps(out))
         return
-    out = {}
-    for name, trades in sorted(all_trades(DEV).items()):
+    found, out = all_trades(DEV), {}
+    for name, trades in sorted(found.items()):
         out[name] = {"cost_0.7": evaluate(trades), "cost_0": evaluate(trades, 0.0),
-                     "cost_1.2": evaluate(trades, RETAIL_EXTRA_PIPS)}
-        print(name, json.dumps(out[name]["cost_0.7"]), "| no extra cost mean_r", out[name]["cost_0"]["mean_r"])
-    Path("research_output/scalp_multi_development.json").write_text(json.dumps(out, indent=2) + "\n")
+                     "cost_1.2": evaluate(trades, RETAIL_EXTRA_PIPS), "diagnose": diagnose(trades)}
+    for v in VARIANTS:
+        rules = selected(out, v.name)
+        trades = [t for r in rules for t in found.get(f"{v.name}:{r}", [])]
+        out[f"{v.name}:selected"] = {"rules": rules, "cost_0.7": evaluate(trades),
+                                     "cost_1.2": evaluate(trades, RETAIL_EXTRA_PIPS)}
+    for name, v in out.items():
+        r = v["cost_0.7"]
+        print(f"{name:32s} n={r['trades']:6d} mean_r={r.get('mean_r')} pf={r.get('profit_factor')} "
+              f"p={r.get('p_mean_positive')} hit={r.get('hit_rate')} stop={r.get('median_risk_pips')}")
+    dev_path.write_text(json.dumps(out, indent=2) + "\n")
 
 
 if __name__ == "__main__":

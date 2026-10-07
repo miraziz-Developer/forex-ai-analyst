@@ -45,3 +45,26 @@ without commission but wider spreads). Everything is measured in R, the loss at 
 - **Holdout** = 2025-10-01 .. 2026-09-30, run once, for one final version.
 - **The final version passes only if, on the holdout, at the 0.7 pip cost:** at least 300 trades; mean
   net R > 0 with day-bootstrap P(mean > 0) >= 0.95; profit factor >= 1.2; at least 2 of 3 pairs positive.
+
+## Fixes for the known weaknesses of scalping (fixed before any development result)
+
+Scalping loses mainly to three things: costs that are large against a stop of a few pips, quiet hours
+with wide spreads and random noise, and trading against the larger trend. Each fix answers one of them and
+is written down now, so it cannot be tuned to the data:
+
+| Variant | Change |
+|---|---|
+| `base` | the rules exactly as above |
+| `S` | entries only 07:00–16:59 UTC (London open to the end of the London/New York overlap) |
+| `T` | entries only in the direction of the H1 EMA 8/13/21 stack (the forum rule's filter, for every rule) |
+| `W` | a protective stop narrower than 6 pips is widened to 6 pips (target widened in proportion), so the 0.7 pip cost stays near 10% of R |
+| `STW` | all three |
+
+For each variant: every single rule, `portfolio`, `confluence`, and `selected` (the portfolio of only the
+rules whose development mean R is positive). The development run also reports where each version loses
+(session, stop size, side, pair).
+
+**Choosing the one version for the holdout (fixed now):** among the 15 combined versions (5 variants x
+portfolio / confluence / selected), the one with the highest development mean R at the 0.7 pip cost, among
+those with at least 300 development trades, development P(mean > 0) >= 0.95 and profit factor >= 1.2.
+If no version qualifies, the holdout is not spent and the verdict is FAIL on development data.

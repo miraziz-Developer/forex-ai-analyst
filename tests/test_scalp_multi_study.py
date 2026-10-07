@@ -112,6 +112,30 @@ class ExecutionTest(unittest.TestCase):
         mixed = two + [{"rule": "c", "side": -1, "entry_ms": t0}]
         self.assertEqual(s.confluence("EURUSD", m1, mixed), [])
 
+    def test_gate_refuses_and_min_stop_widens(self):
+        m1 = [minute(i, 1.1) for i in range(300)] + [minute(300 + i, 1.1 - 0.0001 * i) for i in range(300)]
+        bars = s.base.aggregate(m1, 5 * s.M1)
+        sig = signal_at(len(bars), 50, 1)
+        self.assertEqual(s.execute("EURUSD", "t", m1, bars, sig, 2.0, None, 1000, gate=lambda side, i: False), [])
+        wide = s.execute("EURUSD", "t", m1, bars, sig, 2.0, None, 1000, min_stop=6 * s.PIP)
+        self.assertAlmostEqual(wide[0]["risk_pips"], 6.0)
+
+    def test_variant_gate_hours_and_trend(self):
+        rising = [minute(i, 1.1 + i * 0.000002) for i in range(40 * 60)]
+        gate = s.make_gate(rising, s.Variant("x", hours=(0,), trend=True))
+        late = len(rising) - 1
+        hour = s.datetime.fromtimestamp(rising[late]["datetime"] / 1000, s.timezone.utc).hour
+        self.assertEqual(gate(1, late), hour == 0)
+        trend_only = s.make_gate(rising, s.Variant("y", trend=True))
+        self.assertTrue(trend_only(1, late))
+        self.assertFalse(trend_only(-1, late))
+        self.assertIsNone(s.make_gate(rising, s.Variant("base")))
+
+    def test_selected_keeps_positive_rules_of_one_variant(self):
+        dev = {"W:r1_ribbon": {"cost_0.7": {"mean_r": 0.1}}, "W:r2_ribbon_stochastic": {"cost_0.7": {"mean_r": -0.1}},
+               "S:r3_momentum": {"cost_0.7": {"mean_r": 0.2}}, "W:portfolio": {"cost_0.7": {"mean_r": 0.3}}}
+        self.assertEqual(s.selected(dev, "W"), ["r1_ribbon"])
+
     def test_evaluate_subtracts_cost_in_r(self):
         trades = [{"pair": "EURUSD", "day": "2025-01-0%d" % (i % 5 + 1), "r_gross": 1.0 if i % 2 else -1.0,
                    "risk_pips": 7.0} for i in range(20)]
