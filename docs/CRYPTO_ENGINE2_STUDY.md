@@ -121,3 +121,18 @@ BingX, and skipped if price has already run more than half a stop distance past 
 hours the scheduler closes the position at market and cancels the leftover stop and target. It shares the
 risk controls (RISK PCT), the 12-position cap and the one-position-per-pair gate with Donchian, so it does
 not trade a coin that Donchian holds. `REBOUND_ENABLED=false` switches it off; `REBOUND_LEVERAGE` (3).
+
+## Expansion: B on 32 more BingX coins it has never seen — pre-registration (2026-10-07)
+
+More trades without a weaker rule. Candidates (fixed now, before any run): every coin from a list of older
+liquid tokens that is listed on BingX's public contract list today and is not among the bot's thirty:
+XTZ, THETA, VET, ICP, MANA, GALA, CHZ, ENJ, KSM, COMP, SNX, 1INCH, SUSHI, ZIL, IOTA, NEO, QTUM, ONT, BAT,
+ZRX, KAVA, RUNE, EGLD, HBAR, GRT, CELO, SKL, ANKR, CTSI, DYDX, ENS, APE. Period: 2021-01 (or the first full
+month a coin's Binance USD-M archive covers) to 2026-09; a coin with a month missing later or more than five
+hourly gaps is excluded as bad data, whatever its result. Rule, costs and funding unchanged; code
+`src/forex_ai_analyst/lab/rebound_expansion.py`.
+
+**Passes only if** (the whole group, not chosen coins): mean R > 0 with bootstrap P >= 0.95; PF >= 1.15;
+at least 60% of the tested coins positive; mean R > 0 in 2021-2023 and in 2024-2026. A pass adds **every**
+tested coin (losers included, so the list is not picked by its results) to the rebound engine only; the
+Donchian list stays as it is.
