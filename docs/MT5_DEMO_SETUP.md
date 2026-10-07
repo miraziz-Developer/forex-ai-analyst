@@ -137,6 +137,34 @@ that still lists the engines without `rebound` keeps the rebound off: add it. Op
   forward-test bar (26 weeks, 60 trades, PF 1.2).
 Signals, closes and errors go to Telegram; the journal is `fx_ml_demo.sqlite`.
 
+## Monitoring: nothing stops silently
+
+- **Startup message.** Every engine with ✅ or ⏸ (off) and its risk; for each engine the markets found at
+  this broker and whether each has enough history for its signal ("ma'lumot kam" otherwise); a ready
+  `FX_BOT_ENGINES=...` line if some engine is off.
+- **Engine heartbeat.** Every run of every engine is recorded. An engine that has not completed a run in
+  10 minutes (fix, rebound: every minute) or 45 minutes (the others: every 15 minutes) sends
+  `🚨 [engine] dvigatel ishlamayapti` with its last error, at most every six hours.
+- **Daily status (after 06:00 UTC).** Adds "Dvigatellar holati": ✅ working / ❌ last error / ⚠️ late, per
+  engine.
+- **MT5 connection.** If the terminal or broker link drops, the bot says so once, retries every minute and
+  says when it is back; it does not restart in a loop. A non-demo account still stops it.
+- **Log file.** `logs\mt5_bot.log` in the bot folder (5 files x 5 MB, rotating): every message, every engine
+  error with its traceback, and a `heartbeat` line every 15 minutes (equity, open trades, engine states).
+  To watch it live on the VM:
+
+  ```powershell
+  Get-Content C:\Users\forexadmin\forex-ai-analyst-main\logs\mt5_bot.log -Tail 50 -Wait
+  ```
+
+  Only the errors: `Select-String -Path ...\logs\mt5_bot.log -Pattern "ERROR|WARNING|dvigatel ishlamayapti"`.
+
+**All proven engines on** (`.env` on the VM):
+
+```
+FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound
+```
+
 ## Export broker history for research
 
 ```powershell

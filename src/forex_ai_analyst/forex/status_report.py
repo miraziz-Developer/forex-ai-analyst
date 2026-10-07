@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from forex_ai_analyst.forex import crypto_live, fix_live, index_live, metals_live, trend_live
+from forex_ai_analyst.forex import engine_health as health
 from forex_ai_analyst.forex import mt5_guards as guards
 from forex_ai_analyst.forex.index_study import sma
 from forex_ai_analyst.lab.candidates import rsi
@@ -97,4 +98,7 @@ def daily_status(mt5, db: sqlite3.Connection, now: datetime, engines: set[str]) 
     if "fix" in engines:
         days = (fix_live.last_weekday(now.date()) - now.date()).days
         lines.append(f"[fix] oy oxiriga {days} kun" if days > 0 else "[fix] bugun oy oxiri: 15:00-16:03 London")
+    order = [e for e in ("trend", "gold", "crypto", "index", "rebound", "fix", "ml") if e in engines]
+    lines.append("Dvigatellar holati:")
+    lines += health.summary(db, order + ["risk", "close"], now)
     return "\n".join(lines)
