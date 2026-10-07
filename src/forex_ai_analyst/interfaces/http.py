@@ -1,4 +1,5 @@
-"""The one Render entrypoint: deterministic Donchian 4h trend service, BingX VST demo only (no LLM in the trade path)."""
+"""The one Render entrypoint: deterministic Donchian 4h trend and 1h capitulation-rebound engines, BingX VST demo
+only (no LLM in the trade path)."""
 from __future__ import annotations
 
 import logging
@@ -13,7 +14,7 @@ load_dotenv()
 
 from flask import Flask, abort, jsonify, request
 
-from forex_ai_analyst.trading.application import trend_engine
+from forex_ai_analyst.trading.application import rebound_engine, trend_engine
 from forex_ai_analyst.trading.domain.models import CandidateSignal, CandidateStatus, Decision, Direction
 from forex_ai_analyst.knowledge import service as knowledge
 from forex_ai_analyst.operations import incidents as execution_alerts
@@ -175,15 +176,16 @@ def position_gate_rejection(pair: str, open_signals: list[dict], closed_signals:
 TREND_MAX_HOLD_DAYS = 60  # safety net only; the strategy exits on its stop or exit channel
 
 
-def execute_trend_order(pair: str, signal: dict, risk_usdt: float, leverage: int) -> dict | None:
-    """Long market order with an exchange-side stop only (no fixed take-profit)."""
+def execute_trend_order(pair: str, signal: dict, risk_usdt: float, leverage: int,
+                        take_profit: float | None = None) -> dict | None:
+    """Long market order with an exchange-side stop (Donchian: no fixed take-profit; rebound: with one)."""
     if not demo_execution_enabled():
         return None
     from forex_ai_analyst.trading.infrastructure import bingx_broker as broker
     quantity = broker.round_quantity(pair, risk_usdt / signal["stop_distance"])
     if quantity <= 0:
         raise ValueError(f"BingX VST quantity rounds to zero for {pair}; risk too small")
-    order = broker.place_market_order(pair, "BUY", quantity, None, signal["stop"], leverage=leverage)
+    order = broker.place_market_order(pair, "BUY", quantity, take_profit, signal["stop"], leverage=leverage)
     filled = order.get("filled_quantity") or quantity
     result = {**order, "quantity": filled}
     if float(order["fill_price"]) > signal["stop"]:
@@ -261,10 +263,20 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
                   "stop_distance": signal["stop_distance"]})
     if scalping_storage.fingerprint_exists(candidate.fingerprint):
         return [{"status": "SKIP", "reason": "bu 4h breakout allaqachon ko'rib chiqilgan"}]
+    return _open_long(pair, candidate, signal, params.leverage, now, account_state, "Donchian", None,
+                      "Donchian 4h breakout",
+                      lambda risk, qty, order: format_trend_signal(pair, signal, params, risk, qty, order))
+
+
+def _open_long(pair: str, candidate: CandidateSignal, signal: dict, leverage: int, now: datetime,
+               account_state: dict | None, label: str, take_profit: float | None, reason: str,
+               message) -> list[dict]:
+    """The shared path from an accepted long signal to a VST order: account state, runtime controls, the
+    position gate, risk sizing from equity and margin, the order, the journal and the Telegram message."""
     account_snapshot = account_state if account_state is not None else _vst_account_context()
     if not account_snapshot.get("available"):
         return [{"status": "SKIP", "reason": "VST balance state unavailable; order yuborilmadi"}]
-    runtime_rejection = runtime_controls.trade_permitted(pair, 0.0, params.leverage, 0)
+    runtime_rejection = runtime_controls.trade_permitted(pair, 0.0, leverage, 0)
     if runtime_rejection:
         key = "kill-switch" if "kill switch" in runtime_rejection else f"risk-control:{pair}:{runtime_rejection}"
         execution_alerts.report(key, f"{pair} yangi VST order bloklandi: {runtime_rejection}.",
@@ -276,13 +288,13 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
     gate = position_gate_rejection(pair, scalping_storage.open_paper_signals(),
                                    scalping_storage.closed_paper_signals(50), now)
     if gate:
-        logger.info("%s Donchian signal rejected by position gate: %s", pair, gate)
+        logger.info("%s %s signal rejected by position gate: %s", pair, label, gate)
         return [{"status": "SKIP", "reason": gate}]
     controls = runtime_controls.settings()
     risk_limit = runtime_controls.balance_risk_limit(account_snapshot, controls)
     try:
         margin_supported = (float(account_snapshot["available_usdt"]) * float(controls["max_margin_utilization_pct"])
-                            / 100 * params.leverage * signal["stop_distance"] / signal["entry"])
+                            / 100 * leverage * signal["stop_distance"] / signal["entry"])
     except (KeyError, TypeError, ValueError):
         margin_supported = 0.0
     risk_usdt = min(risk_limit or 0.0, margin_supported)
@@ -290,9 +302,10 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
         return [{"status": "SKIP", "reason": "VST balansi yoki marja risk uchun yetarli emas"}]
 
     try:
-        broker_order = execute_trend_order(pair, signal, risk_usdt, params.leverage)
+        broker_order = (execute_trend_order(pair, signal, risk_usdt, leverage, take_profit) if take_profit
+                        else execute_trend_order(pair, signal, risk_usdt, leverage))
         quantity = float((broker_order or {}).get("quantity", risk_usdt / signal["stop_distance"]))
-        scalping_storage.mark_accepted(Decision(candidate, CandidateStatus.ACCEPTED_PAPER, "Donchian 4h breakout"),
+        scalping_storage.mark_accepted(Decision(candidate, CandidateStatus.ACCEPTED_PAPER, reason),
                                        risk_usdt, quantity, broker_order)
         if broker_order and broker_order.get("unsafe_fill"):
             close_order = broker_order["close_order"]
@@ -303,12 +316,54 @@ def scan_pair(pair: str, provider: MarketDataProvider, now: datetime | None = No
                     signal["entry"], (broker_order or {}).get("fill_price", "paper"), signal["stop"], risk_usdt,
                     quantity, (broker_order or {}).get("order_id", "paper"))
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-            send_telegram_message(format_trend_signal(pair, signal, params, risk_usdt, quantity, broker_order),
-                                  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-        return [{"status": "ACCEPTED_PAPER", "fingerprint": candidate.fingerprint, "strategy": trend_engine.STRATEGY}]
+            send_telegram_message(message(risk_usdt, quantity, broker_order), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+        return [{"status": "ACCEPTED_PAPER", "fingerprint": candidate.fingerprint, "strategy": candidate.strategy}]
     except Exception as exc:
-        logger.exception("Donchian VST execution failed for %s", pair)
-        return [{"status": "SKIP", "reason": f"Donchian/VST execution failed: {type(exc).__name__}"}]
+        logger.exception("%s VST execution failed for %s", label, pair)
+        return [{"status": "SKIP", "reason": f"{label}/VST execution failed: {type(exc).__name__}"}]
+
+
+def format_rebound_signal(pair: str, signal: dict, risk_usdt: float, quantity: float,
+                          broker_order: dict | None) -> str:
+    execution = (f"BingX VST demo order ochildi: #{broker_order['order_id']}; fill: {broker_order['fill_price']:.6g}."
+                 if broker_order else "Paper signal (VST execution o'chiq).")
+    return (f"🔄 QULASHDAN QAYTISH 1H LONG — {pair}\n\n"
+            f"24 soatda -{signal['fall']:.1%}, yashil 1h sham ({signal['close']:.6g})\n"
+            f"Kirish (joriy narx): {signal['entry']:.6g}\n"
+            f"Stop (birjada): {signal['stop']:.6g}\n"
+            f"Target (birjada, tushishning yarmi): {signal['target']:.6g}\n"
+            f"Chiqish: stop, target yoki 24 soatdan keyin\n"
+            f"Risk: ${risk_usdt:.2f}; quantity: {quantity:.8g}; leverage {rebound_engine.leverage()}x\n" + execution)
+
+
+def scan_rebound(pair: str, provider: MarketDataProvider, now: datetime | None = None,
+                 account_state: dict | None = None) -> list[dict]:
+    """Capitulation rebound on 1h bars (docs/CRYPTO_ENGINE2_STUDY.md), the bot's second engine. Stop and target
+    keep the backtest's distances from the live price; a signal price has run away from is skipped."""
+    now = now or datetime.now(timezone.utc)
+    bars = provider.fetch_closed_bars(pair, rebound_engine.TIMEFRAME, rebound_engine.HISTORY_BARS, now)
+    signal = rebound_engine.entry_signal(bars)
+    if not signal:
+        return [{"status": "SKIP", "reason": "qulash signali yo'q"}]
+    live = _live_price(pair)
+    if live is not None and live > 0:
+        if live - signal["close"] > MAX_CHASE_FRACTION * signal["stop_distance"]:
+            return [{"status": "SKIP", "reason": "narx qaytish signalidan uzoqlashgan; quvlashmaydi"}]
+        signal = {**signal, "entry": live, "stop": live - signal["stop_distance"],
+                  "target": live + signal["target_distance"]}
+    candidate = CandidateSignal(
+        strategy=rebound_engine.STRATEGY, pair=pair.upper(), direction=Direction.BUY,
+        regime=classify_market_regime(bars).regime, entry_price=signal["entry"], stop_price=signal["stop"],
+        target_price=signal["target"], expires_at=now + timedelta(hours=rebound_engine.HOLD_HOURS),
+        signal_timeframe="1h", trend_timeframe="1h", candle_time_ms=signal["candle_time_ms"], score=100,
+        confirmations=(f"24h fall {signal['fall']:.1%}, green 1h close {signal['close']:.6g}",),
+        invalidation_reason="stop, target or 24 hours",
+        features={"stop_distance": signal["stop_distance"], "target_distance": signal["target_distance"]})
+    if scalping_storage.fingerprint_exists(candidate.fingerprint):
+        return [{"status": "SKIP", "reason": "bu qulash signali allaqachon ko'rib chiqilgan"}]
+    return _open_long(pair, candidate, signal, rebound_engine.leverage(), now, account_state, "Rebound",
+                      signal["target"], "capitulation rebound 1h",
+                      lambda risk, qty, order: format_rebound_signal(pair, signal, risk, qty, order))
 
 
 def scan_configured_pairs(provider: MarketDataProvider) -> None:
@@ -335,6 +390,12 @@ def scan_configured_pairs(provider: MarketDataProvider) -> None:
             scan_pair(pair, provider, account_state=account_state)
         except Exception:
             logger.exception("multi-strategy scan failed for %s", pair)
+        if not rebound_engine.enabled():
+            continue
+        try:
+            scan_rebound(pair, provider, account_state=account_state)
+        except Exception:
+            logger.exception("rebound scan failed for %s", pair)
 
 
 def _require_dashboard_access() -> None:

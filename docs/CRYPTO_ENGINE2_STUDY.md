@@ -111,3 +111,13 @@ No change raised the t-statistic, so by the rule fixed in advance the base rule 
 replication markets are not spent again (the base rule already passed there). The filters keep about the
 same edge per trade on fewer trades; the exit changes raise the win rate (55-56%) but cut the size of the
 wins more than they cut the losses, so profit falls. The rule as first written is already the best of these.
+
+## Live: second engine of the BingX bot (VST demo), 2026-10-07
+
+`trading/application/rebound_engine.py` takes its signal from the lab function above, unchanged. Every
+scan (5 minutes) checks the newest closed 1h bar of each of the thirty pairs. A signal is re-anchored to the
+live price with the backtest's stop and target distances, sent with both the stop and the take-profit on
+BingX, and skipped if price has already run more than half a stop distance past the signal close. After 24
+hours the scheduler closes the position at market and cancels the leftover stop and target. It shares the
+risk controls (RISK PCT), the 12-position cap and the one-position-per-pair gate with Donchian, so it does
+not trade a coin that Donchian holds. `REBOUND_ENABLED=false` switches it off; `REBOUND_LEVERAGE` (3).
