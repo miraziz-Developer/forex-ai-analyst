@@ -184,6 +184,31 @@ def close_due(mt5, db: sqlite3.Connection, today: str) -> list[str]:
     return messages
 
 
+def self_managing_versions() -> set[str]:
+    """Journal versions whose engine is on and closes its own rows when the broker position is gone."""
+    engines = {"trend": trend_live.VERSION, "gold": metals_live.VERSION, "crypto": crypto_live.VERSION,
+               "index": index_live.VERSION, "rebound": rebound_live.VERSION, "fix": fix_live.VERSION}
+    return {version for name, version in engines.items() if name in enabled_engines()}
+
+
+def reconcile_orphans(mt5, db: sqlite3.Connection) -> list[str]:
+    """Close journal rows whose broker position no longer exists (closed by hand, by its stop, or left by an
+    engine that is now off), so they stop holding the portfolio risk and stress budget. Rows of engines that
+    are on are left to the engine, which reports its own exit."""
+    messages, managed = [], self_managing_versions()
+    for row in db.execute("SELECT * FROM trades WHERE status = 'OPEN' AND ticket IS NOT NULL").fetchall():
+        if row["model_version"] in managed or mt5.positions_get(ticket=row["ticket"]):
+            continue
+        deals = getattr(mt5, "history_deals_get", lambda **_: None)(position=row["ticket"]) or ()
+        profit = sum(d.profit + d.commission + d.swap for d in deals) if deals else None
+        db.execute("UPDATE trades SET status = 'CLOSED', profit = ?, note = ? WHERE id = ?",
+                   [profit, "position no longer at the broker (closed by hand or by its stop)", row["id"]])
+        result = "" if profit is None else f": {profit:+.2f}"
+        messages.append(f"🧹 {row['market']} ({row['model_version']}) brokerda yo'q — jurnalda yopildi{result}")
+    db.commit()
+    return messages
+
+
 LABELS = {"fx_logistic": "v1", "fx_logistic_cot_c01": "v2c"}
 _COT_WARNED: set[str] = set()
 
@@ -484,7 +509,7 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                ("rebound", lambda: rebound_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
     if slow:
         engines += [("risk", lambda: [m for m in [guards.drawdown_pause(db, require_demo(mt5).equity)[1]] if m]),
-                    ("close", lambda: close_due(mt5, db, now.date().isoformat())),
+                    ("close", lambda: close_due(mt5, db, now.date().isoformat()) + reconcile_orphans(mt5, db)),
                     ("ml", lambda: decide(mt5, db, now, require_demo(mt5), _paused(db))),
                     ("trend", lambda: trend_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                     ("index", lambda: index_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
