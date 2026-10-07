@@ -146,7 +146,8 @@ def minutes(pair: str, day: date) -> list[dict]:
     bid = decode(_raw(pair, day, "BID"), day, point)
     ask = {r[0]: r for r in decode(_raw(pair, day, "ASK"), day, point)}
     return [{"datetime": b[0], "bid_open": b[1], "bid_high": b[2], "bid_low": b[3], "bid_close": b[4],
-             "ask_open": ask[b[0]][1], "ask_close": ask[b[0]][4]} for b in bid if b[0] in ask]
+             "ask_open": ask[b[0]][1], "ask_high": ask[b[0]][2], "ask_low": ask[b[0]][3], "ask_close": ask[b[0]][4]}
+            for b in bid if b[0] in ask]
 
 
 def cache_size() -> int:
