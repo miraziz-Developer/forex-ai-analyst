@@ -43,3 +43,20 @@ Code `src/forex_ai_analyst/lab/exit_study2.py`, committed before it is run. Five
 **A variant replaces the live exit only if** its Sharpe beats the live rule over the full period and in
 both halves (2021-2023, 2024-2026) and its profit factor is not lower. Win rate is reported but is not the
 criterion: a rule can win more often and earn less.
+
+### Second-round result (2026-10-08) — none adopted; the live exit stays
+
+| Exit | Sharpe | 2021-23 / 2024-26 | Win | Mean R | PF | Avg win / loss | Best trade |
+|---|---|---|---|---|---|---|---|
+| **live (stop + 20-bar exit)** | **1.10** | 1.08 / 1.14 | 31.8% | **+0.449** | **1.77** | **+3.26** / -0.86 | **+73.4R** |
+| TP 2R | 0.69 | 0.66 / 0.72 | 37.5% | +0.111 | 1.21 | +1.75 / -0.87 | +3.7R |
+| TP 3R | 0.74 | 0.70 / 0.79 | 33.9% | +0.154 | 1.27 | +2.13 / -0.86 | +5.3R |
+| TP 5R | 0.96 | 1.01 / 0.89 | 32.1% | +0.245 | 1.42 | +2.57 / -0.86 | +8.5R |
+| trail 4 ATR | 0.67 | 0.64 / 0.71 | 34.0% | +0.156 | 1.33 | +1.87 / -0.73 | +20.5R |
+| trail 5 ATR | 0.96 | 0.80 / 1.12 | 31.8% | +0.330 | 1.61 | +2.75 / -0.80 | +84.3R |
+
+Every take-profit and every trail earns less. The strategy lives on a few long trends (average winner
++3.3R, best +73R); a take-profit cuts exactly those, and a trail tight enough to keep the small give-backs
+also stops out the big trends on their normal pullbacks. Giving back part of an open profit, and letting
+some trades that were up end as small losses, is the price of the trends that pay for everything. Seven
+exit variants have now failed against the 20-bar exit (two trails in round one, five here).
