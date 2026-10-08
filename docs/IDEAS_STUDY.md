@@ -20,3 +20,24 @@ pair plus swap on both legs.
 
 A pass becomes a demo engine (MT5 for 1, 4, 5 and gold/silver; BingX for 2, 3 and ETH/BTC, which would
 need short positions: a separate decision).
+
+## Results (2026-10-08)
+
+| # | Idea | Sample | Result | Verdict |
+|---|---|---|---|---|
+| 1 | **Pre-FOMC drift**, US500 | 109 meetings 2013-2026 | +0.101% per event (other Tue-Thu: +0.0025%), PF 1.63, hit 50.5%, P **0.958**; 2013-2019 +0.010%, 2020-2026 +0.197% | **PASS** (narrowly: P just over 0.95, and the first half is near zero, consistent with reports that the drift weakened after publication) |
+| 2 | Crypto XS momentum, long-short | 290 weeks | -0.03%/week, Sharpe -0.05, P 0.45 | FAIL |
+| 3 | **Funding carry, long-short** | 290 weeks, 62 coins | **+0.369%/week net**, Sharpe **1.07**, PF 1.53, hit 55.5%, P **0.998**; 2021-2023 +0.364%, 2024-2026 +0.374% | **PASS** |
+| 4 | Overnight drift, US500 | 3,379 nights | gross +0.013%/night (Sharpe 0.30); after 0.02% swap -0.035% (Sharpe -0.83); intraday gross ~0 | FAIL (the swap eats it) |
+| 5 | Opening-range breakout, NAS100 M1 | — | minute data still downloading | pending |
+| 6 | Ratio reversion | ETH/BTC 133 trades; gold/silver 132 | -0.50% and -0.87% per trade, PF 0.62 / 0.39 | FAIL (the ratios trend) |
+
+**Funding carry, checks (after the verdict, not part of the gate).** Weekly averages per leg: the long leg
+(coins with the lowest funding last week) gains +0.45% on price and receives 0.24% funding; the short leg
+(highest funding) gains 0.08% on price and receives 0.26% funding; fees 0.14% a leg. With the signal lagged a
+further week it still earns Sharpe 0.90 (P 0.98), so it is not an artefact of timing. With the top and bottom
+10% instead of fifths: similar. Caveats: the 62 coins are today's BingX list (survivorship), and the rule needs
+short positions and about 24 positions rebalanced weekly.
+
+**Pre-FOMC drift, caveats.** Eight trades a year; the result rests on 2020-2026. It goes to the MT5 demo as a
+small, separate engine, to be judged on its live record.
