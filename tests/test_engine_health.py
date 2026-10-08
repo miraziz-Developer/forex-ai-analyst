@@ -82,7 +82,7 @@ class TickHealthTests(unittest.TestCase):
         for name in ("trend", "gold", "crypto", "index", "rebound", "fix"):
             self.assertIn(f" {name}:", text)
         self.assertIn("⏸ o'chiq rebound", text)
-        self.assertIn("FX_BOT_ENGINES=crypto,fix,gold,index,rebound,trend", text)
+        self.assertIn("FX_BOT_ENGINES=crypto,fix,fomc,gold,index,rebound,trend", text)
         self.assertIn("logs", text)
 
 

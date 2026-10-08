@@ -29,7 +29,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from forex_ai_analyst.forex import (crypto_live, fix_live, index_live, metals_live, ml_model, rebound_live,
+from forex_ai_analyst.forex import (crypto_live, fix_live, fomc_live, index_live, metals_live, ml_model, rebound_live,
                                    status_report, trend_live)
 from forex_ai_analyst.forex import engine_health as health
 from forex_ai_analyst.forex import mt5_guards as guards
@@ -187,7 +187,8 @@ def close_due(mt5, db: sqlite3.Connection, today: str) -> list[str]:
 def self_managing_versions() -> set[str]:
     """Journal versions whose engine is on and closes its own rows when the broker position is gone."""
     engines = {"trend": trend_live.VERSION, "gold": metals_live.VERSION, "crypto": crypto_live.VERSION,
-               "index": index_live.VERSION, "rebound": rebound_live.VERSION, "fix": fix_live.VERSION}
+               "index": index_live.VERSION, "rebound": rebound_live.VERSION, "fix": fix_live.VERSION,
+               "fomc": fomc_live.VERSION}
     return {version for name, version in engines.items() if name in enabled_engines()}
 
 
@@ -429,6 +430,7 @@ ENGINE_ENVS = {"trend": ("FX_TREND_RISK_PCT", 0.5, "xom ashyo D1 Donchian"),
                "index": ("FX_INDEX_RISK_PCT", 1.0, "indeks pullback D1"),
                "rebound": ("FX_REBOUND_RISK_PCT", 0.3, "kripto qulashdan qaytish H1"),
                "fix": ("FX_FIX_RISK_PCT", 0.25, "oy oxiri fix"),
+               "fomc": ("FX_FOMC_RISK_PCT", 0.5, "FOMC oldidan US500 drift"),
                "ml": ("FX_BOT_RISK_PCT", 0.5, "haftalik ML (isbotlanmagan)")}
 
 
@@ -440,7 +442,7 @@ def watched_engines() -> list[str]:
 def enabled_engines() -> set[str]:
     """FX_BOT_ENGINES, e.g. "trend,fix,index,crypto,gold,rebound" to switch the weekly ML experiment off
     (default: all). Closing open trades, the risk state and the weekly report always run."""
-    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,crypto,gold,rebound,ml")
+    raw = os.environ.get("FX_BOT_ENGINES", "trend,fix,index,crypto,gold,rebound,fomc,ml")
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
@@ -506,7 +508,9 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
     # the fix rule is time-critical (3-minute windows), so it runs before the slower engines
     engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                # the rebound buys the hour after a crash, so it also runs every minute (it skips stale signals)
-               ("rebound", lambda: rebound_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
+               ("rebound", lambda: rebound_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
+               # buys at 14:00 New York the day before a Fed statement and must sell before 14:00 the next day
+               ("fomc", lambda: fomc_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me))]
     if slow:
         engines += [("risk", lambda: [m for m in [guards.drawdown_pause(db, require_demo(mt5).equity)[1]] if m]),
                     ("close", lambda: close_due(mt5, db, now.date().isoformat()) + reconcile_orphans(mt5, db)),
@@ -519,7 +523,7 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
                      else []),
                     ("status", lambda: [r] if (r := status_report.daily_status(mt5, db, now, enabled_engines()))
                      else [])]
-    switchable = {"fix", "ml", "trend", "index", "crypto", "gold", "rebound"}
+    switchable = {"fix", "ml", "trend", "index", "crypto", "gold", "rebound", "fomc"}
     engines = [(n, r) for n, r in engines if n not in switchable or n in enabled_engines()]
     messages: list[str] = []
     for name, run in engines:

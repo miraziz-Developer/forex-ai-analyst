@@ -95,10 +95,17 @@ def daily_status(mt5, db: sqlite3.Connection, now: datetime, engines: set[str]) 
             lines.append(f"[rebound] 24 soatlik o'zgarish (signal -12% da): {', '.join(near) if near else 'maʼlumot yoʻq'}")
         except Exception as exc:
             lines.append(f"[rebound] maʼlumot olinmadi ({type(exc).__name__})")
+    if "fomc" in engines:
+        try:
+            from forex_ai_analyst.forex import fomc_live
+            nxt = next((d for d in fomc_live.schedule(db, now.date()) if d > now.date()), None)
+            lines.append(f"[fomc] keyingi FOMC: {nxt.isoformat() if nxt else 'nomaʼlum'} (US500 bir kun oldin 14:00 NY da olinadi)")
+        except Exception as exc:
+            lines.append(f"[fomc] maʼlumot olinmadi ({type(exc).__name__})")
     if "fix" in engines:
         days = (fix_live.last_weekday(now.date()) - now.date()).days
         lines.append(f"[fix] oy oxiriga {days} kun" if days > 0 else "[fix] bugun oy oxiri: 15:00-16:03 London")
-    order = [e for e in ("trend", "gold", "crypto", "index", "rebound", "fix", "ml") if e in engines]
+    order = [e for e in ("trend", "gold", "crypto", "index", "rebound", "fomc", "fix", "ml") if e in engines]
     lines.append("Dvigatellar holati:")
     lines += health.summary(db, order + ["risk", "close"], now)
     return "\n".join(lines)
