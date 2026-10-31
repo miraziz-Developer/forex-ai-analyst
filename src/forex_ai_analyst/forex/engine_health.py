@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from forex_ai_analyst.forex import mt5_guards as guards
 
-FAST = {"fix", "rebound"}                      # run every minute; the others every 15 minutes
+FAST = {"fix", "rebound", "fomc"}              # run every minute; the others every 15 minutes
 STALE_MINUTES = {"fast": 10, "slow": 45}
 ALERT_EVERY = timedelta(hours=6)
 

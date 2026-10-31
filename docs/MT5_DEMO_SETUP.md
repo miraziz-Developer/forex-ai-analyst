@@ -95,14 +95,22 @@ minute, so it buys within a minute of the hour's close, and skips a signal
 that price has already run away from. On a hedge account it sits beside the
 H4 Donchian position on the same coin.
 
+**Pre-FOMC drift forward test.** Buys US500 at 14:00 New York on the weekday
+before a scheduled FOMC statement and sells at 13:55 New York on statement day,
+before the 14:00 release (docs/IDEAS_STUDY.md: 109 meetings 2013-2026, +0.10%
+per event, PF 1.63). Eight trades a year, `[fomc]` in Telegram, 0.5% risk via
+`FX_FOMC_RISK_PCT` against a protective stop of 2 daily ATR. Meeting dates come
+from the Fed's calendar page each day (built-in 2026-2027 list as a fallback);
+the daily status shows the next meeting.
+
 **Default risk per engine** (docs/PORTFOLIO_STUDY.md; engines are nearly
 uncorrelated): crypto 0.3%, crypto rebound 0.3%, gold/silver 4h 0.75%, index
 1.0%, commodity 0.5%, fix 0.25% (weakest evidence); at most 6% open risk in total. Adaptive allocation then moves each
 engine with its own live results.
 
-**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound,ml` (default).
+**Engines on/off:** `FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound,fomc,ml` (default).
 The weekly ML models have no demonstrated edge (docs/ML_STUDY.md);
-`FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound` switches them off. A `.env`
+`FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound,fomc` switches them off. A `.env`
 that still lists the engines without `rebound` keeps the rebound off: add it. Open trades are always closed on schedule either way.
 
 **Guards (optional `.env` overrides):**
@@ -163,7 +171,7 @@ Signals, closes and errors go to Telegram; the journal is `fx_ml_demo.sqlite`.
 **All proven engines on** (`.env` on the VM):
 
 ```
-FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound
+FX_BOT_ENGINES=trend,fix,index,crypto,gold,rebound,fomc
 ```
 
 ## Export broker history for research
