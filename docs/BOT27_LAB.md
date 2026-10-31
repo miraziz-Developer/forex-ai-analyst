@@ -18,3 +18,19 @@ wider spreads than Dukascopy; **0.5 pip is the reference**).
 
 **Evidence that it works (at 0.5 pip):** mean R > 0 with bootstrap P >= 0.95, PF >= 1.3, at least 100
 trades, mean R > 0 in both pairs and in both buys and sells.
+
+## Result (2026-10-31) — FAIL
+
+| Extra cost | Trades | Win | Mean R | Total R | PF | P(mean>0) | Buys / sells mean R |
+|---|---|---|---|---|---|---|---|
+| 0 (Dukascopy spread only) | 363 | 51.5% | -0.116 | -42.1 | 0.76 | 0.01 | -0.08 / -0.13 |
+| **0.5 pip (reference)** | 363 | 44.4% | **-0.190** | -69.1 | **0.63** | 0.00 | -0.17 / -0.20 |
+| 1.0 pip | 363 | 36.1% | -0.265 | -96.1 | 0.53 | 0.00 | -0.25 / -0.27 |
+
+About 15 trades a month on two pairs; median stop 7.6 pips. Negative in both pairs (EURUSD -0.17R,
+GBPUSD -0.20R at 0.5 pip) and in every year. Exits: 174 full stops (-1R), 66 breakeven exits (+0.08R),
+30 partial-then-breakeven (+0.63R), 49 full targets (+1.48R), 44 others; average win +0.71R against an
+average loss -0.99R. The breakeven at 0.7R and the 60% close at 1.0R cap the winners while the losers stay
+at a full -1R, so a win rate near 50% is not enough, and the spread on a 7-pip stop takes the rest.
+The 14 live demo trades (+0.26R) sit inside the normal luck of a strategy whose average is negative: about
+one stretch in six of 14 trades comes out that well by chance. Not ready for a cent account.
