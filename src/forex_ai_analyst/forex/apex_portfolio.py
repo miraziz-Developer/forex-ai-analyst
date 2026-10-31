@@ -69,6 +69,17 @@ def allocate(monthly: dict[str, list[float]], method: str) -> list[float]:
     return scaled
 
 
+def current_risk(monthly: dict[str, list[float]]) -> dict[str, float]:
+    """Risk % per trade for each engine for the coming month under C (the bot's FX_*_RISK_PCT values)."""
+    names = list(monthly)
+    budget = sum(BASE_RISK[e] for e in names)
+    inv = {e: (1 / v if (v := vol(monthly[e][-LOOKBACK:])) > 0 else 0.0) for e in names}
+    b = allocate(monthly, "B")
+    v = vol(b[-LOOKBACK:]) * math.sqrt(12)
+    k = min(max(TARGET_VOL / v, SCALE_RANGE[0]), SCALE_RANGE[1]) if v > 0 else 1.0
+    return {e: round(k * budget * inv[e] / sum(inv.values()), 2) for e in names}
+
+
 def main() -> None:
     months, monthly = engine_months()
     cut = months.index(DEV_END) + 1
@@ -78,6 +89,7 @@ def main() -> None:
         report["dev"][method] = ps.stats(rets[LOOKBACK:cut])                 # after the warm-up year
         report["holdout"][method] = ps.stats(rets[cut:])
         report["full"][method] = ps.stats(rets[LOOKBACK:])
+    report["risk_pct_now"] = current_risk(monthly)
     a = report["holdout"]["A"]
     report["adopted"] = next((m for m in ("C", "B") if report["holdout"][m]["sharpe"] > a["sharpe"]
                               and report["holdout"][m]["max_drawdown"] >= a["max_drawdown"] - 0.02), "A")
