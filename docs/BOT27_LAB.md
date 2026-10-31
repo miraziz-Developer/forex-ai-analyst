@@ -32,5 +32,7 @@ GBPUSD -0.20R at 0.5 pip) and in every year. Exits: 174 full stops (-1R), 66 bre
 30 partial-then-breakeven (+0.63R), 49 full targets (+1.48R), 44 others; average win +0.71R against an
 average loss -0.99R. The breakeven at 0.7R and the 60% close at 1.0R cap the winners while the losers stay
 at a full -1R, so a win rate near 50% is not enough, and the spread on a 7-pip stop takes the rest.
-The 14 live demo trades (+0.26R) sit inside the normal luck of a strategy whose average is negative: about
-one stretch in six of 14 trades comes out that well by chance. Not ready for a cent account.
+The 14 live demo trades (+0.26R) were mostly gold and USDJPY, which could not be replayed here. If the
+replayed average (-0.19R, spread of results about 0.95R) held there too, 14 trades this good would happen by
+luck about once in twenty-five stretches: unlikely but possible, and gold/USDJPY may behave differently. Not
+ready for a cent account; the gold and USDJPY replay is the next check once their minute data downloads.
