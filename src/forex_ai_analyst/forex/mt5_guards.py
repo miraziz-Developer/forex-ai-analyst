@@ -9,6 +9,7 @@ All limits come from .env with conservative defaults:
   FX_BOT_MAX_STRESS_TRADE_PCT (4)  one position's loss in a repeat of its market's worst day (volume is cut)
   FX_BOT_MAX_STRESS_PCT (15)       the same for all open positions together
   FX_BOT_MAX_TRADE_RISK_PCT (2.0)  ceiling for one trade's risk after adaptive allocation
+  FX_BOT_RISK_SCALE (1.0)          multiplies every engine's risk (before the ceiling)
   FX_BOT_NO_AUTO_DISABLE (unset)   set to 1 to keep trading a model that failed its health check
 A model is disabled for new trades once it has >= 30 closed trades with a profit factor below 0.7,
 far below anything its backtest produced; open positions are still managed and closed.
@@ -249,7 +250,9 @@ def risk_multiplier(db: sqlite3.Connection, version: str) -> float:
 
 
 def engine_risk_pct(db: sqlite3.Connection, version: str, base_pct: float) -> float:
-    pct = min(base_pct * risk_multiplier(db, version), env_float("FX_BOT_MAX_TRADE_RISK_PCT", 2.0))
+    # FX_BOT_RISK_SCALE scales every engine at once (prop study: x1.0-1.25 best, research_output/apex)
+    scale = max(env_float("FX_BOT_RISK_SCALE", 1.0), 0.0)
+    pct = min(base_pct * scale * risk_multiplier(db, version), env_float("FX_BOT_MAX_TRADE_RISK_PCT", 2.0))
     if prop_config() and get(db, "prop_target_hit") == "1":
         return min(pct, PROP_MIN_RISK_PCT)          # target reached, only the minimum trading days are missing
     return pct

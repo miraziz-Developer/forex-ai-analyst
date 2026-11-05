@@ -368,6 +368,9 @@ class AllocationTests(unittest.TestCase):
         with patch.dict("os.environ", {"FX_BOT_MAX_TRADE_RISK_PCT": "1.5"}):
             self.assertEqual(g.engine_risk_pct(db, "great", 1.0), 1.5)             # 2.0 capped at 1.5
         self.assertEqual(g.engine_risk_pct(db, "weak", 0.6), 0.3)
+        with patch.dict("os.environ", {"FX_BOT_RISK_SCALE": "1.25"}):
+            self.assertAlmostEqual(g.engine_risk_pct(db, "probation", 0.8), 1.0)   # 0.8 x 1.25
+            self.assertEqual(g.engine_risk_pct(db, "great", 1.0), 2.0)             # 2.5 capped at 2.0
 
 
 class PropRulesTests(unittest.TestCase):
