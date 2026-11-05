@@ -12,12 +12,18 @@ All limits come from .env with conservative defaults:
   FX_BOT_NO_AUTO_DISABLE (unset)   set to 1 to keep trading a model that failed its health check
 A model is disabled for new trades once it has >= 30 closed trades with a profit factor below 0.7,
 far below anything its backtest produced; open positions are still managed and closed.
+
+Prop-firm rules (off unless FX_PROP_PROFILE is set; see PROP_PROFILES):
+  FX_PROP_PROFILE (two_step | one_step_trailing | funded)   FX_PROP_INITIAL  account's starting balance (required)
+  FX_PROP_TARGET_PCT, FX_PROP_DAILY_LOSS_PCT, FX_PROP_MAX_DD_PCT, FX_PROP_MIN_DAYS   override the profile
+  FX_PROP_SAFETY (0.6)  the bot stops at this share of each firm limit   FX_PROP_DAY_TZ (Europe/Prague) firm's day
 """
 from __future__ import annotations
 
 import os
 import sqlite3
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 EXTRA_COLUMNS = {"risk_money": "REAL", "requested_price": "REAL", "slippage": "REAL", "stress_money": "REAL"}
 HEALTH_MIN_TRADES, HEALTH_MIN_PF = 30, 0.7
@@ -73,7 +79,11 @@ def open_risk(db: sqlite3.Connection) -> float:
 
 
 def risk_room(db: sqlite3.Connection, equity: float, new_risk: float) -> bool:
-    return open_risk(db) + new_risk <= equity * env_float("FX_BOT_MAX_TOTAL_RISK_PCT", 6.0) / 100 + 1e-9
+    limit = env_float("FX_BOT_MAX_TOTAL_RISK_PCT", 6.0)
+    cfg = prop_config()
+    if cfg:  # every open stop hit on one day must still fit inside the firm's daily loss buffer
+        limit = min(limit, cfg["daily_loss_pct"] * cfg["safety"])
+    return open_risk(db) + new_risk <= equity * limit / 100 + 1e-9
 
 
 def spread_ok(ask: float, bid: float, stop_distance: float) -> bool:
@@ -237,7 +247,95 @@ def risk_multiplier(db: sqlite3.Connection, version: str) -> float:
 
 
 def engine_risk_pct(db: sqlite3.Connection, version: str, base_pct: float) -> float:
-    return min(base_pct * risk_multiplier(db, version), env_float("FX_BOT_MAX_TRADE_RISK_PCT", 2.0))
+    pct = min(base_pct * risk_multiplier(db, version), env_float("FX_BOT_MAX_TRADE_RISK_PCT", 2.0))
+    if prop_config() and get(db, "prop_target_hit") == "1":
+        return min(pct, PROP_MIN_RISK_PCT)          # target reached, only the minimum trading days are missing
+    return pct
+
+
+# --- prop-firm rules ---------------------------------------------------------------------------------------------
+# Typical rules; check your firm's current terms and override with the FX_PROP_* variables.
+PROP_PROFILES = {
+    "two_step": dict(target_pct=8.0, daily_loss_pct=5.0, max_dd_pct=10.0, dd_mode="static", min_days=4),
+    "one_step_trailing": dict(target_pct=10.0, daily_loss_pct=4.0, max_dd_pct=6.0, dd_mode="trailing", min_days=5),
+    "funded": dict(target_pct=0.0, daily_loss_pct=5.0, max_dd_pct=10.0, dd_mode="static", min_days=0),
+}
+PROP_MIN_RISK_PCT = 0.1
+
+
+def prop_config() -> dict | None:
+    name = os.environ.get("FX_PROP_PROFILE", "").strip()
+    if not name:
+        return None
+    if name not in PROP_PROFILES:
+        raise ValueError(f"FX_PROP_PROFILE={name!r}: choose one of {', '.join(PROP_PROFILES)}")
+    cfg = dict(PROP_PROFILES[name], name=name, initial=env_float("FX_PROP_INITIAL", 0.0),
+               safety=env_float("FX_PROP_SAFETY", 0.6), tz=os.environ.get("FX_PROP_DAY_TZ", "Europe/Prague"))
+    if cfg["initial"] <= 0:
+        raise ValueError("FX_PROP_INITIAL must be the account's starting balance (e.g. 10000)")
+    for key, env in (("target_pct", "FX_PROP_TARGET_PCT"), ("daily_loss_pct", "FX_PROP_DAILY_LOSS_PCT"),
+                     ("max_dd_pct", "FX_PROP_MAX_DD_PCT"), ("min_days", "FX_PROP_MIN_DAYS")):
+        cfg[key] = env_float(env, cfg[key])
+    return cfg
+
+
+def prop_floor(cfg: dict, peak: float) -> float:
+    """Equity at which the firm closes the account. Trailing floors follow the peak and lock at the start balance."""
+    width = cfg["initial"] * cfg["max_dd_pct"] / 100
+    if cfg["dd_mode"] == "trailing":
+        return min(max(peak, cfg["initial"]) - width, cfg["initial"])
+    return cfg["initial"] - width
+
+
+def prop_trading_days(db: sqlite3.Connection) -> int:
+    return db.execute("SELECT COUNT(DISTINCT substr(created_at, 1, 10)) FROM trades").fetchone()[0]
+
+
+def prop_check(db: sqlite3.Connection, equity: float, now: datetime) -> tuple[bool, list[str]]:
+    """(flatten, messages). Applies the prop rules with a safety buffer; `prop_paused` blocks new entries.
+    flatten=True means every bot position should be closed now (daily or total buffer hit, or target passed)."""
+    cfg = prop_config()
+    if cfg is None:
+        return False, []
+    initial, safety, messages = cfg["initial"], cfg["safety"], []
+    day = now.astimezone(ZoneInfo(cfg["tz"])).date().isoformat()
+    if get(db, "prop_day") != day:
+        put(db, "prop_day", day)
+        put(db, "prop_day_start", equity)
+        put(db, "prop_day_stop", 0)
+    peak = max(float(get(db, "prop_peak", initial)), equity)
+    put(db, "prop_peak", peak)
+
+    done = get(db, "prop_done", "")
+    if done:
+        put(db, "prop_paused", 1)
+        return True, []
+    floor = prop_floor(cfg, peak)
+    stop_at = floor + initial * cfg["max_dd_pct"] / 100 * (1 - safety)
+    if equity <= stop_at:
+        put(db, "prop_done", "dd")
+        put(db, "prop_paused", 1)
+        return True, [f"🛑 Prop: equity {equity:,.2f} bufer chegarasida ({stop_at:,.2f}; firma {floor:,.2f}). "
+                      f"Bot to'xtadi, pozitsiyalar yopiladi. Qayta yoqish: state'da prop_done ni tozalang"]
+    day_loss = (float(get(db, "prop_day_start", equity)) - equity) / initial * 100
+    if day_loss >= cfg["daily_loss_pct"] * safety and get(db, "prop_day_stop") != "1":
+        put(db, "prop_day_stop", 1)
+        messages.append(f"🚨 Prop: bugungi zarar {day_loss:.2f}% (firma limiti {cfg['daily_loss_pct']:g}%), "
+                        "ertagacha yangi savdo yo'q, pozitsiyalar yopiladi")
+    if get(db, "prop_day_stop") == "1":
+        put(db, "prop_paused", 1)
+        return True, messages
+    if cfg["target_pct"] and equity >= initial * (1 + cfg["target_pct"] / 100):
+        if get(db, "prop_target_hit") != "1":
+            put(db, "prop_target_hit", 1)
+            messages.append(f"🎯 Prop: target +{cfg['target_pct']:g}% yetildi")
+        days = prop_trading_days(db)
+        if days >= cfg["min_days"]:
+            put(db, "prop_done", "passed")
+            put(db, "prop_paused", 1)
+            return True, messages + [f"🏆 Prop: bosqich o'tildi ({days} savdo kuni). Pozitsiyalar yopiladi, bot to'xtadi"]
+    put(db, "prop_paused", 0)
+    return False, messages
 
 
 def market_closed(mt5, result) -> bool:

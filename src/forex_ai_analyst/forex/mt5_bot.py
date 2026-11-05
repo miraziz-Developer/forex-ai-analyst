@@ -505,8 +505,10 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
     trend, report). Every engine is isolated: one failing never stops the others (the month-end fix
     must not be missed because a data source for the ML model is down)."""
     me = sys.modules[__name__]
-    # the fix rule is time-critical (3-minute windows), so it runs before the slower engines
-    engines = [("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
+    # prop limits are checked first, every minute: a daily loss can build up faster than the 15-minute engines
+    engines = [("prop", lambda: prop_step(mt5, db, now)),
+               # the fix rule is time-critical (3-minute windows), so it runs before the slower engines
+               ("fix", lambda: fix_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                # the rebound buys the hour after a crash, so it also runs every minute (it skips stale signals)
                ("rebound", lambda: rebound_live.cycle(mt5, db, now, require_demo(mt5), _paused(db), me)),
                # buys at 14:00 New York the day before a Fed statement and must sell before 14:00 the next day
@@ -545,8 +547,23 @@ def tick(mt5, db: sqlite3.Connection, now: datetime, slow: bool, alerts: dict[st
         messages += health.stalled(db, watched_engines(), now, started)
     return messages
 
+def prop_step(mt5, db: sqlite3.Connection, now: datetime) -> list[str]:
+    """Prop-firm rules (FX_PROP_PROFILE): on a breach of a buffer or a passed target, close every bot position."""
+    flatten, messages = guards.prop_check(db, require_demo(mt5).equity, now)
+    if not flatten:
+        return messages
+    for position in mt5.positions_get() or ():
+        if position.magic != MAGIC:
+            continue
+        side = -1 if position.type == mt5.ORDER_TYPE_BUY else 1
+        result = _send(mt5, position.symbol, side, position.volume, None, "prop exit", position=position.ticket)
+        if (result is None or result.retcode != mt5.TRADE_RETCODE_DONE) and not guards.market_closed(mt5, result):
+            messages.append(f"❌ Prop: {position.symbol} yopilmadi: {getattr(result, 'comment', mt5.last_error())}")
+    return messages
+
+
 def _paused(db: sqlite3.Connection) -> bool:
-    return guards.get(db, "dd_paused", "0") == "1"
+    return guards.get(db, "dd_paused", "0") == "1" or guards.get(db, "prop_paused", "0") == "1"
 
 if __name__ == "__main__":
     main()

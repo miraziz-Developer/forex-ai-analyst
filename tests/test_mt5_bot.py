@@ -368,3 +368,89 @@ class AllocationTests(unittest.TestCase):
         with patch.dict("os.environ", {"FX_BOT_MAX_TRADE_RISK_PCT": "1.5"}):
             self.assertEqual(g.engine_risk_pct(db, "great", 1.0), 1.5)             # 2.0 capped at 1.5
         self.assertEqual(g.engine_risk_pct(db, "weak", 0.6), 0.3)
+
+
+class PropRulesTests(unittest.TestCase):
+    NOON = datetime(2026, 11, 5, 11, 0, tzinfo=timezone.utc)
+
+    def setUp(self):
+        self.g = mt5_bot.guards
+        self.db = mt5_bot.open_db(":memory:")
+        env = patch.dict("os.environ", {"FX_PROP_PROFILE": "two_step", "FX_PROP_INITIAL": "10000"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def trade_days(self, days):
+        for k, day in enumerate(days):
+            self.db.execute("INSERT INTO trades (model_version, decision_day, market, side, prob, ticket, exit_day, "
+                            "created_at, status) VALUES ('v', ?, 'XAUUSD', 1, 0.6, ?, 'e', ?, 'OPEN')",
+                            [day, k, f"{day}T10:00:00"])
+
+    def test_off_without_a_profile(self):
+        with patch.dict("os.environ", {"FX_PROP_PROFILE": ""}):
+            self.assertEqual(self.g.prop_check(self.db, 5_000.0, self.NOON), (False, []))
+            self.assertTrue(self.g.risk_room(self.db, 10_000.0, 500.0))              # default 6% cap
+        with patch.dict("os.environ", {"FX_PROP_PROFILE": "nope"}), self.assertRaises(ValueError):
+            self.g.prop_config()
+
+    def test_daily_buffer_flattens_until_the_next_firm_day(self):
+        self.assertEqual(self.g.prop_check(self.db, 10_000.0, self.NOON), (False, []))
+        flatten, messages = self.g.prop_check(self.db, 9_690.0, self.NOON)          # -3.1% >= 5% x 0.6
+        self.assertTrue(flatten and messages)
+        self.assertTrue(mt5_bot._paused(self.db))
+        self.assertEqual(self.g.prop_check(self.db, 9_700.0, self.NOON), (True, []))   # still today, quiet
+        tomorrow = datetime(2026, 11, 6, 11, 0, tzinfo=timezone.utc)
+        self.assertEqual(self.g.prop_check(self.db, 9_700.0, tomorrow), (False, []))
+        self.assertFalse(mt5_bot._paused(self.db))
+
+    def test_static_drawdown_buffer_stops_for_good(self):
+        self.g.prop_check(self.db, 10_000.0, self.NOON)
+        self.g.put(self.db, "prop_day_start", 9_420.0)                              # keep the daily rule quiet
+        flatten, messages = self.g.prop_check(self.db, 9_390.0, self.NOON)          # firm 9000, bot stops at 9400
+        self.assertTrue(flatten and "bufer" in messages[0])
+        self.assertEqual(self.g.prop_check(self.db, 11_000.0, datetime(2026, 11, 9, tzinfo=timezone.utc)), (True, []))
+
+    def test_trailing_floor_follows_the_peak_and_locks_at_the_start(self):
+        cfg = dict(self.g.PROP_PROFILES["one_step_trailing"], initial=10_000.0)
+        self.assertEqual(self.g.prop_floor(cfg, 10_000.0), 9_400.0)
+        self.assertEqual(self.g.prop_floor(cfg, 10_300.0), 9_700.0)
+        self.assertEqual(self.g.prop_floor(cfg, 11_000.0), 10_000.0)
+        self.assertEqual(self.g.prop_floor(dict(self.g.PROP_PROFILES["two_step"], initial=10_000.0), 12_000.0), 9_000.0)
+
+    def test_target_waits_for_minimum_days_at_minimum_risk(self):
+        self.g.prop_check(self.db, 10_000.0, self.NOON)
+        self.g.put(self.db, "prop_day_start", 10_800.0)
+        self.trade_days(["2026-11-02", "2026-11-03"])
+        flatten, messages = self.g.prop_check(self.db, 10_820.0, self.NOON)
+        self.assertFalse(flatten)
+        self.assertTrue(any("target" in m for m in messages))
+        self.assertEqual(self.g.engine_risk_pct(self.db, "v", 0.75), self.g.PROP_MIN_RISK_PCT)
+        self.trade_days(["2026-11-04", "2026-11-05"])
+        flatten, messages = self.g.prop_check(self.db, 10_830.0, self.NOON)
+        self.assertTrue(flatten and "o'tildi" in messages[-1])
+        self.assertEqual(self.g.get(self.db, "prop_done"), "passed")
+
+    def test_open_risk_fits_inside_the_daily_buffer(self):
+        self.assertTrue(self.g.risk_room(self.db, 10_000.0, 300.0))                 # 3% = 5% x 0.6
+        self.assertFalse(self.g.risk_room(self.db, 10_000.0, 310.0))
+
+    def test_prop_step_closes_only_this_bots_positions(self):
+        class Broker(FakeMT5):
+            def __init__(self):
+                super().__init__()
+                self.equity = 10_000.0
+                self.open = [SimpleNamespace(ticket=1, magic=mt5_bot.MAGIC, symbol="EURUSD", volume=0.1, type=0),
+                             SimpleNamespace(ticket=2, magic=999, symbol="EURUSD", volume=0.1, type=1)]
+
+            def account_info(self):
+                return SimpleNamespace(trade_mode=self.mode, equity=self.equity)
+
+            def positions_get(self, ticket=None):
+                return tuple(self.open)
+
+        broker = Broker()
+        self.assertEqual(mt5_bot.prop_step(broker, self.db, self.NOON), [])
+        self.assertEqual(broker.sent, [])
+        broker.equity = 9_650.0
+        mt5_bot.prop_step(broker, self.db, self.NOON)
+        self.assertEqual([(r["position"], r["type"]) for r in broker.sent], [(1, FakeMT5.ORDER_TYPE_SELL)])
