@@ -405,8 +405,9 @@ class PropRulesTests(unittest.TestCase):
 
     def test_static_drawdown_buffer_stops_for_good(self):
         self.g.prop_check(self.db, 10_000.0, self.NOON)
-        self.g.put(self.db, "prop_day_start", 9_420.0)                              # keep the daily rule quiet
-        flatten, messages = self.g.prop_check(self.db, 9_390.0, self.NOON)          # firm 9000, bot stops at 9400
+        self.g.put(self.db, "prop_day_start", 9_200.0)                              # keep the daily rule quiet
+        self.assertEqual(self.g.prop_check(self.db, 9_390.0, self.NOON), (False, []))  # -6.1%: still trading
+        flatten, messages = self.g.prop_check(self.db, 9_140.0, self.NOON)          # firm 9000, bot stops at 9150
         self.assertTrue(flatten and "bufer" in messages[0])
         self.assertEqual(self.g.prop_check(self.db, 11_000.0, datetime(2026, 11, 9, tzinfo=timezone.utc)), (True, []))
 

@@ -153,11 +153,14 @@ Off unless `FX_PROP_PROFILE` is set in `.env`. Checked every minute, before the 
 FX_PROP_PROFILE=two_step        # two_step (8% / daily 5% / 10% static), one_step_trailing (10% / 4% / 6% trailing), funded
 FX_PROP_INITIAL=10000           # the account's starting balance (required)
 # optional overrides: FX_PROP_TARGET_PCT, FX_PROP_DAILY_LOSS_PCT, FX_PROP_MAX_DD_PCT, FX_PROP_MIN_DAYS,
-# FX_PROP_SAFETY (0.6), FX_PROP_DAY_TZ (Europe/Prague, the firm's daily reset)
+# FX_PROP_SAFETY (0.6, daily), FX_PROP_SAFETY_TOTAL (0.85, max drawdown), FX_PROP_DAY_TZ (Europe/Prague)
 ```
 
-- The bot stops at `FX_PROP_SAFETY` of each firm limit: with daily 5% it closes every bot position and stops
-  new entries for the rest of the firm's day at -3%; with 10% static drawdown it stops for good at -6%.
+- Daily: at `FX_PROP_SAFETY` of the firm's daily limit (5% -> -3%) the bot closes its positions and stops new
+  entries for the rest of the firm's day. Total: at `FX_PROP_SAFETY_TOTAL` of the max drawdown (10% -> -8.5%)
+  it stops for good. The total buffer is wider because a daily study of the Apex portfolio (2022-2026,
+  research_output/apex/prop_daily_study.json) had a worst drawdown of 8.1%: a 6% stop halted 5 of 51
+  simulated challenges that the firm's 10% limit would have let pass, while the worst day was -2.96%.
 - All open stops together never exceed the daily buffer (here 3% of equity), so one bad day cannot breach it.
 - Profit target reached: if the minimum trading days are done, every position is closed and the bot stops
   (phase passed); otherwise new trades drop to 0.1% risk until the days are done.

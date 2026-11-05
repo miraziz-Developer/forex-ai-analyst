@@ -16,7 +16,9 @@ far below anything its backtest produced; open positions are still managed and c
 Prop-firm rules (off unless FX_PROP_PROFILE is set; see PROP_PROFILES):
   FX_PROP_PROFILE (two_step | one_step_trailing | funded)   FX_PROP_INITIAL  account's starting balance (required)
   FX_PROP_TARGET_PCT, FX_PROP_DAILY_LOSS_PCT, FX_PROP_MAX_DD_PCT, FX_PROP_MIN_DAYS   override the profile
-  FX_PROP_SAFETY (0.6)  the bot stops at this share of each firm limit   FX_PROP_DAY_TZ (Europe/Prague) firm's day
+  FX_PROP_SAFETY (0.6)        share of the firm's daily limit at which the bot stops for the day
+  FX_PROP_SAFETY_TOTAL (0.85) share of the firm's max drawdown at which it stops for good (Apex worst DD was 8.1%)
+  FX_PROP_DAY_TZ (Europe/Prague) the firm's trading day
 """
 from __future__ import annotations
 
@@ -270,7 +272,8 @@ def prop_config() -> dict | None:
     if name not in PROP_PROFILES:
         raise ValueError(f"FX_PROP_PROFILE={name!r}: choose one of {', '.join(PROP_PROFILES)}")
     cfg = dict(PROP_PROFILES[name], name=name, initial=env_float("FX_PROP_INITIAL", 0.0),
-               safety=env_float("FX_PROP_SAFETY", 0.6), tz=os.environ.get("FX_PROP_DAY_TZ", "Europe/Prague"))
+               safety=env_float("FX_PROP_SAFETY", 0.6), safety_total=env_float("FX_PROP_SAFETY_TOTAL", 0.85),
+               tz=os.environ.get("FX_PROP_DAY_TZ", "Europe/Prague"))
     if cfg["initial"] <= 0:
         raise ValueError("FX_PROP_INITIAL must be the account's starting balance (e.g. 10000)")
     for key, env in (("target_pct", "FX_PROP_TARGET_PCT"), ("daily_loss_pct", "FX_PROP_DAILY_LOSS_PCT"),
@@ -311,7 +314,7 @@ def prop_check(db: sqlite3.Connection, equity: float, now: datetime) -> tuple[bo
         put(db, "prop_paused", 1)
         return True, []
     floor = prop_floor(cfg, peak)
-    stop_at = floor + initial * cfg["max_dd_pct"] / 100 * (1 - safety)
+    stop_at = floor + initial * cfg["max_dd_pct"] / 100 * (1 - cfg["safety_total"])
     if equity <= stop_at:
         put(db, "prop_done", "dd")
         put(db, "prop_paused", 1)
